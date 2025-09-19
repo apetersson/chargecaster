@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chart, ChartConfiguration, registerables } from "chart.js";
+import "chartjs-adapter-date-fns";
 
 Chart.register(...registerables);
 
@@ -116,67 +117,85 @@ function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint
       return undefined;
     }
 
+    const nowDate = new Date();
+    const historyWindowMs = 12 * 60 * 60 * 1000;
+    const cutoffTime = nowDate.getTime() - historyWindowMs;
+
     const sortedHistory = hasHistory
-      ? [...history].sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        )
+      ? [...history]
+          .map((item) => ({
+            ...item,
+            date: new Date(item.timestamp),
+          }))
+          .filter((item) => !Number.isNaN(item.date.getTime()) && item.date.getTime() >= cutoffTime)
+          .sort((a, b) => a.date.getTime() - b.date.getTime())
       : [];
 
-    const historyDates = sortedHistory.map((item) => new Date(item.timestamp));
-    const futureDates = hasTrajectory
-      ? trajectory.map((item) => new Date(item.end ?? item.start ?? ''))
+    const historySocPoints = sortedHistory.map((item) => ({
+      x: item.date,
+      y:
+        typeof item.battery_soc_percent === 'number'
+          ? item.battery_soc_percent
+          : null,
+    }));
+    const historyGridPoints = sortedHistory.map((item) => ({
+      x: item.date,
+      y: typeof item.grid_energy_kwh === 'number' ? item.grid_energy_kwh : null,
+    }));
+    const historyPricePoints = sortedHistory.map((item) => ({
+      x: item.date,
+      y: typeof item.price_eur_per_kwh === 'number' ? item.price_eur_per_kwh : null,
+    }));
+
+    const futureSocPoints = hasTrajectory
+      ? trajectory.map((item) => {
+          const startTime = new Date(item.start ?? item.end ?? '');
+          return {
+            x: startTime,
+            y: item.soc_end_percent ?? item.soc_start_percent ?? null,
+          };
+        })
+      : [];
+    const futureGridPoints = hasTrajectory
+      ? trajectory.map((item) => ({
+          x: new Date(item.start ?? item.end ?? ''),
+          y: item.grid_energy_kwh ?? null,
+        }))
+      : [];
+    const futurePricePoints = hasTrajectory
+      ? trajectory.map((item) => ({
+          x: new Date(item.start ?? item.end ?? ''),
+          y: item.price_eur_per_kwh ?? null,
+        }))
       : [];
 
-    const historyLabels = historyDates.map((parsed, idx, arr) => {
-      if (Number.isNaN(parsed.getTime())) {
-        return sortedHistory[idx]?.timestamp ?? `Slot ${idx}`;
-      }
-      const isFirstOverall = idx === 0;
-      const isLastOverall = !futureDates.length && idx === arr.length - 1;
-      return isFirstOverall || isLastOverall
-        ? dateTimeFormatter.format(parsed)
-        : timeFormatter.format(parsed);
-    });
+    const historyCount = historySocPoints.length;
 
-    const futureLabels = futureDates.map((parsed, idx, arr) => {
-      if (Number.isNaN(parsed.getTime())) {
-        const slot = trajectory[idx];
-        return slot ? `Slot ${slot.slot_index}` : `Slot ${idx}`;
-      }
-      const isFirstOverall = !historyDates.length && idx === 0;
-      const isLastOverall = idx === arr.length - 1;
-      return isFirstOverall || isLastOverall
-        ? dateTimeFormatter.format(parsed)
-        : timeFormatter.format(parsed);
-    });
+    const priceValues = [...historyPricePoints, ...futurePricePoints]
+      .map((point) => point.y)
+      .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value));
+    const gridValues = [...historyGridPoints, ...futureGridPoints]
+      .map((point) => point.y)
+      .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value));
 
-    const labels = [...historyLabels, 'Now', ...futureLabels];
-    const historyCount = historyLabels.length;
+    const priceMin = priceValues.length ? Math.min(0, ...priceValues) : 0;
+    const priceMax = priceValues.length ? Math.max(0, ...priceValues) : 1;
+    const gridMin = gridValues.length ? Math.min(0, ...gridValues) : 0;
+    const gridMax = gridValues.length ? Math.max(0, ...gridValues) : 1;
 
-    const historySoc = sortedHistory.map((item) =>
-      typeof item.battery_soc_percent === 'number' ? item.battery_soc_percent : null
-    );
-    const futureSoc = hasTrajectory
-      ? trajectory.map((item) => item.soc_end_percent ?? item.soc_start_percent ?? null)
-      : [];
+    const nowBreak = { x: nowDate, y: null };
 
-    const historyGrid = sortedHistory.map((item) =>
-      typeof item.grid_energy_kwh === 'number' ? item.grid_energy_kwh : null
-    );
-    const futureGrid = hasTrajectory
-      ? trajectory.map((item) => item.grid_energy_kwh ?? null)
-      : [];
+    const socData = [...historySocPoints, nowBreak, ...futureSocPoints];
+    const gridData = [...historyGridPoints, { ...nowBreak }, ...futureGridPoints];
+    const priceData = [...historyPricePoints, { ...nowBreak }, ...futurePricePoints];
 
-    const historyPrice = sortedHistory.map((item) =>
-      typeof item.price_eur_per_kwh === 'number' ? item.price_eur_per_kwh : null
-    );
-    const futurePrice = hasTrajectory
-      ? trajectory.map((item) => item.price_eur_per_kwh ?? null)
-      : [];
-
-    const socData = [...historySoc, null, ...futureSoc];
-    const gridData = [...historyGrid, null, ...futureGrid];
-    const priceData = [...historyPrice, null, ...futurePrice];
+    const xMinDate = historySocPoints[0]?.x ?? futureSocPoints[0]?.x ?? nowDate;
+    const xMaxDate =
+      futureSocPoints[futureSocPoints.length - 1]?.x ||
+      historySocPoints[historyCount - 1]?.x ||
+      nowDate;
+    const firstMillis = xMinDate.getTime();
+    const lastMillis = xMaxDate.getTime();
 
     const pastLineColor = '#94a3b8';
     const pastFillColor = 'rgba(148, 163, 184, 0.2)';
@@ -200,8 +219,12 @@ function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint
           : futureFill,
     });
 
-    const pointColor = (ctx: any, futureColor: string) =>
-      ctx.dataIndex < historyCount ? pastPointColor : futureColor;
+    const pointColor = (ctx: any, futureColor: string) => {
+      if (ctx.dataIndex === historyCount) {
+        return 'transparent';
+      }
+      return ctx.dataIndex < historyCount ? pastPointColor : futureColor;
+    };
 
     chartRef.current?.destroy();
 
@@ -211,47 +234,52 @@ function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint
     }
 
     const config: ChartConfiguration = {
-      type: "line",
+      type: 'line',
       data: {
-        labels,
         datasets: [
           {
-            label: "Target SOC %",
+            label: 'Target SOC %',
             data: socData,
+            parsing: false,
             borderColor: futureSocColor,
             backgroundColor: futureSocFill,
-            yAxisID: "y",
+            yAxisID: 'y',
             tension: 0.25,
             fill: true,
             spanGaps: true,
             segment: makeSegmentColor(futureSocColor, futureSocFill),
-            pointRadius: (ctx) => (ctx.dataIndex < historyCount ? 3 : 4),
+            pointRadius: (ctx) =>
+              ctx.dataIndex < historyCount ? 3 : ctx.dataIndex === historyCount ? 0 : 4,
             pointBackgroundColor: (ctx) => pointColor(ctx, futureSocColor),
             pointBorderColor: (ctx) => pointColor(ctx, futureSocColor),
           },
           {
-            label: "Grid Energy (kWh)",
+            label: 'Grid Energy (kWh)',
             data: gridData,
+            parsing: false,
             borderColor: futureGridColor,
             backgroundColor: futureGridFill,
-            yAxisID: "y1",
+            yAxisID: 'y1',
             tension: 0.2,
             spanGaps: true,
             segment: makeSegmentColor(futureGridColor, futureGridFill),
-            pointRadius: (ctx) => (ctx.dataIndex < historyCount ? 3 : 4),
+            pointRadius: (ctx) =>
+              ctx.dataIndex < historyCount ? 3 : ctx.dataIndex === historyCount ? 0 : 4,
             pointBackgroundColor: (ctx) => pointColor(ctx, futureGridColor),
             pointBorderColor: (ctx) => pointColor(ctx, futureGridColor),
           },
           {
-            label: "Price (€/kWh)",
+            label: 'Price (€/kWh)',
             data: priceData,
+            parsing: false,
             borderColor: futurePriceColor,
             backgroundColor: futurePriceFill,
-            yAxisID: "y2",
+            yAxisID: 'y2',
             tension: 0.2,
             spanGaps: true,
             segment: makeSegmentColor(futurePriceColor, futurePriceFill),
-            pointRadius: (ctx) => (ctx.dataIndex < historyCount ? 3 : 4),
+            pointRadius: (ctx) =>
+              ctx.dataIndex < historyCount ? 3 : ctx.dataIndex === historyCount ? 0 : 4,
             pointBackgroundColor: (ctx) => pointColor(ctx, futurePriceColor),
             pointBorderColor: (ctx) => pointColor(ctx, futurePriceColor),
           },
@@ -260,9 +288,34 @@ function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint
       options: {
         maintainAspectRatio: false,
         scales: {
+          x: {
+            type: 'time',
+            min: xMinDate,
+            time: {
+              tooltipFormat: 'dd MMM yyyy HH:mm',
+              displayFormats: {
+                hour: 'HH:mm',
+                minute: 'HH:mm',
+              },
+            },
+            ticks: {
+              color: '#94a3b8',
+              callback: (value) => {
+                const millis =
+                  typeof value === 'number' ? value : new Date(value as string).getTime();
+                if (Math.abs(millis - firstMillis) < 60_000 || Math.abs(millis - lastMillis) < 60_000) {
+                  return dateTimeFormatter.format(new Date(millis));
+                }
+                return timeFormatter.format(new Date(millis));
+              },
+            },
+            grid: {
+              color: 'rgba(148, 163, 184, 0.1)',
+            },
+          },
           y: {
-            type: "linear",
-            position: "left",
+            type: 'linear',
+            position: 'left',
             suggestedMin: 0,
             suggestedMax: 100,
             ticks: {
@@ -270,15 +323,22 @@ function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint
             },
           },
           y1: {
-            type: "linear",
-            position: "right",
+            type: 'linear',
+            position: 'right',
+            suggestedMin: gridMin === gridMax ? gridMin - 1 : gridMin,
+            suggestedMax: gridMin === gridMax ? gridMax + 1 : gridMax,
+            ticks: {
+              callback: (value) => `${numberFormatter.format(Number(value))} kWh`,
+            },
             grid: {
               drawOnChartArea: false,
             },
           },
           y2: {
-            type: "linear",
-            position: "right",
+            type: 'linear',
+            position: 'right',
+            suggestedMin: priceMin === priceMax ? priceMin - 0.1 : priceMin,
+            suggestedMax: priceMin === priceMax ? priceMax + 0.1 : priceMax,
             grid: {
               drawOnChartArea: false,
             },
@@ -291,7 +351,7 @@ function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint
         plugins: {
           legend: {
             labels: {
-              color: "#f8fafc",
+              color: '#f8fafc',
             },
           },
         },
@@ -308,12 +368,6 @@ function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint
 
   return canvasRef;
 }
-
-type MessageListProps = {
-  items?: string[];
-  tone: "warning" | "error";
-};
-
 function MessageList({ items, tone }: MessageListProps) {
   if (!items || items.length === 0) {
     return null;
