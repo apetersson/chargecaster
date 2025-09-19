@@ -1,0 +1,30 @@
+fronius:
+  host: "http://192.168.0.15"
+  user: "technician"
+  password: "CHANGE_ME"
+  batteries_path: "/config/batteries"
+  verify_tls: false
+  timeout_s: 6
+
+evcc:
+  enabled: true
+  base_url: "http://192.168.0.1:7070"
+
+price:
+  network_tariff_eur_per_kwh: 0.11
+
+battery:
+  capacity_kwh: 10
+  max_charge_power_w: 500
+  auto_mode_floor_soc: 5
+
+logic:
+  min_hold_minutes: 20     # debounce between flips
+  interval_seconds: 300    # controller loop sleep
+  house_load_w: 1200       # assumed constant load for simulation
+
+state:
+  path: "/data/state.csv"
+
+logging:
+  level: "INFO"            # DEBUG, INFO, WARNING
