@@ -31,7 +31,7 @@ def grid_fee(cfg: Dict[str, Any]) -> float:
         return 0.0
 
 
-def write_json_atomic(path: str | Path, payload: Dict[str, Any]) -> None:
+def write_json_atomic(path: str | Path, payload: Any) -> None:
     """Persist payload to ``path`` atomically, creating folders when required."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +39,14 @@ def write_json_atomic(path: str | Path, payload: Dict[str, Any]) -> None:
     with tmp_path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=True, indent=2)
     tmp_path.replace(target)
+
+
+def load_json(path: str | Path) -> Any:
+    target = Path(path)
+    if not target.exists():
+        return None
+    with target.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
 
 
 def now() -> dt.datetime:
@@ -135,6 +143,10 @@ def _parse_timestamp(value: str | None) -> Optional[dt.datetime]:
         return dt.datetime.fromisoformat(value).astimezone(dt.timezone.utc)
     except Exception:
         return None
+
+
+def parse_timestamp(value: str | None) -> Optional[dt.datetime]:
+    return _parse_timestamp(value)
 
 
 def _normalise_price_value(value: Any, unit: Optional[str] = None) -> Optional[float]:

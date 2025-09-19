@@ -31,6 +31,8 @@ logging:
 
 public:
   snapshot_path: "/public/data/latest.json"
+  history_path: "/public/data/history.json"
+  history_hours: 12
 
 market_data:
   enabled: true
