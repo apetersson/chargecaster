@@ -33,38 +33,62 @@ def capture_evcc(
     cfg: Dict[str, Any]
 ) -> tuple[Dict[str, Any], Optional[str], list[str], list[Dict[str, Any]], Optional[str]]:
     evcc_cfg = cfg.get("evcc", {})
-    if not evcc_cfg.get("enabled", False):
-        return {}, None, ["evcc disabled in config"], []
-
     base_url = (evcc_cfg.get("base_url") or "").rstrip("/")
-    if not base_url:
-        return {}, None, ["evcc base_url missing"], []
+    evcc_enabled = evcc_cfg.get("enabled", False) and base_url
 
     messages: list[str] = []
     live: Dict[str, Any] = {}
     raw_state: Optional[Dict[str, Any]] = None
+    network_tariff = core.grid_fee(cfg)
 
-    try:
-        state_info = core.get_evcc_state(base_url)
-        raw_state = state_info.pop("raw", None)
-        live = {k: state_info.get(k) for k in ("battery_soc", "pv_power", "grid_power") if state_info.get(k) is not None}
-    except Exception as exc:  # pylint: disable=broad-except
-        messages.append(f"state fetch failed: {exc}")
+    if evcc_cfg.get("enabled", False) and not base_url:
+        messages.append("evcc base_url missing")
+    if not evcc_cfg.get("enabled", False):
+        messages.append("evcc disabled in config")
+
+    if evcc_enabled:
+        try:
+            state_info = core.get_evcc_state(base_url)
+            raw_state = state_info.pop("raw", None)
+            live = {k: state_info.get(k) for k in ("battery_soc", "pv_power", "grid_power") if state_info.get(k) is not None}
+        except Exception as exc:  # pylint: disable=broad-except
+            messages.append(f"state fetch failed: {exc}")
 
     forecast_slots = core.extract_forecast_from_state(raw_state or {})
     forecast = core.normalize_price_slots(forecast_slots)
     forecast_source = "evcc" if forecast else None
-    if not forecast:
+    if evcc_enabled and not forecast:
         messages.append("no forecast data present in EVCC state response")
 
     price_snapshot: Optional[str] = None
-    try:
-        price_now = core.get_evcc_price(base_url, raw_state)
-        if price_now is not None:
-            network_tariff = cfg.get("price", {}).get("network_tariff_eur_per_kwh", 0)
-            price_snapshot = f"{price_now + float(network_tariff):.4f}"
-    except Exception:
-        pass
+    if evcc_enabled:
+        try:
+            price_now = core.get_evcc_price(base_url, raw_state)
+            if price_now is not None:
+                price_snapshot = f"{price_now + network_tariff:.4f}"
+        except Exception:
+            pass
+
+    market_cfg = cfg.get("market_data", {})
+    market_enabled = bool(market_cfg.get("enabled", True))
+    prefer_market = bool(market_cfg.get("prefer_market", True))
+    market_label = market_cfg.get("source_label") or market_cfg.get("label") or "market_data"
+    market_max_hours = float(market_cfg.get("max_hours", 72.0) or 72.0)
+
+    if market_enabled:
+        try:
+            market_slots = core.fetch_market_forecast(market_cfg.get("url"), max_hours=market_max_hours)
+            if market_slots:
+                if prefer_market or not forecast:
+                    if forecast and forecast_source != market_label:
+                        messages.append("market data overriding EVCC forecast")
+                    forecast = market_slots
+                    forecast_source = market_label
+                if price_snapshot is None:
+                    first_market_price = float(market_slots[0].get("price", 0.0))
+                    price_snapshot = f"{first_market_price + network_tariff:.4f}"
+        except Exception as exc:  # pylint: disable-broad-except
+            messages.append(f"market data fetch failed: {exc}")
 
     return live, price_snapshot, messages, forecast, forecast_source
 
@@ -87,9 +111,10 @@ def run_once(config_path: Path, *, dry_run: bool = True) -> Dict[str, Any]:
 
     if not forecast:
         base_url = cfg.get("evcc", {}).get("base_url") or "the configured EVCC endpoint"
+        market_url = cfg.get("market_data", {}).get("url") or core.DEFAULT_MARKET_DATA_URL
         errors.append(
-            f"Unable to retrieve EVCC price/state data from {base_url}. "
-            "Verify the host is reachable, the tariff API is enabled, or disable EVCC in config."
+            "Unable to retrieve a price forecast from EVCC or market data endpoints. "
+            f"Checked EVCC at {base_url} and market data at {market_url}."
         )
         simulation_result: Optional[Dict[str, Any]] = None
     else:
@@ -105,7 +130,8 @@ def run_once(config_path: Path, *, dry_run: bool = True) -> Dict[str, Any]:
                         "config": {
                             "capacity_kwh": cfg.get("battery", {}).get("capacity_kwh"),
                             "max_charge_power_w": cfg.get("battery", {}).get("max_charge_power_w"),
-                            "network_tariff_eur_per_kwh": cfg.get("price", {}).get("network_tariff_eur_per_kwh"),
+                        "grid_fee_eur_per_kwh": cfg.get("price", {}).get("grid_fee_eur_per_kwh")
+                        or cfg.get("price", {}).get("network_tariff_eur_per_kwh"),
                             "house_load_w": house_load_w,
                         },
                     },
@@ -221,6 +247,36 @@ def run_once(config_path: Path, *, dry_run: bool = True) -> Dict[str, Any]:
             "state_path": str(state_path),
         }
     )
+
+    public_cfg = cfg.get("public", {})
+    snapshot_path_value = public_cfg.get("snapshot_path", "/public/data/latest.json")
+    if snapshot_path_value:
+        snapshot_path = Path(snapshot_path_value)
+        if not snapshot_path.is_absolute():
+            snapshot_path = (config_path.parent / snapshot_path).resolve()
+        snapshot_payload = {
+            "timestamp": output["timestamp"],
+            "interval_seconds": output["interval_seconds"],
+            "house_load_w": output.get("house_load_w"),
+            "current_soc_percent": output.get("current_soc_percent"),
+            "next_step_soc_percent": output.get("next_step_soc_percent"),
+            "recommended_soc_percent": output.get("recommended_soc_percent"),
+            "recommended_final_soc_percent": output.get("recommended_final_soc_percent"),
+            "price_snapshot_eur_per_kwh": output.get("price_snapshot_eur_per_kwh"),
+            "projected_cost_eur": output.get("projected_cost_eur"),
+            "projected_grid_energy_kwh": output.get("projected_grid_energy_kwh"),
+            "forecast_hours": output.get("forecast_hours"),
+            "forecast_samples": output.get("forecast_samples"),
+            "trajectory": output.get("trajectory", []),
+            "warnings": warnings,
+            "errors": errors,
+        }
+        try:
+            core.write_json_atomic(snapshot_path, snapshot_payload)
+        except Exception as exc:  # pylint: disable=broad-except
+            warning_msg = f"snapshot write failed: {exc}"
+            warnings.append(warning_msg)
+            output["warnings"] = warnings
 
     return output
 

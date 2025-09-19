@@ -16,7 +16,29 @@ import yaml
 from requests.utils import parse_dict_header
 
 DEFAULT_CONFIG = Path("config.yaml")
+DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata"
 SOC_STEPS = 100
+
+
+def grid_fee(cfg: Dict[str, Any]) -> float:
+    price_cfg = cfg.get("price", {}) if isinstance(cfg, dict) else {}
+    value = price_cfg.get("grid_fee_eur_per_kwh")
+    if value is None:
+        value = price_cfg.get("network_tariff_eur_per_kwh")  # backwards compat
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def write_json_atomic(path: str | Path, payload: Dict[str, Any]) -> None:
+    """Persist payload to ``path`` atomically, creating folders when required."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_suffix(target.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=True, indent=2)
+    tmp_path.replace(target)
 
 
 def now() -> dt.datetime:
@@ -115,6 +137,25 @@ def _parse_timestamp(value: str | None) -> Optional[dt.datetime]:
         return None
 
 
+def _normalise_price_value(value: Any, unit: Optional[str] = None) -> Optional[float]:
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if unit:
+        unit_lower = str(unit).lower()
+        if "mwh" in unit_lower:
+            return price / 1000.0
+        if "ct" in unit_lower or "cent" in unit_lower:
+            return price / 100.0
+    if price > 500.0:
+        return price / 1000.0
+    if price > 5.0:
+        return price / 100.0
+    return price
+
+
 def normalize_price_slots(raw: Any) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]]
     if isinstance(raw, dict):
@@ -128,13 +169,15 @@ def normalize_price_slots(raw: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw, list):
         return []
 
-    slots: List[Dict[str, Any]] = []
+    slots_by_start: Dict[dt.datetime, Dict[str, Any]] = {}
     for entry in raw:
         if not isinstance(entry, dict):
             continue
         start = _parse_timestamp(entry.get("start") or entry.get("from"))
         end = _parse_timestamp(entry.get("end") or entry.get("to"))
-        price = entry.get("price")
+        price = _normalise_price_value(entry.get("price"), entry.get("unit"))
+        if price is None:
+            price = _normalise_price_value(entry.get("value"), entry.get("value_unit"))
         if start is None or price is None:
             continue
         if end is None:
@@ -149,16 +192,69 @@ def normalize_price_slots(raw: Any) -> List[Dict[str, Any]]:
         if end <= start:
             continue
         duration_hours = (end - start).total_seconds() / 3600.0
-        slots.append(
+        payload = {
+            "start": start,
+            "end": end,
+            "duration_hours": duration_hours,
+            "price": price,
+        }
+        existing = slots_by_start.get(start)
+        if existing is None or price < existing["price"]:
+            slots_by_start[start] = payload
+
+    slots = sorted(slots_by_start.values(), key=lambda item: item["start"])
+    return slots
+
+
+def fetch_market_forecast(url: str | None, *, max_hours: float = 72.0) -> List[Dict[str, Any]]:
+    endpoint = url or DEFAULT_MARKET_DATA_URL
+    response = requests.get(endpoint, timeout=10)
+    response.raise_for_status()
+    payload = response.json()
+
+    if isinstance(payload, dict):
+        data = payload.get("data") or payload.get("items") or []
+    elif isinstance(payload, list):
+        data = payload
+    else:
+        return []
+
+    current_time = now()
+    horizon_end = current_time + dt.timedelta(hours=max_hours)
+    raw_entries: List[Dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        start_ts = item.get("start_timestamp")
+        price = item.get("marketprice")
+        if start_ts is None or price is None:
+            continue
+        end_ts = item.get("end_timestamp")
+        try:
+            start = dt.datetime.fromtimestamp(float(start_ts) / 1000.0, tz=dt.timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if end_ts is not None:
+            try:
+                end = dt.datetime.fromtimestamp(float(end_ts) / 1000.0, tz=dt.timezone.utc)
+            except (TypeError, ValueError):
+                end = start + dt.timedelta(hours=1)
+        else:
+            end = start + dt.timedelta(hours=float(item.get("duration_hours", 1)) or 1)
+        if end <= current_time:
+            continue
+        if start >= horizon_end:
+            continue
+        raw_entries.append(
             {
-                "start": start,
-                "end": end,
-                "duration_hours": duration_hours,
-                "price": float(price),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "price": price,
+                "unit": item.get("unit"),
             }
         )
-    slots.sort(key=lambda item: item["start"])
-    return slots
+
+    return normalize_price_slots(raw_entries)
 
 
 def get_evcc_state(base_url: str) -> Dict[str, Any]:
@@ -374,7 +470,7 @@ def simulate_optimal_schedule(
     if capacity_kwh <= 0:
         raise ValueError("battery.capacity_kwh must be > 0")
     max_charge_w = float(battery_cfg.get("max_charge_power_w", 0))
-    network_tariff = float(cfg.get("price", {}).get("network_tariff_eur_per_kwh", 0))
+    network_tariff = grid_fee(cfg)
 
     current_soc = live_state.get("battery_soc")
     if current_soc is None:
@@ -442,6 +538,7 @@ def simulate_optimal_schedule(
     grid_energy_total = 0.0
     cost_total = 0.0
     state_iter = current_state
+    trajectory: List[Dict[str, Any]] = []
     for idx, slot in enumerate(slots):
         next_state = policy[idx][state_iter]
         delta = next_state - state_iter
@@ -452,6 +549,18 @@ def simulate_optimal_schedule(
         cost_total += (slot["price"] + network_tariff) * grid_energy
         grid_energy_total += grid_energy
         path.append(next_state)
+        trajectory.append(
+            {
+                "slot_index": idx,
+                "start": iso(slot["start"]),
+                "end": iso(slot["end"]),
+                "duration_hours": slot["duration_hours"],
+                "soc_start_percent": state_iter * percent_step,
+                "soc_end_percent": next_state * percent_step,
+                "grid_energy_kwh": grid_energy,
+                "price_eur_per_kwh": slot["price"] + network_tariff,
+            }
+        )
         state_iter = next_state
 
     final_energy = path[-1] * energy_per_step
@@ -471,6 +580,7 @@ def simulate_optimal_schedule(
         "average_price_eur_per_kwh": avg_price,
         "forecast_samples": len(slots),
         "forecast_hours": total_duration,
+        "trajectory": trajectory,
         "price_floor_eur_per_kwh": min(slot["price"] + network_tariff for slot in slots),
         "price_ceiling_eur_per_kwh": max(slot["price"] + network_tariff for slot in slots),
         "timestamp": iso(now()),

@@ -11,7 +11,7 @@ evcc:
   base_url: "http://192.168.0.1:7070"
 
 price:
-  network_tariff_eur_per_kwh: 0.11
+  grid_fee_eur_per_kwh: 0.11
 
 battery:
   capacity_kwh: 10
@@ -28,3 +28,13 @@ state:
 
 logging:
   level: "INFO"            # DEBUG, INFO, WARNING
+
+public:
+  snapshot_path: "/public/data/latest.json"
+
+market_data:
+  enabled: true
+  url: "https://api.awattar.de/v1/marketdata"
+  prefer_market: true        # override EVCC forecast with market data when available
+  max_hours: 72              # limit forecast horizon (hours)
+  source_label: "awattar"    # label reported in logs and API output
