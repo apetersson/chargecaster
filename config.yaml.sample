@@ -8,7 +8,7 @@ fronius:
 
 evcc:
   enabled: true
-  base_url: "http://192.168.0.1:7070"
+  base_url: "http://192.168.0.96:7070"
 
 price:
   grid_fee_eur_per_kwh: 0.11
