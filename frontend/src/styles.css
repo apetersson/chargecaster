@@ -170,3 +170,7 @@ ul {
 li + li {
   margin-top: 0.45rem;
 }
+
+.metric.strategy .value {
+  color: #38bdf8;
+}

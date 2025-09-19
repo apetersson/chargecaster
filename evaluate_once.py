@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import datetime as dt
 from typing import Any, Dict, Optional
 
 import yaml
@@ -330,30 +331,31 @@ def run_once(config_path: Path, *, dry_run: bool = True) -> Dict[str, Any]:
         snapshot_path = Path(snapshot_path_value)
         if not snapshot_path.is_absolute():
             snapshot_path = (config_path.parent / snapshot_path).resolve()
-    snapshot_payload = {
-        "timestamp": output["timestamp"],
-        "interval_seconds": output["interval_seconds"],
-        "house_load_w": output.get("house_load_w"),
-        "current_soc_percent": output.get("current_soc_percent"),
-        "next_step_soc_percent": output.get("next_step_soc_percent"),
+        snapshot_payload = {
+            "timestamp": output["timestamp"],
+            "interval_seconds": output["interval_seconds"],
+            "house_load_w": output.get("house_load_w"),
+            "current_soc_percent": output.get("current_soc_percent"),
+            "next_step_soc_percent": output.get("next_step_soc_percent"),
             "recommended_soc_percent": output.get("recommended_soc_percent"),
             "recommended_final_soc_percent": output.get("recommended_final_soc_percent"),
             "price_snapshot_eur_per_kwh": output.get("price_snapshot_eur_per_kwh"),
-        "projected_cost_eur": output.get("projected_cost_eur"),
-        "projected_grid_energy_kwh": output.get("projected_grid_energy_kwh"),
-        "forecast_hours": output.get("forecast_hours"),
-        "forecast_samples": output.get("forecast_samples"),
-        "trajectory": output.get("trajectory", []),
-        "history": history_entries,
-        "warnings": warnings,
-        "errors": errors,
-    }
+            "projected_cost_eur": output.get("projected_cost_eur"),
+            "projected_grid_energy_kwh": output.get("projected_grid_energy_kwh"),
+            "forecast_hours": output.get("forecast_hours"),
+            "forecast_samples": output.get("forecast_samples"),
+            "trajectory": output.get("trajectory", []),
+            "history": history_entries,
+            "warnings": warnings,
+            "errors": errors,
+        }
         try:
             core.write_json_atomic(snapshot_path, snapshot_payload)
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception as exc:  # pylint: disable-broad-except
             warning_msg = f"snapshot write failed: {exc}"
             warnings.append(warning_msg)
             output["warnings"] = warnings
+
 
     return output
 
