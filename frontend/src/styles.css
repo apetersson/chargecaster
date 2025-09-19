@@ -174,3 +174,9 @@ li + li {
 .metric.strategy .value {
   color: #38bdf8;
 }
+
+.metric.strategy .value,
+.metric .value.strategy {
+  color: #38bdf8;
+  font-weight: 600;
+}
