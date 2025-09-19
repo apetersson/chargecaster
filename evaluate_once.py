@@ -331,6 +331,7 @@ def run_once(config_path: Path, *, dry_run: bool = True) -> Dict[str, Any]:
         snapshot_path = Path(snapshot_path_value)
         if not snapshot_path.is_absolute():
             snapshot_path = (config_path.parent / snapshot_path).resolve()
+        output["snapshot_path"] = str(snapshot_path)
         snapshot_payload = {
             "timestamp": output["timestamp"],
             "interval_seconds": output["interval_seconds"],
