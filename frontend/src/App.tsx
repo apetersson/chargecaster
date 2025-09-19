@@ -40,6 +40,14 @@ type TrajectoryPoint = {
   price_eur_per_kwh: number;
 };
 
+type HistoryPoint = {
+  timestamp: string;
+  battery_soc_percent?: number;
+  price_eur_per_kwh?: number;
+  grid_power_kw?: number;
+  grid_energy_kwh?: number;
+};
+
 type SnapshotPayload = {
   timestamp: string | null;
   interval_seconds: number | null;
@@ -54,6 +62,7 @@ type SnapshotPayload = {
   forecast_hours: number | null;
   forecast_samples: number | null;
   trajectory: TrajectoryPoint[];
+  history?: HistoryPoint[];
   warnings?: string[];
   errors?: string[];
 };
@@ -93,36 +102,106 @@ function statusClass(errors?: string[], warnings?: string[]) {
   return { label: "OK", className: "status ok" };
 }
 
-function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
+function useProjectionChart(history: HistoryPoint[], trajectory: TrajectoryPoint[]) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<Chart | null>(null);
 
   useEffect(() => {
-    if (!trajectory.length) {
+    const hasHistory = Array.isArray(history) && history.length > 0;
+    const hasTrajectory = Array.isArray(trajectory) && trajectory.length > 0;
+
+    if (!hasHistory && !hasTrajectory) {
       chartRef.current?.destroy();
       chartRef.current = null;
       return undefined;
     }
 
-    const total = trajectory.length;
-    const labels = trajectory.map((item, idx) => {
-      const timestamp = item.end ?? item.start;
-      if (!timestamp) {
-        return `Slot ${item.slot_index}`;
-      }
-      const parsed = new Date(timestamp);
+    const sortedHistory = hasHistory
+      ? [...history].sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        )
+      : [];
+
+    const historyDates = sortedHistory.map((item) => new Date(item.timestamp));
+    const futureDates = hasTrajectory
+      ? trajectory.map((item) => new Date(item.end ?? item.start ?? ''))
+      : [];
+
+    const historyLabels = historyDates.map((parsed, idx, arr) => {
       if (Number.isNaN(parsed.getTime())) {
-        return `Slot ${item.slot_index}`;
+        return sortedHistory[idx]?.timestamp ?? `Slot ${idx}`;
       }
-      if (idx === 0 || idx === total - 1) {
-        return dateTimeFormatter.format(parsed);
-      }
-      return timeFormatter.format(parsed);
+      const isFirstOverall = idx === 0;
+      const isLastOverall = !futureDates.length && idx === arr.length - 1;
+      return isFirstOverall || isLastOverall
+        ? dateTimeFormatter.format(parsed)
+        : timeFormatter.format(parsed);
     });
 
-    const socData = trajectory.map((item) => item.soc_end_percent ?? item.soc_start_percent ?? 0);
-    const gridData = trajectory.map((item) => item.grid_energy_kwh ?? 0);
-    const priceData = trajectory.map((item) => item.price_eur_per_kwh ?? 0);
+    const futureLabels = futureDates.map((parsed, idx, arr) => {
+      if (Number.isNaN(parsed.getTime())) {
+        const slot = trajectory[idx];
+        return slot ? `Slot ${slot.slot_index}` : `Slot ${idx}`;
+      }
+      const isFirstOverall = !historyDates.length && idx === 0;
+      const isLastOverall = idx === arr.length - 1;
+      return isFirstOverall || isLastOverall
+        ? dateTimeFormatter.format(parsed)
+        : timeFormatter.format(parsed);
+    });
+
+    const labels = [...historyLabels, 'Now', ...futureLabels];
+    const historyCount = historyLabels.length;
+
+    const historySoc = sortedHistory.map((item) =>
+      typeof item.battery_soc_percent === 'number' ? item.battery_soc_percent : null
+    );
+    const futureSoc = hasTrajectory
+      ? trajectory.map((item) => item.soc_end_percent ?? item.soc_start_percent ?? null)
+      : [];
+
+    const historyGrid = sortedHistory.map((item) =>
+      typeof item.grid_energy_kwh === 'number' ? item.grid_energy_kwh : null
+    );
+    const futureGrid = hasTrajectory
+      ? trajectory.map((item) => item.grid_energy_kwh ?? null)
+      : [];
+
+    const historyPrice = sortedHistory.map((item) =>
+      typeof item.price_eur_per_kwh === 'number' ? item.price_eur_per_kwh : null
+    );
+    const futurePrice = hasTrajectory
+      ? trajectory.map((item) => item.price_eur_per_kwh ?? null)
+      : [];
+
+    const socData = [...historySoc, null, ...futureSoc];
+    const gridData = [...historyGrid, null, ...futureGrid];
+    const priceData = [...historyPrice, null, ...futurePrice];
+
+    const pastLineColor = '#94a3b8';
+    const pastFillColor = 'rgba(148, 163, 184, 0.2)';
+    const pastPointColor = '#e2e8f0';
+
+    const futureSocColor = '#22c55e';
+    const futureSocFill = 'rgba(34, 197, 94, 0.25)';
+    const futureGridColor = '#f97316';
+    const futureGridFill = 'rgba(249, 115, 22, 0.15)';
+    const futurePriceColor = '#38bdf8';
+    const futurePriceFill = 'rgba(56, 189, 248, 0.2)';
+
+    const makeSegmentColor = (futureColor: string, futureFill: string) => ({
+      borderColor: (ctx: any) =>
+        ctx?.p0DataIndex !== undefined && ctx.p0DataIndex < historyCount
+          ? pastLineColor
+          : futureColor,
+      backgroundColor: (ctx: any) =>
+        ctx?.p0DataIndex !== undefined && ctx.p0DataIndex < historyCount
+          ? pastFillColor
+          : futureFill,
+    });
+
+    const pointColor = (ctx: any, futureColor: string) =>
+      ctx.dataIndex < historyCount ? pastPointColor : futureColor;
 
     chartRef.current?.destroy();
 
@@ -139,27 +218,42 @@ function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
           {
             label: "Target SOC %",
             data: socData,
-            borderColor: "#22c55e",
-            backgroundColor: "rgba(34, 197, 94, 0.25)",
+            borderColor: futureSocColor,
+            backgroundColor: futureSocFill,
             yAxisID: "y",
             tension: 0.25,
             fill: true,
+            spanGaps: true,
+            segment: makeSegmentColor(futureSocColor, futureSocFill),
+            pointRadius: (ctx) => (ctx.dataIndex < historyCount ? 3 : 4),
+            pointBackgroundColor: (ctx) => pointColor(ctx, futureSocColor),
+            pointBorderColor: (ctx) => pointColor(ctx, futureSocColor),
           },
           {
             label: "Grid Energy (kWh)",
             data: gridData,
-            borderColor: "#f97316",
-            backgroundColor: "rgba(249, 115, 22, 0.15)",
+            borderColor: futureGridColor,
+            backgroundColor: futureGridFill,
             yAxisID: "y1",
             tension: 0.2,
+            spanGaps: true,
+            segment: makeSegmentColor(futureGridColor, futureGridFill),
+            pointRadius: (ctx) => (ctx.dataIndex < historyCount ? 3 : 4),
+            pointBackgroundColor: (ctx) => pointColor(ctx, futureGridColor),
+            pointBorderColor: (ctx) => pointColor(ctx, futureGridColor),
           },
           {
             label: "Price (€/kWh)",
             data: priceData,
-            borderColor: "#38bdf8",
-            backgroundColor: "rgba(56, 189, 248, 0.2)",
+            borderColor: futurePriceColor,
+            backgroundColor: futurePriceFill,
             yAxisID: "y2",
             tension: 0.2,
+            spanGaps: true,
+            segment: makeSegmentColor(futurePriceColor, futurePriceFill),
+            pointRadius: (ctx) => (ctx.dataIndex < historyCount ? 3 : 4),
+            pointBackgroundColor: (ctx) => pointColor(ctx, futurePriceColor),
+            pointBorderColor: (ctx) => pointColor(ctx, futurePriceColor),
           },
         ],
       },
@@ -210,7 +304,7 @@ function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [trajectory]);
+  }, [history, trajectory]);
 
   return canvasRef;
 }
@@ -333,6 +427,62 @@ function TrajectoryTable({ trajectory }: TrajectoryTableProps) {
   );
 }
 
+type HistoryTableProps = {
+  history: HistoryPoint[];
+};
+
+function HistoryTable({ history }: HistoryTableProps) {
+  if (!history.length) {
+    return null;
+  }
+
+  const rows = [...history].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
+  return (
+    <section className="card">
+      <h2>Recent History</h2>
+      <div className="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Battery SOC %</th>
+              <th>Price (€/kWh)</th>
+              <th>Grid Power (kW)</th>
+              <th>Grid Energy (kWh)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((item, idx) => (
+              <tr key={`${item.timestamp}-${idx}`}>
+                <td>{formatDate(item.timestamp)}</td>
+                <td>{formatPercent(item.battery_soc_percent ?? null)}</td>
+                <td>{
+                  typeof item.price_eur_per_kwh === 'number'
+                    ? formatNumber(item.price_eur_per_kwh, ' €/kWh')
+                    : 'n/a'
+                }</td>
+                <td>{
+                  typeof item.grid_power_kw === 'number'
+                    ? formatNumber(item.grid_power_kw, ' kW')
+                    : 'n/a'
+                }</td>
+                <td>{
+                  typeof item.grid_energy_kwh === 'number'
+                    ? formatNumber(item.grid_energy_kwh, ' kWh')
+                    : 'n/a'
+                }</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 const App = () => {
   const [data, setData] = useState<SnapshotPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -383,10 +533,34 @@ const App = () => {
     () => (data && Array.isArray(data.trajectory) ? data.trajectory : []),
     [data]
   );
-  const chartRef = useTrajectoryChart(trajectory);
+  const history = useMemo(
+    () => (data && Array.isArray(data.history) ? data.history : []),
+    [data]
+  );
+  const chartRef = useProjectionChart(history, trajectory);
 
   return (
     <>
+      {error ? (
+        <section className="card">
+          <p className="status err">{error}</p>
+        </section>
+      ) : null}
+
+      <SummaryCards data={data} />
+
+      <section className="card chart">
+        <h2>SOC over time</h2>
+        <canvas ref={chartRef} aria-label="SOC projection chart" />
+      </section>
+
+      <TrajectoryTable trajectory={trajectory} />
+
+      <HistoryTable history={history} />
+
+      <MessageList items={data?.warnings} tone="warning" />
+      <MessageList items={data?.errors} tone="error" />
+
       <section className="card banner">
         <div>
           <h2>Latest Optimisation</h2>
@@ -401,24 +575,6 @@ const App = () => {
           {loading ? "Refreshing..." : "Refresh now"}
         </button>
       </section>
-
-      {error ? (
-        <section className="card">
-          <p className="status err">{error}</p>
-        </section>
-      ) : null}
-
-      <SummaryCards data={data} />
-
-      <section className="card chart">
-        <h2>Target SOC projection</h2>
-        <canvas ref={chartRef} aria-label="SOC projection chart" />
-      </section>
-
-      <TrajectoryTable trajectory={trajectory} />
-
-      <MessageList items={data?.warnings} tone="warning" />
-      <MessageList items={data?.errors} tone="error" />
     </>
   );
 };

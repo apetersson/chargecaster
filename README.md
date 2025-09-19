@@ -54,8 +54,11 @@ Key sections:
 - `price.grid_fee_eur_per_kwh`: Grid surcharge automatically added to every price sample.
 - `state.path`: CSV log file path (inside the container the default is `/data/state.csv`).
 - `public.snapshot_path`: Where the controller writes the latest JSON payload (defaults to `/public/data/latest.json`).
+- `public.history_path`: Rolling history file for the dashboard (defaults to `/public/data/history.json`).
+- `public.history_hours`: How many hours of history to retain (defaults to `12`).
 
-For the dashboard to retain the latest optimisation snapshot between restarts, make sure the host volume mapped to `/public/data` is writable.
+For the dashboard to retain the latest optimisation snapshot and history between
+restarts, make sure the host volume mapped to `/public/data` is writable.
 
 ---
 
@@ -159,6 +162,7 @@ docker buildx build \
 - `price_snapshot_eur_per_kwh`: latest price + grid fee.
 - `projected_cost_eur`, `projected_grid_energy_kwh`
 - `trajectory`: array of hourly slots with start/end ISO strings, SOC progression, grid energy drawn, price per kWh.
+- `history`: recent measurements (up to `public.history_hours`) with actual SOC, price, and grid usage captured each controller run.
 - `warnings`, `errors`: arrays with any warnings encountered while fetching data or applying commands.
 
 This file is safe to expose read-only on your LAN, and can be used by third-party dashboards or scripts.

@@ -254,28 +254,100 @@ def run_once(config_path: Path, *, dry_run: bool = True) -> Dict[str, Any]:
     )
 
     public_cfg = cfg.get("public", {})
+
+    history_entries: list[Dict[str, Any]] = []
+    history_path_value = public_cfg.get("history_path")
+    history_hours = float(public_cfg.get("history_hours", 12.0) or 12.0)
+    if history_path_value:
+        history_path = Path(history_path_value)
+        if not history_path.is_absolute():
+            history_path = (config_path.parent / history_path).resolve()
+        try:
+            existing_history = core.load_json(history_path) or []
+        except Exception:
+            existing_history = []
+
+        cutoff_ts = core.now() - dt.timedelta(hours=history_hours)
+        filtered_history: list[Dict[str, Any]] = []
+        for item in existing_history:
+            if not isinstance(item, dict):
+                continue
+            ts = core.parse_timestamp(item.get("timestamp"))
+            if ts is None or ts < cutoff_ts:
+                continue
+            filtered_history.append(item)
+
+        price_value: Optional[float] = None
+        if price_snapshot is not None:
+            try:
+                price_value = float(price_snapshot)
+            except (TypeError, ValueError):
+                price_value = None
+
+        grid_power = None
+        grid_energy = None
+        if live and live.get("grid_power") is not None:
+            try:
+                grid_power = float(live["grid_power"])
+                grid_energy = grid_power * (output["interval_seconds"] / 3600.0)
+            except (TypeError, ValueError):
+                grid_power = None
+                grid_energy = None
+
+        history_entry: Dict[str, Any] = {
+            "timestamp": output["timestamp"],
+            "battery_soc_percent": current_soc,
+        }
+        if price_value is not None:
+            history_entry["price_eur_per_kwh"] = price_value
+        if grid_power is not None:
+            history_entry["grid_power_kw"] = grid_power
+        if grid_energy is not None:
+            history_entry["grid_energy_kwh"] = grid_energy
+
+        filtered_history.append(history_entry)
+
+        dedup: Dict[str, Dict[str, Any]] = {}
+        for item in filtered_history:
+            ts_key = str(item.get("timestamp"))
+            dedup[ts_key] = item
+        history_entries = sorted(
+            dedup.values(),
+            key=lambda entry: core.parse_timestamp(entry.get("timestamp")) or core.now(),
+        )
+
+        try:
+            core.write_json_atomic(history_path, history_entries)
+        except Exception as exc:  # pylint: disable=broad-except
+            warning_msg = f"history write failed: {exc}"
+            warnings.append(warning_msg)
+            output["warnings"] = warnings
+
+    output["history"] = history_entries
+
     snapshot_path_value = public_cfg.get("snapshot_path", "/public/data/latest.json")
     if snapshot_path_value:
         snapshot_path = Path(snapshot_path_value)
         if not snapshot_path.is_absolute():
             snapshot_path = (config_path.parent / snapshot_path).resolve()
-        snapshot_payload = {
-            "timestamp": output["timestamp"],
-            "interval_seconds": output["interval_seconds"],
-            "house_load_w": output.get("house_load_w"),
-            "current_soc_percent": output.get("current_soc_percent"),
-            "next_step_soc_percent": output.get("next_step_soc_percent"),
+    snapshot_payload = {
+        "timestamp": output["timestamp"],
+        "interval_seconds": output["interval_seconds"],
+        "house_load_w": output.get("house_load_w"),
+        "current_soc_percent": output.get("current_soc_percent"),
+        "next_step_soc_percent": output.get("next_step_soc_percent"),
             "recommended_soc_percent": output.get("recommended_soc_percent"),
             "recommended_final_soc_percent": output.get("recommended_final_soc_percent"),
             "price_snapshot_eur_per_kwh": output.get("price_snapshot_eur_per_kwh"),
-            "projected_cost_eur": output.get("projected_cost_eur"),
-            "projected_grid_energy_kwh": output.get("projected_grid_energy_kwh"),
-            "forecast_hours": output.get("forecast_hours"),
-            "forecast_samples": output.get("forecast_samples"),
-            "trajectory": output.get("trajectory", []),
-            "warnings": warnings,
-            "errors": errors,
-        }
+        "projected_cost_eur": output.get("projected_cost_eur"),
+        "projected_grid_energy_kwh": output.get("projected_grid_energy_kwh"),
+        "forecast_hours": output.get("forecast_hours"),
+        "forecast_samples": output.get("forecast_samples"),
+        "trajectory": output.get("trajectory", []),
+        "history": history_entries,
+        "warnings": warnings,
+        "errors": errors,
+    }
         try:
             core.write_json_atomic(snapshot_path, snapshot_payload)
         except Exception as exc:  # pylint: disable=broad-except
