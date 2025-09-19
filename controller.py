@@ -15,7 +15,8 @@ TRUE_SET = {"1", "true", "t", "yes", "y"}
 
 
 def main() -> None:
-    config_path = Path(os.environ.get("BATTERYCTL_CONFIG", "config.yaml"))
+    config_env = os.environ.get("BATTERYCTL_CONFIG", "config.yaml")
+    config_path = Path(config_env).expanduser().resolve()
     run_once_flag = os.environ.get("BATTERYCTL_ONCE", "").lower() in TRUE_SET
     banner = "=" * 60
     print(banner, flush=True)
@@ -27,6 +28,9 @@ def main() -> None:
     while True:
         try:
             result = evaluate_once.run_once(config_path, dry_run=False)
+            snapshot_path = result.get("snapshot_path")
+            if snapshot_path:
+                print(f"[INFO] snapshot path: {snapshot_path}", flush=True)
             print(json.dumps(result), flush=True)
             interval_seconds = max(60, int(result.get("interval_seconds", 300)))
             log_record = result.get("log_record")
