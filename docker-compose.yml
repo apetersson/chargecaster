@@ -1,0 +1,15 @@
+services:
+  batteryctl:
+    image: apetersson/batteryctl:latest
+    build: .
+    container_name: batteryctl
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./state:/data
+    networks:
+      - hostnet
+networks:
+  hostnet:
+    external: true
+    name: host
