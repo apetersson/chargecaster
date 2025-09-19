@@ -63,7 +63,7 @@ export function useProjectionChart(history: HistoryPoint[], trajectory: Trajecto
                 : typeof item.soc_start_percent === "number"
                 ? item.soc_start_percent
                 : Number.NaN;
-            return { x: startTime, y: target } satisfies Point;
+            return { x: startTime, y: target };
           })
           .filter((point): point is Point => point !== null)
           .sort((a, b) => a.x - b.x)
@@ -113,7 +113,7 @@ export function useProjectionChart(history: HistoryPoint[], trajectory: Trajecto
       const data = hasBreak
         ? [...historyPoints, { x: nowMillis, y: Number.NaN }, ...futurePoints]
         : [...historyPoints, ...futurePoints];
-      return { data, hasBreak } as const;
+      return { data, hasBreak };
     };
 
     const socSeries = buildSeries(historySocPoints, futureSocPoints);
@@ -248,8 +248,7 @@ export function useProjectionChart(history: HistoryPoint[], trajectory: Trajecto
             ticks: {
               color: "#94a3b8",
               callback: (value) => {
-                const millis =
-                  typeof value === "number" ? value : new Date(value as string).getTime();
+                const millis = typeof value === "number" ? value : new Date(value).getTime();
                 if (Math.abs(millis - firstMillis) < 60_000 || Math.abs(millis - lastMillis) < 60_000) {
                   return dateTimeFormatter.format(new Date(millis));
                 }
