@@ -74,21 +74,26 @@ def capture_evcc(
     prefer_market = bool(market_cfg.get("prefer_market", True))
     market_label = market_cfg.get("source_label") or market_cfg.get("label") or "market_data"
     market_max_hours = float(market_cfg.get("max_hours", 72.0) or 72.0)
+    market_failed = False
 
     if market_enabled:
         try:
             market_slots = core.fetch_market_forecast(market_cfg.get("url"), max_hours=market_max_hours)
             if market_slots:
                 if prefer_market or not forecast:
-                    if forecast and forecast_source != market_label:
-                        messages.append("market data overriding EVCC forecast")
                     forecast = market_slots
                     forecast_source = market_label
                 if price_snapshot is None:
                     first_market_price = float(market_slots[0].get("price", 0.0))
                     price_snapshot = f"{first_market_price + network_tariff:.4f}"
+            else:
+                market_failed = True
         except Exception as exc:  # pylint: disable-broad-except
             messages.append(f"market data fetch failed: {exc}")
+            market_failed = True
+
+    if market_failed and evcc_enabled and forecast_source == "evcc":
+        messages.append("market data unavailable, using EVCC forecast")
 
     return live, price_snapshot, messages, forecast, forecast_source
 
