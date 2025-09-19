@@ -7,6 +7,14 @@ import TrajectoryTable from "./components/TrajectoryTable";
 import { useProjectionChart } from "./hooks/useProjectionChart";
 import type { HistoryPoint, SnapshotPayload, TrajectoryPoint } from "./types";
 
+const isSnapshotPayload = (input: unknown): input is SnapshotPayload => {
+  if (!input || typeof input !== "object") {
+    return false;
+  }
+  const candidate = input as Record<string, unknown>;
+  return "timestamp" in candidate && "interval_seconds" in candidate;
+};
+
 const REFRESH_INTERVAL_MS = 60_000;
 
 const App = () => {
@@ -19,8 +27,10 @@ const App = () => {
       return false;
     }
     try {
-      const module = await import("./mock/latest-mock.json");
-      setData(module.default as SnapshotPayload);
+      const mockModule = (await import("./mock/latest-mock.json")) as {
+        default: SnapshotPayload;
+      };
+      setData(mockModule.default);
       setError(null);
       return true;
     } catch (mockErr) {
@@ -36,7 +46,10 @@ const App = () => {
       if (!response.ok) {
         throw new Error(`Failed to load snapshot (${response.status})`);
       }
-      const payload: SnapshotPayload = await response.json();
+      const payload = (await response.json()) as unknown;
+      if (!isSnapshotPayload(payload)) {
+        throw new Error("Snapshot payload malformed");
+      }
       setData(payload);
       setError(null);
     } catch (err) {
@@ -50,8 +63,10 @@ const App = () => {
   }, [loadMockSnapshot]);
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, REFRESH_INTERVAL_MS);
+    void fetchData();
+    const interval = setInterval(() => {
+      void fetchData();
+    }, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -95,7 +110,9 @@ const App = () => {
         <button
           type="button"
           className="refresh-button"
-          onClick={fetchData}
+          onClick={() => {
+            void fetchData();
+          }}
           disabled={loading}
         >
           {loading ? "Refreshing..." : "Refresh now"}
