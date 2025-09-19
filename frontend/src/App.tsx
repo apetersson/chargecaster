@@ -104,7 +104,8 @@ function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
       return undefined;
     }
 
-    const labels = trajectory.map((item) => {
+    const total = trajectory.length;
+    const labels = trajectory.map((item, idx) => {
       const timestamp = item.end ?? item.start;
       if (!timestamp) {
         return `Slot ${item.slot_index}`;
@@ -113,11 +114,15 @@ function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
       if (Number.isNaN(parsed.getTime())) {
         return `Slot ${item.slot_index}`;
       }
-      return `${parsed.toLocaleDateString()} ${timeFormatter.format(parsed)}`;
+      if (idx === 0 || idx === total - 1) {
+        return dateTimeFormatter.format(parsed);
+      }
+      return timeFormatter.format(parsed);
     });
 
     const socData = trajectory.map((item) => item.soc_end_percent ?? item.soc_start_percent ?? 0);
     const gridData = trajectory.map((item) => item.grid_energy_kwh ?? 0);
+    const priceData = trajectory.map((item) => item.price_eur_per_kwh ?? 0);
 
     chartRef.current?.destroy();
 
@@ -134,8 +139,8 @@ function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
           {
             label: "Target SOC %",
             data: socData,
-            borderColor: "#60a5fa",
-            backgroundColor: "rgba(96, 165, 250, 0.2)",
+            borderColor: "#22c55e",
+            backgroundColor: "rgba(34, 197, 94, 0.25)",
             yAxisID: "y",
             tension: 0.25,
             fill: true,
@@ -146,6 +151,14 @@ function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
             borderColor: "#f97316",
             backgroundColor: "rgba(249, 115, 22, 0.15)",
             yAxisID: "y1",
+            tension: 0.2,
+          },
+          {
+            label: "Price (€/kWh)",
+            data: priceData,
+            borderColor: "#38bdf8",
+            backgroundColor: "rgba(56, 189, 248, 0.2)",
+            yAxisID: "y2",
             tension: 0.2,
           },
         ],
@@ -168,6 +181,17 @@ function useTrajectoryChart(trajectory: TrajectoryPoint[]) {
             grid: {
               drawOnChartArea: false,
             },
+          },
+          y2: {
+            type: "linear",
+            position: "right",
+            grid: {
+              drawOnChartArea: false,
+            },
+            ticks: {
+              callback: (value) => `${numberFormatter.format(Number(value))} €/kWh`,
+            },
+            offset: true,
           },
         },
         plugins: {
@@ -314,6 +338,21 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const loadMockSnapshot = useCallback(async () => {
+    if (!import.meta.env.DEV) {
+      return false;
+    }
+    try {
+      const module = await import("./mock/latest-mock.json");
+      setData(module.default as SnapshotPayload);
+      setError(null);
+      return true;
+    } catch (mockErr) {
+      console.warn("failed to load mock snapshot", mockErr);
+      return false;
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -325,11 +364,14 @@ const App = () => {
       setData(payload);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const loadedMock = await loadMockSnapshot();
+      if (!loadedMock) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadMockSnapshot]);
 
   useEffect(() => {
     fetchData();
