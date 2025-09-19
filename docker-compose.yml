@@ -7,9 +7,6 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./state:/data
-    networks:
-      - hostnet
-networks:
-  hostnet:
-    external: true
-    name: host
+      - ./snapshots:/public/data
+    ports:
+      - "8080:80"

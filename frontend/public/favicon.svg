@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="sky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="curve" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="50%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="battery" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#16a34a" />
+      <stop offset="100%" stop-color="#22c55e" />
+    </linearGradient>
+    <linearGradient id="bolt" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#facc15" />
+      <stop offset="100%" stop-color="#f97316" />
+    </linearGradient>
+  </defs>
+
+  <!-- background panel -->
+  <rect x="6" y="10" width="116" height="108" rx="18" fill="url(#sky)" />
+
+  <!-- grid lines -->
+  <g stroke="#172554" stroke-width="2" opacity="0.35">
+    <line x1="18" y1="32" x2="110" y2="32" />
+    <line x1="18" y1="56" x2="110" y2="56" />
+    <line x1="18" y1="80" x2="110" y2="80" />
+    <line x1="38" y1="24" x2="38" y2="96" />
+    <line x1="58" y1="24" x2="58" y2="96" />
+    <line x1="78" y1="24" x2="78" y2="96" />
+    <line x1="98" y1="24" x2="98" y2="96" />
+  </g>
+
+  <!-- duck curve (price profile) -->
+  <path d="M18 92 C 32 40, 60 28, 76 56 C 86 72, 104 70, 110 46" fill="none" stroke="url(#curve)" stroke-width="10" stroke-linecap="round" />
+  <path d="M20 92 C 36 60, 58 48, 76 56 C 84 60, 94 66, 110 46" fill="none" stroke="rgba(14,165,233,0.5)" stroke-width="20" stroke-linecap="round" opacity="0.35" />
+
+  <!-- battery pack foreground -->
+  <g transform="translate(26 36)">
+    <rect x="0" y="12" width="52" height="44" rx="10" fill="url(#battery)" stroke="#052e16" stroke-width="4" />
+    <rect x="52" y="26" width="10" height="20" rx="4" fill="#22c55e" stroke="#052e16" stroke-width="3" />
+    <path d="M30 14 L16 38h10l-5 18 20-26h-9l-2-12z" fill="url(#bolt)" stroke="#9a3412" stroke-width="3" stroke-linejoin="round" />
+    <circle cx="14" cy="44" r="5" fill="rgba(15,23,42,0.4)" />
+    <circle cx="38" cy="44" r="5" fill="rgba(15,23,42,0.4)" />
+  </g>
+
+  <!-- spark overlay -->
+  <circle cx="82" cy="34" r="6" fill="#fde047" opacity="0.85">
+    <animate attributeName="r" values="5;6.5;5" dur="2.4s" repeatCount="indefinite" />
+    <animate attributeName="opacity" values="0.6;0.95;0.6" dur="2.4s" repeatCount="indefinite" />
+  </circle>
+</svg>
