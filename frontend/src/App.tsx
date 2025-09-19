@@ -17,13 +17,15 @@ const isSnapshotPayload = (input: unknown): input is SnapshotPayload => {
 
 const REFRESH_INTERVAL_MS = 60_000;
 
+const mockEnabled = import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === "true";
+
 const App = () => {
   const [data, setData] = useState<SnapshotPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadMockSnapshot = useCallback(async () => {
-    if (!import.meta.env.DEV || import.meta.env.VITE_USE_MOCK !== "true") {
+    if (!mockEnabled) {
       return false;
     }
     try {
@@ -53,8 +55,12 @@ const App = () => {
       setData(payload);
       setError(null);
     } catch (err) {
-      const loadedMock = await loadMockSnapshot();
-      if (!loadedMock) {
+      if (mockEnabled) {
+        const loadedMock = await loadMockSnapshot();
+        if (!loadedMock) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } else {
         setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
