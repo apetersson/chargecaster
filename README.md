@@ -84,10 +84,23 @@ If you want hot reload while tweaking the dashboard:
 ```bash
 cd frontend
 yarn install
-yarn dev
+# optional: serve bundled mock data instead of hitting the controller
+VITE_USE_MOCK=true yarn dev
 ```
 
-The dev server runs on `http://localhost:5173` and fetches snapshots from `/data/latest.json`, so you can proxy requests or run the controller in parallel.
+The dev server runs on `http://localhost:5173` and fetches snapshots from `/data/latest.json`, so you can proxy requests or run the controller in parallel. With `VITE_USE_MOCK=true` the UI serves the bundled snapshot from `src/mock/latest-mock.json`; unset the variable to hit the live controller instead.
+
+Quality checks:
+
+```bash
+# static analysis (TypeScript-aware ESLint)
+yarn lint
+
+# production build (Vite)
+yarn build
+```
+
+Run these before baking Docker images so the frontend stays lint-clean and buildable.
 
 ---
 

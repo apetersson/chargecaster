@@ -1,7 +1,7 @@
-import type { SnapshotPayload } from "../types";
+import type { SnapshotSummary } from "../types";
 import { formatDate, formatNumber, formatPercent, statusClass } from "../utils/format";
 
-const SummaryCards = ({ data }: { data: SnapshotPayload | null }) => {
+const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
   if (!data) {
     return null;
   }
@@ -59,7 +59,7 @@ const SummaryCards = ({ data }: { data: SnapshotPayload | null }) => {
         </div>
         <div className="metric">
           <span className="label">Price Snapshot</span>
-          <span className="value small">{formatNumber(Number(data.price_snapshot_eur_per_kwh), " €/kWh")}</span>
+          <span className="value small">{formatNumber(data.price_snapshot_eur_per_kwh, " €/kWh")}</span>
         </div>
         <div className="metric">
           <span className="label">Projected Cost</span>
