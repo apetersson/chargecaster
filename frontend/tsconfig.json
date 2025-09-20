@@ -10,8 +10,13 @@
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "resolveJsonModule": true,
+    "paths": {
+      "@backend/trpc": ["../backend/src/trpc/trpc.router.ts"],
+      "@backend/trpc-types": ["../backend/src/trpc/trpc.router.ts"],
+      "@backend/simulation-types": ["../backend/src/simulation/types.ts"]
+    },
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx"

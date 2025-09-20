@@ -1,0 +1,20 @@
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+
+import { SimulationModule } from "./simulation/simulation.module.js";
+import { StorageModule } from "./storage/storage.module.js";
+import { TrpcModule } from "./trpc/trpc.module.js";
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [".env", "../.env", "../../.env"],
+      cache: true,
+    }),
+    StorageModule,
+    SimulationModule,
+    TrpcModule,
+  ],
+})
+export class AppModule {}
