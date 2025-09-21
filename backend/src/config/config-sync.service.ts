@@ -1,12 +1,13 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import YAML from "yaml";
 
 import { SimulationService } from "../simulation/simulation.service.js";
-import type { SimulationConfig } from "../simulation/types.js";
-import { extractForecastFromState, normalizePriceSlots } from "../simulation/simulation.service.js";
+import type { ForecastEra, SimulationConfig } from "../simulation/types.js";
+import { normalizePriceSlots } from "../simulation/simulation.service.js";
 
 const DEFAULT_CONFIG_FILE = "../config.local.yaml";
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
@@ -22,9 +23,11 @@ interface ConfigFile {
   battery?: Record<string, unknown>;
   price?: Record<string, unknown>;
   logic?: Record<string, unknown>;
-  evcc?: ConfigSection;
+  // evcc removed
+  evcc?: never;
   market_data?: ConfigSection;
   state?: Record<string, unknown>;
+  solar?: Record<string, unknown>;
 }
 
 interface PreparedSimulation {
@@ -35,8 +38,26 @@ interface PreparedSimulation {
   errors: string[];
   priceSnapshot: number | null;
   solarForecast: Record<string, unknown>[];
-  trajectoryNotBefore: string | null;
+  forecastEras: ForecastEra[];
 }
+
+interface NormalizedSlot {
+  payload: Record<string, unknown>;
+  startDate: Date | null;
+  endDate: Date | null;
+  startIso: string | null;
+  endIso: string | null;
+  durationHours: number | null;
+}
+
+type ForecastCostPayload = Record<string, unknown> & {
+  price?: unknown;
+  value?: unknown;
+  unit?: unknown;
+  price_unit?: unknown;
+  value_unit?: unknown;
+  price_ct_per_kwh?: number | null;
+};
 
 @Injectable()
 export class ConfigSyncService {
@@ -71,6 +92,7 @@ export class ConfigSyncService {
         liveState: prepared.liveState,
         forecast: prepared.forecast,
         solarForecast: prepared.solarForecast,
+        forecastEras: prepared.forecastEras,
         warnings: prepared.warnings,
         errors: prepared.errors,
         priceSnapshotEurPerKwh: prepared.priceSnapshot,
@@ -111,61 +133,56 @@ export class ConfigSyncService {
     const errors: string[] = [];
     const liveState: { battery_soc?: number | null } = {};
 
-    const evccResult = await this.collectFromEvcc(configFile.evcc, simulationConfig, warnings);
-    this.logger.log(
-      `EVCC data: slots=${evccResult.forecast.length}, live_soc=${
-        evccResult.liveSoc ?? "n/a"
-      }, snapshot=${evccResult.priceSnapshot ?? "n/a"}`,
-    );
-    if (evccResult.liveSoc !== null && evccResult.liveSoc !== undefined) {
-      liveState.battery_soc = evccResult.liveSoc;
-    }
-
-    let forecast: Record<string, unknown>[] = [...evccResult.forecast];
-    let priceSnapshot = evccResult.priceSnapshot;
-    let solarForecast: Record<string, unknown>[] = [...evccResult.solar];
+    // EVCC removed; start with empty and rely on market data
+    let forecast: Record<string, unknown>[] = [];
+    let priceSnapshot: number | null = null;
+    let solarForecast: Record<string, unknown>[] = [];
 
     const marketResult = await this.collectFromMarket(configFile.market_data, simulationConfig, warnings);
+    const futureMarketForecast = this.filterFutureEntries(marketResult.forecast);
 
     const preferMarket = this.resolveBoolean(configFile.market_data?.prefer_market, true);
     this.logger.log(
-      `Market data: slots=${marketResult.forecast.length}, snapshot=${
+      `Market data: slots=${futureMarketForecast.length}, snapshot=${
         marketResult.priceSnapshot ?? "n/a"
       }, prefer_market=${preferMarket}`,
     );
-    if (marketResult.forecast.length && (preferMarket || !forecast.length)) {
-      forecast = [...marketResult.forecast];
+    if (futureMarketForecast.length && (preferMarket || !forecast.length)) {
+      forecast = [...futureMarketForecast];
       priceSnapshot = marketResult.priceSnapshot ?? priceSnapshot;
-    } else if (!forecast.length && marketResult.forecast.length) {
-      forecast = [...marketResult.forecast];
+    } else if (!forecast.length && futureMarketForecast.length) {
+      forecast = [...futureMarketForecast];
       priceSnapshot = marketResult.priceSnapshot ?? priceSnapshot;
     }
 
     if (!forecast.length) {
-      const message = "Unable to retrieve a price forecast from EVCC or market data endpoints.";
+      const message = "Unable to retrieve a price forecast from market data endpoint.";
       errors.push(message);
       this.logger.warn(message);
     }
 
-    forecast = this.filterFutureEntries(forecast);
-    solarForecast = this.filterFutureEntries(solarForecast);
+    const { forecastEntries, eras } = this.buildForecastEras(
+      forecast,
+      [],
+      futureMarketForecast,
+      solarForecast,
+    );
+
+    forecast = forecastEntries;
     priceSnapshot = priceSnapshot ?? this.derivePriceSnapshot(forecast, simulationConfig);
     this.logger.log(
       `Prepared simulation summary: slots=${forecast.length}, price_snapshot=${priceSnapshot ?? "n/a"}`,
     );
 
-    const trajectoryStart = forecast[0]?.start ?? forecast[0]?.from;
     return {
       simulationConfig,
       liveState,
       forecast,
       solarForecast,
+      forecastEras: eras,
       warnings,
       errors,
       priceSnapshot: priceSnapshot ?? null,
-      trajectoryNotBefore: trajectoryStart
-        ? this.parseDate(trajectoryStart)?.toISOString() ?? null
-        : null,
     };
   }
 
@@ -173,6 +190,7 @@ export class ConfigSyncService {
     const battery = configFile.battery ?? {};
     const price = configFile.price ?? {};
     const logic = configFile.logic ?? {};
+    const solar = configFile.solar ?? {};
     const stateCfg = configFile.state ?? {};
 
     const capacity = this.resolveNumber(battery.capacity_kwh, 0);
@@ -181,10 +199,12 @@ export class ConfigSyncService {
 
     const gridFee = this.resolveNumber(price.grid_fee_eur_per_kwh, null);
     const networkTariff = this.resolveNumber(price.network_tariff_eur_per_kwh, null);
+    const feedInTariff = this.resolveNumber(price.feed_in_tariff_eur_per_kwh, null);
 
     const intervalSeconds = this.resolveNumber(logic.interval_seconds, 300);
     const minHoldMinutes = this.resolveNumber(logic.min_hold_minutes, 0);
     const houseLoad = this.resolveNumber(logic.house_load_w, 1200);
+    const directUseRatio = this.resolveNumber(solar.direct_use_ratio, null);
 
     const simulationConfig: SimulationConfig = {
       battery: {
@@ -195,104 +215,26 @@ export class ConfigSyncService {
       price: {
         grid_fee_eur_per_kwh: gridFee ?? networkTariff ?? 0,
         network_tariff_eur_per_kwh: networkTariff ?? undefined,
+        feed_in_tariff_eur_per_kwh: feedInTariff ?? undefined,
       },
       logic: {
         interval_seconds: intervalSeconds ?? undefined,
         min_hold_minutes: minHoldMinutes ?? undefined,
         house_load_w: houseLoad ?? undefined,
       },
+      solar:
+        directUseRatio === null
+          ? undefined
+          : {
+              direct_use_ratio: Math.min(Math.max(directUseRatio, 0), 1),
+            },
       state: typeof stateCfg.path === "string" ? { path: stateCfg.path } : undefined,
     };
 
     return simulationConfig;
   }
 
-  private async collectFromEvcc(
-    evccConfig: ConfigSection | undefined,
-    simulationConfig: SimulationConfig,
-    warnings: string[],
-  ): Promise<{
-    forecast: Record<string, unknown>[];
-    liveSoc: number | null;
-    priceSnapshot: number | null;
-    solar: Record<string, unknown>[];
-  }> {
-    const forecast: Record<string, unknown>[] = [];
-    const solarEntries: Record<string, unknown>[] = [];
-    let liveSoc: number | null = null;
-    let priceSnapshot: number | null = null;
-
-    const enabled = this.resolveBoolean(evccConfig?.enabled, false);
-    const baseUrl = this.resolveString(evccConfig?.base_url ?? evccConfig?.baseUrl ?? evccConfig?.url);
-
-    if (!enabled) {
-      warnings.push("EVCC integration disabled in config.");
-      this.logger.warn("EVCC integration disabled in config.");
-      return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
-    }
-
-    if (!baseUrl) {
-      warnings.push("EVCC base_url missing in config.");
-      this.logger.warn("EVCC base_url missing in config.");
-      return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
-    }
-
-    const trimmedBaseUrl = baseUrl.replace(/\/$/, "");
-    let statePayload: Record<string, unknown> | null = null;
-
-    try {
-      const stateUrl = `${trimmedBaseUrl}/api/state`;
-      this.logger.log(`Fetching EVCC state from ${stateUrl}`);
-      const response = await this.fetchJson(stateUrl, REQUEST_TIMEOUT_MS);
-      if (response && typeof response === "object") {
-        statePayload = response as Record<string, unknown>;
-      } else {
-        warnings.push("EVCC state endpoint returned unexpected payload.");
-        this.logger.warn("EVCC state endpoint returned unexpected payload.");
-      }
-    } catch (error) {
-      const message = `State fetch from EVCC failed: ${this.describeError(error)}`;
-      warnings.push(message);
-      this.logger.warn(message);
-      return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
-    }
-
-    if (statePayload) {
-      liveSoc = this.extractBatterySoc(statePayload);
-      const rawForecast = extractForecastFromState(statePayload);
-      forecast.push(...rawForecast);
-      const rawSolar = this.extractSolarForecast(statePayload);
-      solarEntries.push(...rawSolar);
-      const rawPrice = this.extractPriceFromState(statePayload);
-      if (rawPrice !== null && rawPrice !== undefined) {
-        priceSnapshot = this.applyGridFee(rawPrice, simulationConfig);
-      }
-    }
-
-    if (!forecast.length) {
-      warnings.push("No forecast data present in EVCC state response.");
-      this.logger.warn("No forecast data present in EVCC state response.");
-    }
-
-    if (priceSnapshot === null) {
-      try {
-        const tariffUrl = `${trimmedBaseUrl}/api/tariff`;
-        this.logger.log(`Fetching EVCC tariff data from ${tariffUrl}`);
-        const tariffPayload = await this.fetchJson(tariffUrl, REQUEST_TIMEOUT_MS);
-        const tariffEntries = this.normalizeForecastEntries(tariffPayload);
-        const derived = this.derivePriceSnapshot(tariffEntries, simulationConfig);
-        if (derived !== null) {
-          priceSnapshot = derived;
-        }
-      } catch (error) {
-        const message = `EVCC tariff fetch failed: ${this.describeError(error)}`;
-        warnings.push(message);
-        this.logger.warn(message);
-      }
-    }
-
-    return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
-  }
+  // EVCC collection removed
 
   private async collectFromMarket(
     marketConfig: ConfigSection | undefined,
@@ -406,25 +348,50 @@ export class ConfigSyncService {
       if (!item || typeof item !== "object") {
         continue;
       }
-      const record = item as { ts?: unknown; val?: unknown };
+      const record = item as { ts?: unknown; val?: unknown; value?: unknown; energy_kwh?: unknown; energy_wh?: unknown };
       const start = this.parseDate(record.ts);
       if (!start) {
         continue;
       }
 
       const next = index + 1 < timeseries.length ? timeseries[index + 1] : undefined;
-      const end = this.parseDate((next as { ts?: unknown } | undefined)?.ts) ??
+      const end =
+        this.parseDate((next as { ts?: unknown } | undefined)?.ts) ??
         new Date(start.getTime() + SLOT_DURATION_MS);
 
-      const energyWh = this.resolveNumber(record.val, null);
-      if (energyWh === null) {
+      const durationMs = end.getTime() - start.getTime();
+      if (!(durationMs > 0)) {
+        continue;
+      }
+
+      let energyKwh = this.resolveNumber(record.energy_kwh, null);
+      if (energyKwh === null) {
+        const energyWh = this.resolveNumber(record.energy_wh, null);
+        if (energyWh !== null) {
+          energyKwh = energyWh / 1000;
+        }
+      }
+
+      if (energyKwh === null) {
+        const rawPower = this.resolveNumber(record.value ?? record.val, null);
+        if (rawPower !== null) {
+          let powerKw = rawPower;
+          if (powerKw > 1000) {
+            powerKw /= 1000;
+          }
+          const durationHours = durationMs / SLOT_DURATION_MS;
+          energyKwh = powerKw * durationHours;
+        }
+      }
+
+      if (energyKwh === null || !Number.isFinite(energyKwh) || energyKwh <= 0) {
         continue;
       }
 
       entries.push({
         start: start.toISOString(),
         end: end.toISOString(),
-        energy_kwh: energyWh / 1000,
+        energy_kwh: energyKwh,
       });
     }
 
@@ -445,6 +412,200 @@ export class ConfigSyncService {
       }
       return start.getTime() > now;
     });
+  }
+
+  private buildForecastEras(
+    canonicalForecast: Record<string, unknown>[],
+    evccForecast: Record<string, unknown>[],
+    marketForecast: Record<string, unknown>[],
+    solarForecast: Record<string, unknown>[],
+  ): { forecastEntries: Record<string, unknown>[]; eras: ForecastEra[] } {
+    if (!canonicalForecast.length) {
+      return { forecastEntries: [], eras: [] };
+    }
+
+    const canonicalSlots = canonicalForecast
+      .map((entry) => this.normalizeForecastSlot(entry))
+      .filter((slot) => slot.startIso !== null)
+      .sort((a, b) => {
+        const aTime = a.startDate?.getTime() ?? 0;
+        const bTime = b.startDate?.getTime() ?? 0;
+        return aTime - bTime;
+      });
+
+    const marketIndex = this.buildStartIndex(marketForecast);
+
+    const solarSlots = solarForecast
+      .map((entry) => this.normalizeForecastSlot(entry))
+      .filter((slot) => slot.startDate !== null)
+      .sort((a, b) => {
+        const aTime = a.startDate?.getTime() ?? 0;
+        const bTime = b.startDate?.getTime() ?? 0;
+        return aTime - bTime;
+      });
+
+    const findSolarPayload = (
+      startDate: Date | null,
+      endDate: Date | null,
+    ): Record<string, unknown> | undefined => {
+      if (!startDate) {
+        return undefined;
+      }
+      const startIso = startDate.toISOString();
+      const direct = solarSlots.find((slot) => slot.startIso === startIso);
+      if (direct) {
+        return this.cloneRecord(direct.payload);
+      }
+      const startTime = startDate.getTime();
+      const endTime = endDate?.getTime() ?? startTime + SLOT_DURATION_MS;
+      for (const slot of solarSlots) {
+        const slotStart = slot.startDate?.getTime();
+        if (slotStart === undefined) {
+          continue;
+        }
+        const slotEnd = slot.endDate?.getTime() ?? slotStart + SLOT_DURATION_MS;
+        if (slotStart < endTime && slotEnd > startTime) {
+          return this.cloneRecord(slot.payload);
+        }
+      }
+      return undefined;
+    };
+
+    const forecastEntries: Record<string, unknown>[] = [];
+    const eras: ForecastEra[] = [];
+
+    for (const slot of canonicalSlots) {
+      if (!slot.startIso) {
+        continue;
+      }
+      const eraId = randomUUID();
+      const payload = { ...slot.payload, era_id: eraId };
+      forecastEntries.push(payload);
+
+      const sources: ForecastEra["sources"] = [];
+
+      const marketPayload = marketIndex.get(slot.startIso);
+      if (marketPayload) {
+        const cloned = this.cloneRecord(marketPayload);
+        const record: ForecastCostPayload = { ...cloned };
+        const rawPrice = record.price ?? record.value;
+        const rawUnit = record.unit ?? record.price_unit ?? record.value_unit;
+        const priceCt = this.convertPriceToCents(rawPrice, rawUnit);
+        if (priceCt !== null) {
+          record.price_ct_per_kwh = priceCt;
+          record.unit = "ct/kWh";
+        }
+        sources.push({ provider: "awattar", type: "cost", payload: record });
+      }
+
+      const solarPayload = findSolarPayload(slot.startDate, slot.endDate);
+      if (solarPayload) {
+        sources.push({ provider: "solar", type: "solar", payload: solarPayload });
+      }
+
+      eras.push({
+        era_id: eraId,
+        start: slot.startIso,
+        end: slot.endIso,
+        duration_hours: slot.durationHours,
+        sources,
+      });
+    }
+
+    return { forecastEntries, eras };
+  }
+
+  private buildStartIndex(entries: Record<string, unknown>[]): Map<string, Record<string, unknown>> {
+    const index = new Map<string, Record<string, unknown>>();
+    for (const entry of entries) {
+      const slot = this.normalizeForecastSlot(entry);
+      if (!slot.startIso) {
+        continue;
+      }
+      index.set(slot.startIso, slot.payload);
+    }
+    return index;
+  }
+
+  private normalizeForecastSlot(entry: Record<string, unknown>): NormalizedSlot {
+    const payload = JSON.parse(JSON.stringify(entry)) as Record<string, unknown>;
+    const startDate = this.parseDate(payload.start ?? payload.from);
+    const endDateCandidate = this.parseDate(payload.end ?? payload.to);
+    const endDate =
+      endDateCandidate ?? (startDate ? new Date(startDate.getTime() + SLOT_DURATION_MS) : null);
+    const startIso = startDate ? startDate.toISOString() : null;
+    const endIso = endDate ? endDate.toISOString() : null;
+    if (startIso) {
+      payload.start = startIso;
+    }
+    if (endIso) {
+      payload.end = endIso;
+    }
+    const durationHours =
+      startDate && endDate ? (endDate.getTime() - startDate.getTime()) / 3600_000 : null;
+
+    return {
+      payload,
+      startDate,
+      endDate,
+      startIso,
+      endIso,
+      durationHours,
+    };
+  }
+
+  private cloneRecord(entry: Record<string, unknown>): Record<string, unknown> {
+    return JSON.parse(JSON.stringify(entry)) as Record<string, unknown>;
+  }
+
+  private convertPriceToCents(value: unknown, unit: unknown): number | null {
+    const numeric = this.resolveNumber(value, null);
+    if (numeric === null) {
+      return null;
+    }
+    const unitStr = typeof unit === "string" ? unit.trim().toLowerCase() : "";
+    const by = (factor: number) => {
+      const result = numeric * factor;
+      return Number.isFinite(result) ? result : null;
+    };
+
+    if (!unitStr) {
+      return by(100);
+    }
+
+    if (unitStr.includes("ct") && unitStr.includes("/wh")) {
+      return by(1000);
+    }
+
+    if (unitStr.includes("ct") && unitStr.includes("kwh")) {
+      return numeric;
+    }
+
+    if (unitStr.includes("eur") && unitStr.includes("/mwh")) {
+      return by(0.1);
+    }
+
+    if (unitStr.includes("€/") && unitStr.includes("mwh")) {
+      return by(0.1);
+    }
+
+    if (unitStr.includes("eur") && unitStr.includes("/wh")) {
+      return by(100000);
+    }
+
+    if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("kwh")) {
+      return by(100);
+    }
+
+    if (unitStr.includes("ct")) {
+      return numeric;
+    }
+
+    if (unitStr.includes("eur")) {
+      return by(100);
+    }
+
+    return by(100);
   }
 
   private derivePriceSnapshot(

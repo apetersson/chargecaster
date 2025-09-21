@@ -12,7 +12,7 @@ Both apps run with hot-reload in development and share a common type layer so th
 
 - Fetches live state from EVCC (or bundled fixtures) and optional market data feeds.
 - Dynamic programming optimiser calculates cost-minimising trajectories while respecting battery constraints.
-- Exposes snapshot, history, and trajectory endpoints over tRPC; the frontend consumes them via auto-generated TypeScript types.
+- Exposes snapshot, history, forecast, and oracle endpoints over tRPC; the frontend consumes them via auto-generated TypeScript types.
 - Ships with fixtures for rapid local demos—no hardware connection required.
 - Supports Docker/Compose packaging for one-command deployments (API + UI + SQLite volume).
 
@@ -98,7 +98,7 @@ Helpful scripts:
 1. Start the backend (`yarn start:dev` in `backend/`).
 2. Start the frontend (`yarn dev` in `frontend/`).
 3. Visit `http://localhost:5173` – the dashboard issues batched GET requests such as
-   `GET /trpc/dashboard.summary,dashboard.history,dashboard.trajectory?batch=1`.
+  `GET /trpc/dashboard.summary,dashboard.history,dashboard.forecast,dashboard.oracle?batch=1`.
    Fastify’s `maxParamLength` is configured to allow these long URLs.
 4. Edit code in either project; both dev servers hot-reload automatically.
 
@@ -150,7 +150,7 @@ The backend exposes tRPC procedures; the most commonly consumed responses includ
 
 - `dashboard.summary` – single snapshot with `current_soc_percent`, `next_step_soc_percent`, price metrics, warnings/errors.
 - `dashboard.history` – chronological list of past optimiser runs (`entries` array with SOC, price, grid energy).
-- `dashboard.trajectory` – optimiser forecast with per-slot SOC + energy recommendations.
+- `dashboard.oracle` – optimiser per-slot SOC + grid power recommendations.
 
 ## Troubleshooting
 

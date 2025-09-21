@@ -7,12 +7,17 @@ export interface BatteryConfig {
 export interface PriceConfig {
   grid_fee_eur_per_kwh?: number;
   network_tariff_eur_per_kwh?: number;
+  feed_in_tariff_eur_per_kwh?: number;
 }
 
 export interface LogicConfig {
   interval_seconds?: number;
   min_hold_minutes?: number;
   house_load_w?: number;
+}
+
+export interface SolarConfig {
+  direct_use_ratio?: number;
 }
 
 export interface StateConfig {
@@ -23,18 +28,8 @@ export interface SimulationConfig {
   battery: BatteryConfig;
   price: PriceConfig;
   logic: LogicConfig;
+  solar?: SolarConfig;
   state?: StateConfig;
-}
-
-export interface TrajectoryPoint {
-  slot_index: number;
-  start: string;
-  end: string;
-  duration_hours: number;
-  soc_start_percent: number;
-  soc_end_percent: number;
-  grid_energy_kwh: number;
-  price_eur_per_kwh: number;
 }
 
 export interface PriceSlot {
@@ -42,14 +37,32 @@ export interface PriceSlot {
   end: Date;
   durationHours: number;
   price: number;
+  eraId?: string;
 }
 
 export interface HistoryPoint {
   timestamp: string;
   battery_soc_percent: number | null;
-  price_eur_per_kwh: number | null;
-  grid_power_kw: number | null;
-  grid_energy_kwh: number | null;
+  price_ct_per_kwh?: number | null;
+  price_eur_per_kwh: number | null; // deprecated
+  grid_power_w: number | null;
+  grid_energy_w: number | null;
+}
+
+export type ForecastSourceType = "cost" | "solar" | (string & {});
+
+export interface ForecastSourcePayload {
+  provider: string;
+  type: ForecastSourceType;
+  payload: Record<string, unknown>;
+}
+
+export interface ForecastEra {
+  era_id: string;
+  start: string | null;
+  end: string | null;
+  duration_hours: number | null;
+  sources: ForecastSourcePayload[];
 }
 
 export interface SnapshotPayload {
@@ -60,14 +73,16 @@ export interface SnapshotPayload {
   next_step_soc_percent: number | null;
   recommended_soc_percent: number | null;
   recommended_final_soc_percent: number | null;
-  price_snapshot_eur_per_kwh: number | null;
+  price_snapshot_ct_per_kwh?: number | null;
+  price_snapshot_eur_per_kwh: number | null; // deprecated
   projected_cost_eur: number | null;
   baseline_cost_eur: number | null;
   projected_savings_eur: number | null;
-  projected_grid_energy_kwh: number | null;
+  projected_grid_energy_w: number | null;
   forecast_hours: number | null;
   forecast_samples: number | null;
-  trajectory: TrajectoryPoint[];
+  forecast_eras: ForecastEra[];
+  oracle_entries: OracleEntry[];
   history: HistoryPoint[];
   warnings: string[];
   errors: string[];
@@ -81,25 +96,37 @@ export interface SnapshotSummary {
   next_step_soc_percent: number | null;
   recommended_soc_percent: number | null;
   recommended_final_soc_percent: number | null;
+  price_snapshot_ct_per_kwh?: number | null;
   price_snapshot_eur_per_kwh: number | null;
   projected_cost_eur: number | null;
   baseline_cost_eur: number | null;
   projected_savings_eur: number | null;
-  projected_grid_energy_kwh: number | null;
+  projected_grid_energy_w: number | null;
   forecast_hours: number | null;
   forecast_samples: number | null;
   warnings: string[];
   errors: string[];
 }
 
-export interface TrajectoryResponse {
-  generated_at: string;
-  points: TrajectoryPoint[];
-}
-
 export interface HistoryResponse {
   generated_at: string;
   entries: HistoryPoint[];
+}
+
+export interface ForecastResponse {
+  generated_at: string;
+  eras: ForecastEra[];
+}
+
+export interface OracleEntry {
+  era_id: string;
+  target_soc_percent: number | null;
+  grid_energy_w: number | null;
+}
+
+export interface OracleResponse {
+  generated_at: string;
+  entries: OracleEntry[];
 }
 
 export interface SimulationResult {

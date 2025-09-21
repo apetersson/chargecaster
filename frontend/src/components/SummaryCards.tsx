@@ -59,7 +59,15 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
         </div>
         <div className="metric">
           <span className="label">Price Snapshot</span>
-          <span className="value small">{formatNumber(data.price_snapshot_eur_per_kwh, " €/kWh")}</span>
+          <span className="value small">
+            {formatNumber(
+              data.price_snapshot_ct_per_kwh ??
+                (typeof data.price_snapshot_eur_per_kwh === "number"
+                  ? data.price_snapshot_eur_per_kwh * 100
+                  : null),
+              " ct/kWh",
+            )}
+          </span>
         </div>
         <div className="metric">
           <span className="label">Projected Cost</span>
@@ -70,8 +78,8 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
           <span className="value small">{formatNumber(data.projected_savings_eur, " €")}</span>
         </div>
         <div className="metric">
-          <span className="label">Projected Grid Energy</span>
-          <span className="value small">{formatNumber(data.projected_grid_energy_kwh, " kWh")}</span>
+          <span className="label">Projected Grid Power</span>
+          <span className="value small">{formatNumber(data.projected_grid_energy_w, " W")}</span>
         </div>
       </div>
       <small className="timestamp">Last update: {formatDate(data.timestamp)}</small>
