@@ -62,6 +62,8 @@ export interface SnapshotPayload {
   recommended_final_soc_percent: number | null;
   price_snapshot_eur_per_kwh: number | null;
   projected_cost_eur: number | null;
+  baseline_cost_eur: number | null;
+  projected_savings_eur: number | null;
   projected_grid_energy_kwh: number | null;
   forecast_hours: number | null;
   forecast_samples: number | null;
@@ -81,6 +83,8 @@ export interface SnapshotSummary {
   recommended_final_soc_percent: number | null;
   price_snapshot_eur_per_kwh: number | null;
   projected_cost_eur: number | null;
+  baseline_cost_eur: number | null;
+  projected_savings_eur: number | null;
   projected_grid_energy_kwh: number | null;
   forecast_hours: number | null;
   forecast_samples: number | null;

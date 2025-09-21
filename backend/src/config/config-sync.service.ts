@@ -11,6 +11,7 @@ import { extractForecastFromState, normalizePriceSlots } from "../simulation/sim
 const DEFAULT_CONFIG_FILE = "../config.local.yaml";
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
 const REQUEST_TIMEOUT_MS = 5000;
+const SLOT_DURATION_MS = 3_600_000;
 
 interface ConfigSection {
   enabled?: boolean;
@@ -33,6 +34,8 @@ interface PreparedSimulation {
   warnings: string[];
   errors: string[];
   priceSnapshot: number | null;
+  solarForecast: Record<string, unknown>[];
+  trajectoryNotBefore: string | null;
 }
 
 @Injectable()
@@ -43,43 +46,21 @@ export class ConfigSyncService {
 
   async seedFromConfig(): Promise<void> {
     const configPath = this.resolveConfigPath();
-    let rawConfig: ConfigFile | null = null;
-
     try {
-      rawConfig = await this.loadConfigFile(configPath);
-    } catch (error) {
-      this.logger.error(`Failed to read config file at ${configPath}: ${this.describeError(error)}`);
-    }
+      const rawConfig = await this.loadConfigFile(configPath);
 
-    if (!rawConfig) {
-      this.logger.warn("Config file not found or unreadable; falling back to fixture data.");
-      this.simulationService.ensureSeedFromFixture();
-      return;
-    }
+      this.logger.log(`Loaded configuration from ${configPath}`);
 
-    this.logger.log(`Loaded configuration from ${configPath}`);
-
-    let prepared: PreparedSimulation | null = null;
-    try {
       this.logger.log("Preparing simulation inputs from configured data sources...");
-      prepared = await this.prepareSimulation(rawConfig);
-    } catch (error) {
-      this.logger.error(`Failed to prepare simulation from config: ${this.describeError(error)}`);
-    }
+      const prepared = await this.prepareSimulation(rawConfig);
 
-    if (!prepared) {
-      this.logger.error("Config-based preparation returned no result; using fixture snapshot.");
-      this.simulationService.ensureSeedFromFixture();
-      return;
-    }
+      if (!prepared.forecast.length) {
+        const message = "No forecast data could be obtained from configured sources.";
+        prepared.errors.push(message);
+        this.logger.error(message);
+        throw new Error(message);
+      }
 
-    if (!prepared.forecast.length) {
-      this.logger.error("No forecast data could be obtained from configured sources; using fixture snapshot.");
-      this.simulationService.ensureSeedFromFixture();
-      return;
-    }
-
-    try {
       this.logger.log(
         `Running simulation with ${prepared.forecast.length} forecast slots; live SOC: ${
           prepared.liveState.battery_soc ?? "n/a"
@@ -89,14 +70,15 @@ export class ConfigSyncService {
         config: prepared.simulationConfig,
         liveState: prepared.liveState,
         forecast: prepared.forecast,
+        solarForecast: prepared.solarForecast,
         warnings: prepared.warnings,
         errors: prepared.errors,
         priceSnapshotEurPerKwh: prepared.priceSnapshot,
       });
-      this.logger.log("Seeded snapshot using config.local.yaml data sources.");
+      this.logger.log("Seeded snapshot using config data.");
     } catch (error) {
-      this.logger.error(`Simulation run failed; reverting to fixture snapshot: ${this.describeError(error)}`);
-      this.simulationService.ensureSeedFromFixture();
+      this.logger.error(`Config sync failed: ${this.describeError(error)}`);
+      throw error;
     }
   }
 
@@ -108,11 +90,11 @@ export class ConfigSyncService {
     return resolve(process.cwd(), DEFAULT_CONFIG_FILE);
   }
 
-  private async loadConfigFile(path: string): Promise<ConfigFile | null> {
+  private async loadConfigFile(path: string): Promise<ConfigFile> {
     try {
       await access(path, fsConstants.R_OK);
-    } catch {
-      return null;
+    } catch (error) {
+      throw new Error(`Config file not accessible at ${path}: ${this.describeError(error)}`);
     }
 
     const rawContent = await readFile(path, "utf-8");
@@ -141,6 +123,7 @@ export class ConfigSyncService {
 
     let forecast: Record<string, unknown>[] = [...evccResult.forecast];
     let priceSnapshot = evccResult.priceSnapshot;
+    let solarForecast: Record<string, unknown>[] = [...evccResult.solar];
 
     const marketResult = await this.collectFromMarket(configFile.market_data, simulationConfig, warnings);
 
@@ -165,18 +148,24 @@ export class ConfigSyncService {
     }
 
     forecast = this.filterFutureEntries(forecast);
+    solarForecast = this.filterFutureEntries(solarForecast);
     priceSnapshot = priceSnapshot ?? this.derivePriceSnapshot(forecast, simulationConfig);
     this.logger.log(
       `Prepared simulation summary: slots=${forecast.length}, price_snapshot=${priceSnapshot ?? "n/a"}`,
     );
 
+    const trajectoryStart = forecast[0]?.start ?? forecast[0]?.from;
     return {
       simulationConfig,
       liveState,
       forecast,
+      solarForecast,
       warnings,
       errors,
       priceSnapshot: priceSnapshot ?? null,
+      trajectoryNotBefore: trajectoryStart
+        ? this.parseDate(trajectoryStart)?.toISOString() ?? null
+        : null,
     };
   }
 
@@ -222,8 +211,14 @@ export class ConfigSyncService {
     evccConfig: ConfigSection | undefined,
     simulationConfig: SimulationConfig,
     warnings: string[],
-  ): Promise<{ forecast: Record<string, unknown>[]; liveSoc: number | null; priceSnapshot: number | null }> {
+  ): Promise<{
+    forecast: Record<string, unknown>[];
+    liveSoc: number | null;
+    priceSnapshot: number | null;
+    solar: Record<string, unknown>[];
+  }> {
     const forecast: Record<string, unknown>[] = [];
+    const solarEntries: Record<string, unknown>[] = [];
     let liveSoc: number | null = null;
     let priceSnapshot: number | null = null;
 
@@ -233,13 +228,13 @@ export class ConfigSyncService {
     if (!enabled) {
       warnings.push("EVCC integration disabled in config.");
       this.logger.warn("EVCC integration disabled in config.");
-      return { forecast, liveSoc, priceSnapshot };
+      return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
     }
 
     if (!baseUrl) {
       warnings.push("EVCC base_url missing in config.");
       this.logger.warn("EVCC base_url missing in config.");
-      return { forecast, liveSoc, priceSnapshot };
+      return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
     }
 
     const trimmedBaseUrl = baseUrl.replace(/\/$/, "");
@@ -259,13 +254,15 @@ export class ConfigSyncService {
       const message = `State fetch from EVCC failed: ${this.describeError(error)}`;
       warnings.push(message);
       this.logger.warn(message);
-      return { forecast, liveSoc, priceSnapshot };
+      return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
     }
 
     if (statePayload) {
       liveSoc = this.extractBatterySoc(statePayload);
       const rawForecast = extractForecastFromState(statePayload);
-      forecast.push(...this.filterFutureEntries(rawForecast));
+      forecast.push(...rawForecast);
+      const rawSolar = this.extractSolarForecast(statePayload);
+      solarEntries.push(...rawSolar);
       const rawPrice = this.extractPriceFromState(statePayload);
       if (rawPrice !== null && rawPrice !== undefined) {
         priceSnapshot = this.applyGridFee(rawPrice, simulationConfig);
@@ -294,14 +291,14 @@ export class ConfigSyncService {
       }
     }
 
-    return { forecast, liveSoc, priceSnapshot };
+    return { forecast, liveSoc, priceSnapshot, solar: solarEntries };
   }
 
   private async collectFromMarket(
     marketConfig: ConfigSection | undefined,
     simulationConfig: SimulationConfig,
     warnings: string[],
-  ): Promise<{ forecast: Record<string, unknown>[]; priceSnapshot: number | null }> {
+  ): Promise<{ forecast: Record<string, unknown>[]; priceSnapshot: number | null; solar: Record<string, unknown>[] }> {
     const enabled = this.resolveBoolean(marketConfig?.enabled, true);
     const forecast: Record<string, unknown>[] = [];
     let priceSnapshot: number | null = null;
@@ -309,7 +306,7 @@ export class ConfigSyncService {
     if (!enabled) {
       warnings.push("Market data fetch disabled in config.");
       this.logger.warn("Market data fetch disabled in config.");
-      return { forecast, priceSnapshot };
+      return { forecast, priceSnapshot, solar: [] };
     }
 
     const endpoint = this.resolveString(marketConfig?.url) ?? DEFAULT_MARKET_DATA_URL;
@@ -330,7 +327,7 @@ export class ConfigSyncService {
       this.logger.warn(message);
     }
 
-    return { forecast, priceSnapshot };
+    return { forecast, priceSnapshot, solar: [] };
   }
 
   private normalizeForecastEntries(payload: unknown, maxHours = 72): Record<string, unknown>[] {
@@ -396,6 +393,44 @@ export class ConfigSyncService {
     return records;
   }
 
+  private extractSolarForecast(state: Record<string, unknown>): Record<string, unknown>[] {
+    const forecastRecord = this.extractRecord((state as { forecast?: unknown }).forecast);
+    const solarRecord = this.extractRecord(forecastRecord?.solar);
+    const timeseries = Array.isArray(solarRecord?.timeseries)
+      ? (solarRecord?.timeseries as unknown[])
+      : [];
+
+    const entries: Record<string, unknown>[] = [];
+    for (let index = 0; index < timeseries.length; index += 1) {
+      const item = timeseries[index];
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const record = item as { ts?: unknown; val?: unknown };
+      const start = this.parseDate(record.ts);
+      if (!start) {
+        continue;
+      }
+
+      const next = index + 1 < timeseries.length ? timeseries[index + 1] : undefined;
+      const end = this.parseDate((next as { ts?: unknown } | undefined)?.ts) ??
+        new Date(start.getTime() + SLOT_DURATION_MS);
+
+      const energyWh = this.resolveNumber(record.val, null);
+      if (energyWh === null) {
+        continue;
+      }
+
+      entries.push({
+        start: start.toISOString(),
+        end: end.toISOString(),
+        energy_kwh: energyWh / 1000,
+      });
+    }
+
+    return entries;
+  }
+
   private filterFutureEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
     const now = Date.now();
     return entries.filter((entry) => {
@@ -405,10 +440,10 @@ export class ConfigSyncService {
       if (end && end.getTime() <= now) {
         return false;
       }
-      if (start && start.getTime() <= now) {
-        return true;
+      if (!start) {
+        return false;
       }
-      return !start || start.getTime() >= now;
+      return start.getTime() > now;
     });
   }
 

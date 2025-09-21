@@ -6,7 +6,22 @@ type TrajectoryTableProps = {
 };
 
 const TrajectoryTable = ({ trajectory }: TrajectoryTableProps) => {
-  if (!trajectory.length) {
+  const now = Date.now();
+  const rows = trajectory
+    .filter((item) => {
+      const start = new Date(item.start).getTime();
+      const end = new Date(item.end).getTime();
+      if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        return false;
+      }
+      if (end <= now) {
+        return false;
+      }
+      return start > now;
+    })
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+  if (!rows.length) {
     return (
       <section className="card">
         <p>No trajectory data available.</p>
@@ -30,7 +45,7 @@ const TrajectoryTable = ({ trajectory }: TrajectoryTableProps) => {
             </tr>
           </thead>
           <tbody>
-            {trajectory.map((item) => {
+            {rows.map((item) => {
               const target = item.soc_end_percent ?? item.soc_start_percent;
               return (
                 <tr key={item.slot_index}>
