@@ -47,6 +47,8 @@ export interface HistoryPoint {
   price_eur_per_kwh: number | null; // deprecated
   grid_power_w: number | null;
   grid_energy_w: number | null;
+  solar_power_w: number | null;
+  solar_energy_wh: number | null;
 }
 
 export type ForecastSourceType = "cost" | "solar" | (string & {});

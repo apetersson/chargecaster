@@ -14,6 +14,7 @@ import type {
   SnapshotPayload,
   SnapshotSummary,
 } from "./types.js";
+import { normalizeHistoryList } from "./history.serializer.js";
 import { StorageService } from "../storage/storage.service.js";
 
 const SOC_STEPS = 100;
@@ -44,7 +45,7 @@ export class SimulationService {
     const oracleEntries = Array.isArray(payload.oracle_entries) ? payload.oracle_entries : [];
     payload.oracle_entries = oracleEntries;
     const historyRecords = this.storageRef.listHistory();
-    const history = this.serializeHistory(historyRecords.map((item) => item.payload));
+    const history = normalizeHistoryList(historyRecords.map((item) => item.payload));
     return {
       ...payload,
       history,
@@ -120,7 +121,7 @@ export class SimulationService {
   getHistory(limit = 96): HistoryResponse {
     const snapshot = this.ensureSeedFromFixture();
     const historyRecords = this.storageRef.listHistory(limit);
-    const entries = this.serializeHistory(historyRecords.map((item) => item.payload));
+    const entries = normalizeHistoryList(historyRecords.map((item) => item.payload));
     return {
       generated_at: snapshot.timestamp,
       entries,
@@ -219,40 +220,9 @@ export class SimulationService {
     const historyRecords = this.storageRef.listHistory();
     return {
       ...snapshot,
-      history: this.serializeHistory(historyRecords.map((item) => item.payload)),
+      history: normalizeHistoryList(historyRecords.map((item) => item.payload)),
     };
   }
-
-  private serializeHistory(history: Record<string, unknown>[]): HistoryPoint[] {
-    const entries = history.map((entry) => {
-      const timestamp =
-        typeof entry.timestamp === "string" && entry.timestamp.length > 0
-          ? entry.timestamp
-          : new Date().toISOString();
-      return {
-        timestamp,
-        battery_soc_percent: toNullableNumber(
-          (entry as { battery_soc_percent?: unknown }).battery_soc_percent,
-        ),
-        price_ct_per_kwh: toNullableNumber((entry as { price_ct_per_kwh?: unknown }).price_ct_per_kwh),
-        price_eur_per_kwh: toNullableNumber((entry as { price_eur_per_kwh?: unknown }).price_eur_per_kwh),
-        grid_power_w: null,
-        grid_energy_w: null,
-      };
-    });
-    return entries.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  }
-}
-
-function toNullableNumber(value: unknown): number | null {
-  if (value == null) {
-    return null;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function gridFee(cfg: SimulationConfig): number {
