@@ -7,7 +7,11 @@ import YAML from "yaml";
 
 import { SimulationService } from "../simulation/simulation.service.js";
 import type { ForecastEra, SimulationConfig } from "../simulation/types.js";
-import { normalizePriceSlots } from "../simulation/simulation.service.js";
+import {
+  extractForecastFromState,
+  extractSolarForecastFromState,
+  normalizePriceSlots,
+} from "../simulation/simulation.service.js";
 
 const DEFAULT_CONFIG_FILE = "../config.local.yaml";
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
@@ -23,11 +27,18 @@ interface ConfigFile {
   battery?: Record<string, unknown>;
   price?: Record<string, unknown>;
   logic?: Record<string, unknown>;
-  // evcc removed
-  evcc?: never;
+  evcc?: EvccConfig;
   market_data?: ConfigSection;
   state?: Record<string, unknown>;
   solar?: Record<string, unknown>;
+}
+
+interface EvccConfig extends ConfigSection {
+  base_url?: string;
+  baseUrl?: string;
+  token?: string;
+  timeout_ms?: number;
+  timeoutMs?: number;
 }
 
 interface PreparedSimulation {
@@ -133,13 +144,16 @@ export class ConfigSyncService {
     const errors: string[] = [];
     const liveState: { battery_soc?: number | null } = {};
 
-    // EVCC removed; start with empty and rely on market data
     let forecast: Record<string, unknown>[] = [];
     let priceSnapshot: number | null = null;
     let solarForecast: Record<string, unknown>[] = [];
 
     const marketResult = await this.collectFromMarket(configFile.market_data, simulationConfig, warnings);
     const futureMarketForecast = this.filterFutureEntries(marketResult.forecast);
+
+    const evccResult = await this.collectFromEvcc(configFile.evcc, warnings);
+    const futureEvccForecast = this.filterFutureEntries(evccResult.forecast);
+    const futureSolarForecast = this.filterFutureEntries(evccResult.solarForecast);
 
     const preferMarket = this.resolveBoolean(configFile.market_data?.prefer_market, true);
     this.logger.log(
@@ -155,15 +169,33 @@ export class ConfigSyncService {
       priceSnapshot = marketResult.priceSnapshot ?? priceSnapshot;
     }
 
+    if (!forecast.length && futureEvccForecast.length) {
+      forecast = [...futureEvccForecast];
+    }
+
+    if (evccResult.batterySoc !== null) {
+      liveState.battery_soc = evccResult.batterySoc;
+    }
+
+    if (evccResult.priceSnapshot !== null) {
+      priceSnapshot = priceSnapshot ?? evccResult.priceSnapshot;
+    }
+
+    if (futureSolarForecast.length) {
+      solarForecast = futureSolarForecast;
+    }
+
     if (!forecast.length) {
       const message = "Unable to retrieve a price forecast from market data endpoint.";
       errors.push(message);
       this.logger.warn(message);
     }
 
+    const canonicalForecast = futureEvccForecast.length ? futureEvccForecast : forecast;
+
     const { forecastEntries, eras } = this.buildForecastEras(
-      forecast,
-      [],
+      canonicalForecast,
+      futureEvccForecast,
       futureMarketForecast,
       solarForecast,
     );
@@ -234,7 +266,105 @@ export class ConfigSyncService {
     return simulationConfig;
   }
 
-  // EVCC collection removed
+  private async collectFromEvcc(
+    evccConfig: EvccConfig | undefined,
+    warnings: string[],
+  ): Promise<{
+    forecast: Record<string, unknown>[];
+    solarForecast: Record<string, unknown>[];
+    priceSnapshot: number | null;
+    batterySoc: number | null;
+  }> {
+    const enabled = this.resolveBoolean(evccConfig?.enabled, true);
+    if (!enabled) {
+      warnings.push("EVCC data fetch disabled in config.");
+      this.logger.warn("EVCC data fetch disabled in config.");
+      return {
+        forecast: [],
+        solarForecast: [],
+        priceSnapshot: null,
+        batterySoc: null,
+      };
+    }
+
+    const baseUrl = this.resolveString(evccConfig?.base_url ?? evccConfig?.baseUrl);
+    if (!baseUrl) {
+      const message = "EVCC base_url not configured; skipping EVCC forecast.";
+      warnings.push(message);
+      this.logger.warn(message);
+      return {
+        forecast: [],
+        solarForecast: [],
+        priceSnapshot: null,
+        batterySoc: null,
+      };
+    }
+
+    let endpoint: string;
+    try {
+      endpoint = new URL("/api/state", baseUrl).toString();
+    } catch (error) {
+      const message = `Invalid EVCC base_url (${baseUrl}): ${this.describeError(error)}`;
+      warnings.push(message);
+      this.logger.warn(message);
+      return {
+        forecast: [],
+        solarForecast: [],
+        priceSnapshot: null,
+        batterySoc: null,
+      };
+    }
+
+    const timeoutMs =
+      this.resolveNumber(evccConfig?.timeout_ms ?? evccConfig?.timeoutMs, REQUEST_TIMEOUT_MS) ??
+      REQUEST_TIMEOUT_MS;
+    const token = this.resolveString(evccConfig?.token);
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    try {
+      this.logger.log(`Fetching EVCC state from ${endpoint}`);
+      const payload = await this.fetchJson(endpoint, timeoutMs, {
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+      if (!payload || typeof payload !== "object") {
+        const message = "EVCC response was empty.";
+        warnings.push(message);
+        this.logger.warn(message);
+        return {
+          forecast: [],
+          solarForecast: [],
+          priceSnapshot: null,
+          batterySoc: null,
+        };
+      }
+
+      const record = payload as Record<string, unknown>;
+      const forecast = extractForecastFromState(record);
+      const solarForecast = extractSolarForecastFromState(record);
+      const batterySoc = this.extractBatterySoc(record);
+      const priceSnapshot = this.extractPriceFromState(record);
+
+      return {
+        forecast,
+        solarForecast,
+        priceSnapshot,
+        batterySoc,
+      };
+    } catch (error) {
+      const message = `EVCC data fetch failed: ${this.describeError(error)}`;
+      warnings.push(message);
+      this.logger.warn(message);
+      return {
+        forecast: [],
+        solarForecast: [],
+        priceSnapshot: null,
+        batterySoc: null,
+      };
+    }
+  }
 
   private async collectFromMarket(
     marketConfig: ConfigSection | undefined,
@@ -626,11 +756,11 @@ export class ConfigSyncService {
     return this.applyGridFee(basePrice, simulationConfig);
   }
 
-  private async fetchJson(url: string, timeoutMs: number): Promise<unknown> {
+  private async fetchJson(url: string, timeoutMs: number, init?: RequestInit): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, { ...(init ?? {}), signal: controller.signal });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`);
       }
