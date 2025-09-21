@@ -54,8 +54,8 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
           <span className="value">{formatPercent(data.recommended_final_soc_percent)}</span>
         </div>
         <div className="metric">
-          <span className="label">Current Strategy</span>
-          <span className="value small">{actionLabel}</span>
+          <span className="label">Baseline Cost</span>
+          <span className="value small">{formatNumber(data.baseline_cost_eur, " €")}</span>
         </div>
         <div className="metric">
           <span className="label">Price Snapshot</span>
@@ -64,6 +64,10 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
         <div className="metric">
           <span className="label">Projected Cost</span>
           <span className="value small">{formatNumber(data.projected_cost_eur, " €")}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Projected Savings</span>
+          <span className="value small">{formatNumber(data.projected_savings_eur, " €")}</span>
         </div>
         <div className="metric">
           <span className="label">Projected Grid Energy</span>

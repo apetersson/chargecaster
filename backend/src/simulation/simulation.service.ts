@@ -15,6 +15,7 @@ import type {
 import { StorageService } from "../storage/storage.service.js";
 
 const SOC_STEPS = 100;
+const SLOT_DURATION_MS = 3_600_000;
 
 export interface SimulationInput {
   config: SimulationConfig;
@@ -23,6 +24,7 @@ export interface SimulationInput {
   warnings?: string[];
   errors?: string[];
   priceSnapshotEurPerKwh?: number | null;
+  solarForecast?: Record<string, unknown>[];
 }
 
 @Injectable()
@@ -90,6 +92,8 @@ export class SimulationService {
       recommended_final_soc_percent: snapshot.recommended_final_soc_percent,
       price_snapshot_eur_per_kwh: snapshot.price_snapshot_eur_per_kwh,
       projected_cost_eur: snapshot.projected_cost_eur,
+      baseline_cost_eur: snapshot.baseline_cost_eur,
+      projected_savings_eur: snapshot.projected_savings_eur,
       projected_grid_energy_kwh: snapshot.projected_grid_energy_kwh,
       forecast_hours: snapshot.forecast_hours,
       forecast_samples: snapshot.forecast_samples,
@@ -121,7 +125,20 @@ export class SimulationService {
       throw new Error("Storage service not initialised");
     }
     const slots = normalizePriceSlots(input.forecast);
-    const result = simulateOptimalSchedule(input.config, input.liveState, slots);
+    const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
+    const solarMap = new Map<number, number>();
+    for (const slot of solarSlots) {
+      const key = Math.round(slot.start.getTime() / SLOT_DURATION_MS);
+      const available = Math.max(0, slot.energy_kwh * 0.4);
+      solarMap.set(key, available);
+    }
+
+    const solarAvailability = slots.map((slot) => {
+      const key = Math.round(slot.start.getTime() / SLOT_DURATION_MS);
+      return solarMap.get(key) ?? 0;
+    });
+
+    const result = simulateOptimalSchedule(input.config, input.liveState, slots, solarAvailability);
     const priceSnapshot =
       input.priceSnapshotEurPerKwh ?? result.trajectory[0]?.price_eur_per_kwh ?? null;
     const warnings = Array.isArray(input.warnings) ? [...input.warnings] : [];
@@ -136,6 +153,8 @@ export class SimulationService {
       recommended_final_soc_percent: result.recommended_final_soc_percent,
       price_snapshot_eur_per_kwh: priceSnapshot,
       projected_cost_eur: result.projected_cost_eur,
+      baseline_cost_eur: result.baseline_cost_eur,
+      projected_savings_eur: result.projected_savings_eur,
       projected_grid_energy_kwh: result.projected_grid_energy_kwh,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
@@ -257,6 +276,32 @@ function normalizePriceSlots(raw: Record<string, unknown>[]): PriceSlot[] {
   return [...slotsByStart.values()].sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
+interface SolarSlot {
+  start: Date;
+  end: Date;
+  energy_kwh: number;
+}
+
+function normalizeSolarSlots(raw: Record<string, unknown>[]): SolarSlot[] {
+  const slots: SolarSlot[] = [];
+  for (const entry of raw) {
+    if (!entry) continue;
+    const record = entry as { start?: unknown; end?: unknown; energy_kwh?: unknown };
+    const start = parseTimestamp(record.start);
+    if (!start) {
+      continue;
+    }
+    const end = parseTimestamp(record.end) ?? new Date(start.getTime() + SLOT_DURATION_MS);
+    const energy = Number(record.energy_kwh ?? 0);
+    if (!Number.isFinite(energy) || energy <= 0) {
+      continue;
+    }
+    slots.push({ start, end, energy_kwh: energy });
+  }
+
+  return slots.sort((a, b) => a.start.getTime() - b.start.getTime());
+}
+
 function normalizePriceValue(value: unknown, unit: unknown): number | null {
   if (value == null) {
     return null;
@@ -301,6 +346,8 @@ interface SimulationOutput {
   recommended_final_soc_percent: number;
   simulation_runs: number;
   projected_cost_eur: number;
+  baseline_cost_eur: number;
+  projected_savings_eur: number;
   projected_grid_energy_kwh: number;
   average_price_eur_per_kwh: number;
   forecast_samples: number;
@@ -315,6 +362,7 @@ function simulateOptimalSchedule(
   cfg: SimulationConfig,
   liveState: { battery_soc?: number | null },
   slots: PriceSlot[],
+  solarAvailability: number[] = [],
 ): SimulationOutput {
   if (slots.length === 0) {
     throw new Error("price forecast is empty");
@@ -366,9 +414,11 @@ function simulateOptimalSchedule(
     const loadEnergy = (houseLoadWatts / 1000) * duration;
     const chargeLimitKwh = (maxChargePowerW / 1000) * duration;
     const priceTotal = slot.price + networkTariff;
+    const solarKwh = solarAvailability[idx] ?? 0;
+    const netLoadEnergy = Math.max(0, loadEnergy - solarKwh);
 
     const maxChargeSteps = Math.floor(chargeLimitKwh / energyPerStep + 1e-9);
-    const maxDischargeSteps = Math.floor(loadEnergy / energyPerStep + 1e-9);
+    const maxDischargeSteps = Math.floor(netLoadEnergy / energyPerStep + 1e-9);
 
     for (let state = 0; state < numStates; state += 1) {
       let bestCost = Number.POSITIVE_INFINITY;
@@ -380,11 +430,12 @@ function simulateOptimalSchedule(
       for (let delta = -downLimit; delta <= upLimit; delta += 1) {
         const nextState = state + delta;
         const energyChange = delta * energyPerStep;
-        const gridEnergy = loadEnergy + energyChange;
-        if (gridEnergy < -1e-9) {
+        const gridEnergyRaw = netLoadEnergy + energyChange;
+        if (gridEnergyRaw < -1e-9) {
           continue;
         }
-        const slotCost = priceTotal * Math.max(gridEnergy, 0);
+        const gridEnergy = Math.max(gridEnergyRaw, 0);
+        const slotCost = priceTotal * gridEnergy;
         const totalCost = slotCost + dp[idx + 1][nextState];
         if (totalCost < bestCost) {
           bestCost = totalCost;
@@ -408,6 +459,7 @@ function simulateOptimalSchedule(
   const path = [currentState];
   let gridEnergyTotal = 0;
   let costTotal = 0;
+  let baselineCost = 0;
   let stateIter = currentState;
   const trajectory: TrajectoryPoint[] = [];
 
@@ -417,7 +469,10 @@ function simulateOptimalSchedule(
     const delta = nextState - stateIter;
     const energyChange = delta * energyPerStep;
     const loadEnergy = (houseLoadWatts / 1000) * slot.durationHours;
-    let gridEnergy = loadEnergy + energyChange;
+    const solarKwh = solarAvailability[idx] ?? 0;
+    const netLoadEnergy = Math.max(0, loadEnergy - solarKwh);
+    baselineCost += (slot.price + networkTariff) * netLoadEnergy;
+    let gridEnergy = netLoadEnergy + energyChange;
     if (gridEnergy < 0) gridEnergy = 0;
     costTotal += (slot.price + networkTariff) * gridEnergy;
     gridEnergyTotal += gridEnergy;
@@ -437,6 +492,9 @@ function simulateOptimalSchedule(
 
   const finalEnergy = path[path.length - 1] * energyPerStep;
   costTotal -= avgPrice * finalEnergy;
+  baselineCost -= avgPrice * finalEnergy;
+
+  const projectedSavings = baselineCost - costTotal;
 
   const nextState = path[1] ?? path[0];
   const recommendedTarget = path[path.length - 1] * percentStep;
@@ -448,6 +506,8 @@ function simulateOptimalSchedule(
     recommended_final_soc_percent: recommendedTarget,
     simulation_runs: SOC_STEPS,
     projected_cost_eur: costTotal,
+    baseline_cost_eur: baselineCost,
+    projected_savings_eur: projectedSavings,
     projected_grid_energy_kwh: gridEnergyTotal,
     average_price_eur_per_kwh: avgPrice,
     forecast_samples: slots.length,

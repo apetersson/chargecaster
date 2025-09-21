@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import {
+  BarController,
+  BarElement,
   Chart,
   Filler,
   Legend,
@@ -7,10 +9,12 @@ import {
   LineElement,
   LinearScale,
   PointElement,
+  ScatterController,
   TimeScale,
   Tooltip,
   type ChartDataset,
   type ChartOptions,
+  type Plugin,
   type ScatterDataPoint,
   type ScriptableContext,
 } from "chart.js";
@@ -25,8 +29,11 @@ import {
 } from "../utils/format";
 
 Chart.register(
+  BarController,
+  BarElement,
   LineController,
   LineElement,
+  ScatterController,
   PointElement,
   LinearScale,
   TimeScale,
@@ -39,6 +46,7 @@ type SeriesSource = "history" | "forecast" | "gap";
 
 interface ProjectionPoint extends ScatterDataPoint {
   source: SeriesSource;
+  xEnd?: number | null;
 }
 
 interface AxisBounds {
@@ -60,6 +68,9 @@ const PRICE_FILL = "rgba(56, 189, 248, 0.15)";
 const GRID_COLOR = "rgba(148, 163, 184, 0.25)";
 const TICK_COLOR = "#64748b";
 const LEGEND_COLOR = "#475569";
+const PRICE_HISTORY_BAR_BG = "rgba(148, 163, 184, 0.3)";
+const PRICE_HISTORY_BAR_BORDER = "rgba(100, 116, 139, 1)";
+const DEFAULT_SLOT_DURATION_MS = 3_600_000;
 
 const DEFAULT_SOC_BOUNDS = { min: 0, max: 100 };
 const DEFAULT_GRID_BOUNDS = { min: 0, max: 1 };
@@ -77,12 +88,24 @@ const parseTimestamp = (value: string | null | undefined): number | null => {
   return Number.isFinite(time) ? time : null;
 };
 
-const sortTrajectory = (trajectory: TrajectoryPoint[]) =>
-  [...trajectory].sort((a, b) => {
+const filterFutureTrajectory = (trajectory: TrajectoryPoint[]): TrajectoryPoint[] => {
+  const now = Date.now();
+  return [...trajectory].filter((slot) => {
+    const start = parseTimestamp(slot.start);
+    const end = parseTimestamp(slot.end);
+    if (!start || !end) {
+      return false;
+    }
+    if (end <= now) {
+      return false;
+    }
+    return start > now;
+  }).sort((a, b) => {
     const startA = parseTimestamp(a.start) ?? 0;
     const startB = parseTimestamp(b.start) ?? 0;
     return startA - startB;
   });
+};
 
 const toHistoryPoint = (
   timestamp: string,
@@ -103,6 +126,7 @@ const toHistoryPoint = (
 const toForecastPoint = (
   timestamp: string,
   value: number | null | undefined,
+  endTimestamp?: string,
 ): ProjectionPoint | null => {
   if (!isFiniteNumber(value)) {
     return null;
@@ -113,7 +137,8 @@ const toForecastPoint = (
     return null;
   }
 
-  return { x: time, y: value, source: "forecast" };
+  const xEnd = parseTimestamp(endTimestamp ?? null);
+  return { x: time, xEnd, y: value, source: "forecast" };
 };
 
 const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
@@ -214,16 +239,14 @@ const computeBounds = (
 
 const buildSocSeries = (
   history: HistoryPoint[],
-  trajectory: TrajectoryPoint[],
+  futureTrajectory: TrajectoryPoint[],
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.battery_soc_percent))
     .filter((point): point is ProjectionPoint => point !== null);
 
   const futurePoints: ProjectionPoint[] = [];
-  const sortedTrajectory = sortTrajectory(trajectory);
-
-  for (const slot of sortedTrajectory) {
+  for (const slot of futureTrajectory) {
     addPoint(futurePoints, toForecastPoint(slot.start, slot.soc_start_percent));
     addPoint(futurePoints, toForecastPoint(slot.end, slot.soc_end_percent));
   }
@@ -233,40 +256,59 @@ const buildSocSeries = (
 
 const buildGridSeries = (
   history: HistoryPoint[],
-  trajectory: TrajectoryPoint[],
+  futureTrajectory: TrajectoryPoint[],
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.grid_energy_kwh))
     .filter((point): point is ProjectionPoint => point !== null);
 
-  const futurePoints: ProjectionPoint[] = [];
-  const sortedTrajectory = sortTrajectory(trajectory);
+  const futurePoints: ProjectionPoint[] = futureTrajectory
+    .map((slot) => {
+      const start = parseTimestamp(slot.start);
+      const end = parseTimestamp(slot.end);
+      if (start === null || end === null || end <= start) {
+        return null;
+      }
+      const midpoint = start + (end - start) / 2;
+      return { x: midpoint, y: slot.grid_energy_kwh, source: "forecast" as SeriesSource } satisfies ProjectionPoint;
+    })
+    .filter((value): value is ProjectionPoint => value !== null);
 
-  for (const slot of sortedTrajectory) {
-    addPoint(futurePoints, toForecastPoint(slot.start, slot.grid_energy_kwh));
-    addPoint(futurePoints, toForecastPoint(slot.end, slot.grid_energy_kwh));
-  }
-
-  return buildCombinedSeries(historyPoints, futurePoints);
+  return [...historyPoints, ...futurePoints];
 };
 
 const buildPriceSeries = (
   history: HistoryPoint[],
-  trajectory: TrajectoryPoint[],
+  futureTrajectory: TrajectoryPoint[],
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.price_eur_per_kwh))
     .filter((point): point is ProjectionPoint => point !== null);
-
-  const futurePoints: ProjectionPoint[] = [];
-  const sortedTrajectory = sortTrajectory(trajectory);
-
-  for (const slot of sortedTrajectory) {
-    addPoint(futurePoints, toForecastPoint(slot.start, slot.price_eur_per_kwh));
-    addPoint(futurePoints, toForecastPoint(slot.end, slot.price_eur_per_kwh));
+  const sortedHistory = sortChronologically(historyPoints);
+  for (let i = 0; i < sortedHistory.length; i += 1) {
+    const current = sortedHistory[i];
+    const next = sortedHistory[i + 1];
+    const fallbackStart = parseTimestamp(futureTrajectory[0]?.start) ?? current.x + DEFAULT_SLOT_DURATION_MS;
+    const rawEnd = next?.x ?? fallbackStart;
+    current.xEnd = rawEnd > current.x ? rawEnd : current.x + DEFAULT_SLOT_DURATION_MS;
   }
 
-  return buildCombinedSeries(historyPoints, futurePoints);
+  const futurePoints: ProjectionPoint[] = [];
+  for (const slot of futureTrajectory) {
+    const start = parseTimestamp(slot.start);
+    const end = parseTimestamp(slot.end);
+    if (start === null || end === null) {
+      continue;
+    }
+    futurePoints.push({
+      x: start,
+      xEnd: end,
+      y: slot.price_eur_per_kwh,
+      source: "forecast",
+    });
+  }
+
+  return [...sortedHistory, ...futurePoints];
 };
 
 const resolvePointColor = (
@@ -351,11 +393,92 @@ const resolveSegmentBackground = (
   return source === "history" ? HISTORY_FILL : accentFill;
 };
 
+const isProjectionPoint = (value: unknown): value is ProjectionPoint =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      "x" in value &&
+      "source" in value,
+  );
+
+const resolveBarColors = (
+  point: unknown,
+  forecastColor: string,
+  historyColor: string,
+) => {
+  if (!isProjectionPoint(point) || typeof point.y !== "number" || Number.isNaN(point.y)) {
+    return "rgba(0,0,0,0)";
+  }
+  return point.source === "history" ? historyColor : forecastColor;
+};
+
+const priceBarPlugin: Plugin = {
+  id: "price-bar-plugin",
+  beforeDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.price;
+    if (!xScale || !yScale) {
+      return;
+    }
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      if (dataset.label !== "Tariff") {
+        return;
+      }
+
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (meta.hidden) {
+        return;
+      }
+
+      const points = dataset.data as ProjectionPoint[];
+      for (const point of points) {
+        const value = point.y;
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          continue;
+        }
+        const startValue = point.x;
+        if (typeof startValue !== "number" || Number.isNaN(startValue)) {
+          continue;
+        }
+        const endValue = typeof point.xEnd === "number" && Number.isFinite(point.xEnd)
+          ? point.xEnd
+          : startValue + DEFAULT_SLOT_DURATION_MS;
+        const left = xScale.getPixelForValue(startValue);
+        const right = xScale.getPixelForValue(endValue);
+        const top = yScale.getPixelForValue(value);
+        const base = yScale.getPixelForValue(0);
+
+        const barLeft = Math.min(left, right);
+        const barWidth = Math.max(1, Math.abs(right - left));
+        const barTop = Math.min(top, base);
+        const barHeight = Math.max(1, Math.abs(base - top));
+
+        ctx.save();
+        ctx.fillStyle = resolveBarColors(point, PRICE_FILL, PRICE_HISTORY_BAR_BG);
+        ctx.strokeStyle = resolveBarColors(point, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.rect(barLeft, barTop, barWidth, barHeight);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    });
+  },
+};
+
+Chart.register(priceBarPlugin);
+
 const buildDatasets = (
   history: HistoryPoint[],
   trajectory: TrajectoryPoint[],
 ): {
-  datasets: ChartDataset<"line", ProjectionPoint[]>[];
+  datasets: Array<
+    | ChartDataset<"line", ProjectionPoint[]>
+    | ChartDataset<"scatter", ProjectionPoint[]>
+  >;
   bounds: {
     soc: AxisBounds;
     grid: AxisBounds;
@@ -363,11 +486,15 @@ const buildDatasets = (
   };
   timeRange: { min: number | null; max: number | null };
 } => {
-  const socSeries = buildSocSeries(history, trajectory);
-  const gridSeries = buildGridSeries(history, trajectory);
-  const priceSeries = buildPriceSeries(history, trajectory);
+  const futureTrajectory = filterFutureTrajectory(trajectory);
+  const socSeries = buildSocSeries(history, futureTrajectory);
+  const gridSeries = buildGridSeries(history, futureTrajectory);
+  const priceSeries = buildPriceSeries(history, futureTrajectory);
 
-  const datasets: ChartDataset<"line", ProjectionPoint[]>[] = [
+  const datasets: Array<
+    | ChartDataset<"line", ProjectionPoint[]>
+    | ChartDataset<"scatter", ProjectionPoint[]>
+  > = [
     {
       type: "line",
       label: "State of Charge",
@@ -389,7 +516,7 @@ const buildDatasets = (
     },
     {
       type: "line",
-      label: "Grid Energy",
+      label: "Energy from Grid",
       data: gridSeries,
       yAxisID: "grid",
       fill: "origin",
@@ -397,8 +524,8 @@ const buildDatasets = (
       spanGaps: false,
       borderWidth: 2,
       pointBorderWidth: 1,
-      pointRadius: resolvePointRadius,
-      pointHoverRadius: resolveHoverRadius,
+      pointRadius: 0,
+      pointHoverRadius: 0,
       pointBackgroundColor: (ctx) => resolvePointColor(ctx, GRID_BORDER),
       pointBorderColor: (ctx) => resolvePointColor(ctx, GRID_BORDER),
       segment: {
@@ -407,23 +534,50 @@ const buildDatasets = (
       },
     },
     {
+      type: "scatter",
+      label: "Grid Energy Markers",
+      data: (() => {
+        const historyDots = gridSeries
+          .filter((point) => point.source === "history")
+          .map((point) => ({ ...point }));
+        const futureDots = futureTrajectory
+          .map((slot) => {
+            const start = parseTimestamp(slot.start);
+            const end = parseTimestamp(slot.end);
+            if (start === null || end === null || end <= start) {
+              return null;
+            }
+            const midpoint = start + (end - start) / 2;
+            return {
+              x: midpoint,
+              y: slot.grid_energy_kwh,
+              source: "forecast" as SeriesSource,
+            } satisfies ProjectionPoint;
+          })
+          .filter((value): value is ProjectionPoint => value !== null);
+        return [...historyDots, ...futureDots];
+      })(),
+      yAxisID: "grid",
+      showLine: false,
+      pointRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 5 : 3),
+      pointHoverRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 7 : 5),
+      pointBackgroundColor: ({ raw }) =>
+        resolveBarColors(raw, GRID_BORDER, HISTORY_POINT),
+      pointBorderColor: ({ raw }) => resolveBarColors(raw, GRID_BORDER, HISTORY_BORDER),
+    },
+    {
       type: "line",
       label: "Tariff",
       data: priceSeries,
       yAxisID: "price",
-      fill: "origin",
-      tension: 0.3,
-      spanGaps: false,
-      borderWidth: 2,
-      pointBorderWidth: 1,
-      pointRadius: resolvePointRadius,
-      pointHoverRadius: resolveHoverRadius,
-      pointBackgroundColor: (ctx) => resolvePointColor(ctx, PRICE_BORDER),
-      pointBorderColor: (ctx) => resolvePointColor(ctx, PRICE_BORDER),
-      segment: {
-        borderColor: (ctx) => resolveSegmentBorder(ctx, PRICE_BORDER),
-        backgroundColor: (ctx) => resolveSegmentBackground(ctx, PRICE_FILL),
-      },
+      showLine: false,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHitRadius: 6,
+      pointHoverBackgroundColor: ({ raw }) =>
+        resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
+      pointHoverBorderColor: ({ raw }) =>
+        resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
     },
   ];
 
