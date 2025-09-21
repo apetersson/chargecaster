@@ -78,9 +78,8 @@ const PRICE_HISTORY_BAR_BORDER = "rgba(100, 116, 139, 1)";
 const DEFAULT_SLOT_DURATION_MS = 3_600_000;
 
 const DEFAULT_SOC_BOUNDS = { min: 0, max: 100 };
-const DEFAULT_GRID_BOUNDS = { min: -5000, max: 5000 };
+const DEFAULT_POWER_BOUNDS = { min: -5000, max: 15000 };
 const DEFAULT_PRICE_BOUNDS = { min: 0, max: 50 };
-const DEFAULT_SOLAR_BOUNDS = { min: 0, max: 15000 };
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -355,6 +354,15 @@ const computeBounds = (
   return { min, max, dataMin, dataMax };
 };
 
+const includeZeroInBounds = (bounds: AxisBounds): AxisBounds => {
+  const min = Math.min(bounds.min, 0);
+  const max = Math.max(bounds.max, 0);
+  if (min === bounds.min && max === bounds.max) {
+    return bounds;
+  }
+  return { ...bounds, min, max };
+};
+
 const resolveInitialSoc = (
   summary: SnapshotSummary | null,
   historyPoints: ProjectionPoint[],
@@ -417,16 +425,31 @@ const buildGridSeries = (
   return [...historyPoints, ...futurePoints];
 };
 
-const buildSolarSeries = (futureEras: DerivedEra[]): ProjectionPoint[] => {
-  const points: ProjectionPoint[] = [];
+const buildSolarSeries = (
+  history: HistoryPoint[],
+  futureEras: DerivedEra[],
+): ProjectionPoint[] => {
+  const historyPoints = history
+    .map((entry) => {
+      const value = isFiniteNumber(entry.solar_power_w)
+        ? entry.solar_power_w
+        : isFiniteNumber(entry.solar_energy_wh)
+          ? entry.solar_energy_wh
+          : null;
+      return toHistoryPoint(entry.timestamp, value);
+    })
+    .filter((point): point is ProjectionPoint => point !== null);
+
+  const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
     if (!isFiniteNumber(era.solarAverageW)) {
       continue;
     }
     const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
-    points.push({ x: midpoint, y: era.solarAverageW, source: "forecast" });
+    futurePoints.push({ x: midpoint, y: era.solarAverageW, source: "forecast" });
   }
-  return points;
+
+  return [...historyPoints, ...futurePoints];
 };
 
 const buildPriceSeries = (
@@ -641,9 +664,7 @@ const buildDatasets = (
 ): {
   datasets: ChartDataset<"line", ProjectionPoint[]>[];
   bounds: {
-    soc: AxisBounds;
-    grid: AxisBounds;
-    solar: AxisBounds;
+    power: AxisBounds;
     price: AxisBounds;
   };
   timeRange: { min: number | null; max: number | null };
@@ -651,8 +672,9 @@ const buildDatasets = (
   const futureEras = buildFutureEras(forecast, oracleEntries);
   const socSeries = buildSocSeries(history, futureEras, summary);
   const gridSeries = buildGridSeries(history, futureEras);
-  const solarSeries = buildSolarSeries(futureEras);
+  const solarSeries = buildSolarSeries(history, futureEras);
   const priceSeries = buildPriceSeries(history, futureEras);
+  const powerSeries = [...gridSeries, ...solarSeries];
 
   const datasets: ChartDataset<"line", ProjectionPoint[]>[] = [
     {
@@ -678,7 +700,7 @@ const buildDatasets = (
       type: "line",
       label: "Grid Power",
       data: gridSeries,
-      yAxisID: "grid",
+      yAxisID: "power",
       fill: "origin",
       tension: 0.3,
       spanGaps: false,
@@ -697,7 +719,7 @@ const buildDatasets = (
       type: "line",
       label: "Solar Generation",
       data: solarSeries,
-      yAxisID: "solar",
+      yAxisID: "power",
       fill: "origin",
       tension: 0.3,
       spanGaps: false,
@@ -716,7 +738,7 @@ const buildDatasets = (
       type: "line",
       label: GRID_MARKERS_LABEL,
       data: gridSeries.map((point) => ({ ...point })),
-      yAxisID: "grid",
+      yAxisID: "power",
       showLine: false,
       pointRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 5 : 3),
       pointHoverRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 7 : 5),
@@ -749,18 +771,14 @@ const buildDatasets = (
     },
   ];
 
-  const socBounds = computeBounds(socSeries, DEFAULT_SOC_BOUNDS);
-  const gridBounds = computeBounds(gridSeries, DEFAULT_GRID_BOUNDS);
-  const solarBounds = computeBounds(solarSeries, DEFAULT_SOLAR_BOUNDS);
-  const priceBounds = computeBounds(priceSeries, DEFAULT_PRICE_BOUNDS);
+  const powerBounds = includeZeroInBounds(computeBounds(powerSeries, DEFAULT_POWER_BOUNDS));
+  const priceBounds = includeZeroInBounds(computeBounds(priceSeries, DEFAULT_PRICE_BOUNDS));
   const timeRange = findTimeRange(socSeries, gridSeries, solarSeries, priceSeries);
 
   return {
     datasets,
     bounds: {
-      soc: socBounds,
-      grid: gridBounds,
-      solar: solarBounds,
+      power: powerBounds,
       price: priceBounds,
     },
     timeRange,
@@ -769,9 +787,7 @@ const buildDatasets = (
 
 const buildOptions = (config: {
   bounds: {
-    soc: AxisBounds;
-    grid: AxisBounds;
-    solar: AxisBounds;
+    power: AxisBounds;
     price: AxisBounds;
   };
   timeRange: { min: number | null; max: number | null };
@@ -814,10 +830,7 @@ const buildOptions = (config: {
           if (dataset.yAxisID === "soc") {
             return `${baseLabel}${percentFormatter.format(value)}%`;
           }
-          if (dataset.yAxisID === "grid") {
-            return `${baseLabel}${numberFormatter.format(value)} W`;
-          }
-          if (dataset.yAxisID === "solar") {
+          if (dataset.yAxisID === "power") {
             return `${baseLabel}${numberFormatter.format(value)} W`;
           }
           if (dataset.yAxisID === "price") {
@@ -862,6 +875,7 @@ const buildOptions = (config: {
       position: "left",
       min: DEFAULT_SOC_BOUNDS.min,
       max: DEFAULT_SOC_BOUNDS.max,
+      display: false,
       ticks: {
         color: TICK_COLOR,
         callback: (value) => {
@@ -874,14 +888,14 @@ const buildOptions = (config: {
         },
       },
       grid: {
-        color: GRID_COLOR,
+        display: false,
       },
     },
-    grid: {
+    power: {
       type: "linear",
-      position: "right",
-      min: config.bounds.grid.min,
-      max: config.bounds.grid.max,
+      position: "left",
+      min: config.bounds.power.min,
+      max: config.bounds.power.max,
       ticks: {
         color: TICK_COLOR,
         callback: (value) => {
@@ -894,30 +908,15 @@ const buildOptions = (config: {
         },
       },
       grid: {
-        drawOnChartArea: false,
         color: GRID_COLOR,
       },
-    },
-    solar: {
-      type: "linear",
-      position: "right",
-      offset: true,
-      min: config.bounds.solar.min,
-      max: config.bounds.solar.max,
-      ticks: {
+      title: {
+        display: true,
+        text: "Watts",
         color: TICK_COLOR,
-        callback: (value) => {
-          const numeric =
-            typeof value === "number" ? value : Number(value);
-          if (!Number.isFinite(numeric)) {
-            return "";
-          }
-          return `${numberFormatter.format(numeric)} W`;
+        font: {
+          size: 12,
         },
-      },
-      grid: {
-        drawOnChartArea: false,
-        color: GRID_COLOR,
       },
     },
     price: {
@@ -939,6 +938,14 @@ const buildOptions = (config: {
       grid: {
         drawOnChartArea: false,
         color: GRID_COLOR,
+      },
+      title: {
+        display: true,
+        text: "ct/kWh",
+        color: TICK_COLOR,
+        font: {
+          size: 12,
+        },
       },
     },
   },
