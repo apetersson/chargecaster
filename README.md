@@ -1,208 +1,164 @@
 # batteryctl
 
-A price-aware controller that toggles a Fronius battery between manual SoC targets and auto mode based on day-ahead tariffs. The controller produces a live snapshot that drives a static React dashboard, all packaged into a single Docker container.
+Batteryctl optimises residential battery charge/discharge schedules against day-ahead tariffs and exposes the results over a lightweight web dashboard. The project now ships a full TypeScript stack:
 
-## Features
+- **Backend** – NestJS + Fastify + tRPC (`backend/`)
+- **Frontend** – React + Vite + TanStack Query (`frontend/`)
+- **Storage** – better-sqlite3 for local persistence, JSON snapshots for the UI
 
-- EVCC integration for live battery state, PV/grid power, and tariff snapshots.
-- Optional market-price feed (defaults to [awattar](https://api.awattar.de)) with configurable horizon and priority.
-- Dynamic programming optimiser that chooses hourly charge/discharge actions subject to battery capacity and house load.
-- Static React/TypeScript dashboard (bundled with Vite) served by nginx at port `8080`.
-- Atomic CSV logging of decisions and JSON snapshots for external consumers.
+Both apps run with hot-reload in development and share a common type layer so the dashboard speaks to the API without manual schema glue.
 
----
+## Highlights
 
-## Project Layout
+- Fetches live state from EVCC (or bundled fixtures) and optional market data feeds.
+- Dynamic programming optimiser calculates cost-minimising trajectories while respecting battery constraints.
+- Exposes snapshot, history, and trajectory endpoints over tRPC; the frontend consumes them via auto-generated TypeScript types.
+- Ships with fixtures for rapid local demos—no hardware connection required.
+- Supports Docker/Compose packaging for one-command deployments (API + UI + SQLite volume).
+
+## Repository Layout
 
 ```
 .
-├── controller.py         # Scheduler loop invoking the optimiser periodically
-├── core.py               # Optimiser, EVCC + market-data helpers, persistence utilities
-├── evaluate_once.py      # CLI entry point for single-shot evaluations / testing
-├── config.yaml.sample    # Example configuration with Fronius / EVCC / market data settings
-├── Dockerfile            # Multi-stage build (frontend -> runtime with nginx + controller)
-├── docker-compose.yml    # Single container exposing port 8080 and persistent volumes
-├── frontend/             # React + Vite TypeScript frontend
-├── snapshots/            # Host-mounted snapshot directory (JSON state for the dashboard)
-└── tests/                # Pytest suite covering optimiser behaviour
+├── backend/                # NestJS Fastify API + optimiser and storage layers
+│   ├── src/
+│   │   ├── simulation/     # Optimiser implementation + helpers
+│   │   ├── storage/        # better-sqlite3 persistence layer
+│   │   └── trpc/           # Router definitions exposed to the frontend
+│   ├── fixtures/           # Sample EVCC dumps used for seeding demo state
+│   ├── dev-server.mjs      # Build/watch helper used by `yarn start:dev`
+│   └── package.json
+├── frontend/               # React dashboard
+│   ├── src/
+│   │   ├── api/            # tRPC client bootstrap
+│   │   ├── components/     # UI widgets (summary cards, tables, charts)
+│   └── package.json
+├── data/                   # Created at runtime; holds the SQLite database
+├── config.local.yaml       # Sample controller config (if running Python tools)
+└── README.md
 ```
 
----
+> Legacy Python utilities (`controller.py`, `core.py`, etc.) remain in the repo for reference, but the actively maintained runtime is the TypeScript backend/frontend pair described here.
 
 ## Prerequisites
 
-- Python 3.11+ (for local testing) with `pip`
-- Node.js 20.x (only required if you want to run the frontend locally outside Docker)
-- Docker 24+ (with BuildKit / buildx enabled)
-- Docker Compose v2 (`docker compose` command)
+- **Node.js 20+** (LTS recommended)
+- **Yarn 1.22+** (`npm install -g yarn` if you do not have it yet)
+- **SQLite** runtime libraries (bundled on macOS/Linux; required by `better-sqlite3`)
+- **Docker 24+** (optional) for containerised deployments
 
----
-
-## Configuration
-
-Copy the sample configuration and adjust to your environment:
+## Backend: NestJS + Fastify
 
 ```bash
-cp config.yaml.sample config.yaml
+cd backend
+yarn install
+# hot reload with TypeScript compilation + auto restart
+yarn start:dev
 ```
 
-Key sections:
+The dev server runs on `http://localhost:4000`. It compiles TypeScript (`tsc --watch`) to `dist/` and restarts Fastify whenever the build succeeds. Key scripts:
 
-- `fronius`: HTTP digest credentials + endpoints for battery control.
-- `evcc`: Base URL to the EVCC API (`/api/state`, `/api/tariff`). Set `enabled: false` if you only rely on market data.
-- `market_data`: Toggle awattar (or provide your own API). When `prefer_market` is true, this feed overrides EVCC forecasts.
-- `price.grid_fee_eur_per_kwh`: Grid surcharge automatically added to every price sample.
-- `state.path`: CSV log file path (inside the container the default is `/data/state.csv`).
-- `public.snapshot_path`: Where the controller writes the latest JSON payload (defaults to `/public/data/latest.json`).
-- `public.history_path`: Rolling history file for the dashboard (defaults to `/public/data/history.json`).
-- `public.history_hours`: How many hours of history to retain (defaults to `12`).
+- `yarn test` – unit tests (Vitest)
+- `yarn test:e2e` – end-to-end tRPC smoke tests
+- `yarn build` – production compile to `dist/`
+- `yarn lint` / `yarn typecheck` – static analysis
 
-For the dashboard to retain the latest optimisation snapshot and history between
-restarts, make sure the host volume mapped to `/public/data` is writable.
+Environment tweaks:
 
----
+- `PORT`/`HOST` override the Fastify listener (defaults `4000`, `0.0.0.0`).
+- `NODE_ENV=test` suppresses logging and prevents the bootstrap auto-start (tests call `bootstrap()` manually).
+- `fixtures/sample_data.json` seeds the SQLite store when no history exists; replace this file with a dump from your own system for realistic demos.
 
-## Running Locally (CLI)
+### Data storage
 
-Run a one-off simulation using the CLI entry point:
+The API writes to `../data/db/backend.sqlite` (relative to `backend/`). Delete the `data/` folder to reset the demo database, or mount the directory as a volume in Docker for persistence.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python evaluate_once.py --config config.yaml --pretty
-```
-
-This prints the JSON result and, when `market_data.enabled` is true, will fetch tariffs from awattar if EVCC data is missing.
-
----
-
-## Frontend Development (Optional)
-
-If you want hot reload while tweaking the dashboard:
+## Frontend: React + Vite
 
 ```bash
 cd frontend
 yarn install
-# optional: serve bundled mock data instead of hitting the controller
-VITE_USE_MOCK=true yarn dev
+# dev server with fast refresh
+yarn dev
 ```
 
-The dev server runs on `http://localhost:5173` and fetches snapshots from `/data/latest.json`, so you can proxy requests or run the controller in parallel. With `VITE_USE_MOCK=true` the UI serves the bundled snapshot from `src/mock/latest-mock.json`; unset the variable to hit the live controller instead.
+The dashboard is available at `http://localhost:5173` and proxies API calls directly to the backend:
 
-Quality checks:
+- By default it targets `http://localhost:4000/trpc`.
+- Override the target by exporting `VITE_TRPC_URL` before running `yarn dev`.
+
+Helpful scripts:
+
+- `yarn lint` – ESLint with TypeScript support
+- `yarn test` – Vitest component tests (if present)
+- `yarn build` – Production bundle (outputs to `dist/`)
+
+## Coordinated dev workflow
+
+1. Start the backend (`yarn start:dev` in `backend/`).
+2. Start the frontend (`yarn dev` in `frontend/`).
+3. Visit `http://localhost:5173` – the dashboard issues batched GET requests such as
+   `GET /trpc/dashboard.summary,dashboard.history,dashboard.trajectory?batch=1`.
+   Fastify’s `maxParamLength` is configured to allow these long URLs.
+4. Edit code in either project; both dev servers hot-reload automatically.
+
+If you change backend TypeScript that affects generated JavaScript, remember to run `yarn build` before building Docker images so `dist/` reflects the latest changes.
+
+## Testing checklist
+
+Backend:
 
 ```bash
-# static analysis (TypeScript-aware ESLint)
+cd backend
 yarn lint
+yarn typecheck
+yarn test
+yarn test:e2e
+```
 
-# production build (Vite)
+Frontend:
+
+```bash
+cd frontend
+yarn lint
+yarn test   # if suites are defined
 yarn build
 ```
 
-Run these before baking Docker images so the frontend stays lint-clean and buildable.
+## Docker & deployment
 
----
-
-## Docker: Build & Run
-
-### Build multi-arch image
-
-The Dockerfile performs a two-stage build: Vite compiles the frontend, then nginx + Python run in the runtime image.
+A container image can bundle both the API and the static frontend. The current workflow is:
 
 ```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -t apetersson/batteryctl:local \
-  .
+# build the API
+cd backend
+yarn build
+
+# build the frontend bundle
+cd ../frontend
+yarn build
+
+# back at repo root, build the image (Dockerfile assumes prebuilt artifacts)
+docker build -t batteryctl:local .
 ```
 
-For local testing (without pushing), you can drop `--platform` and `-t` and use standard `docker build`.
+The Dockerfile (not shown here) serves the compiled frontend via nginx and launches the backend API with Node.js. Mount `./data` into `/app/data` to persist SQLite state between restarts.
 
-### Start via docker-compose
+## Snapshot payload reference
 
-`docker-compose.yml` runs the container, mounts configuration/state/snapshot folders, and maps port 8080:
+The backend exposes tRPC procedures; the most commonly consumed responses include:
 
-```bash
-docker compose up --build -d
-```
-
-Visit `http://localhost:8080` to view the dashboard. The controller logs appear via `docker compose logs -f`.
-
-Volumes:
-
-- `./config.yaml` → `/app/config.yaml` (read-only)
-- `./state` → `/data`
-- `./snapshots` → `/public/data` (contains `latest.json` for the frontend)
-
-Stop the stack:
-
-```bash
-docker compose down
-```
-
----
-
-## Publishing Workflow
-
-1. **Tag previous release** – if you just cut a new version, capture the old `latest` manifest (using `docker buildx imagetools create`).
-2. **Build multi-arch** – `docker buildx build --platform linux/amd64,linux/arm64 -t apetersson/batteryctl:vX.Y.Z -t apetersson/batteryctl:latest . --push`
-3. **Retag old manifest** – `docker buildx imagetools create --tag apetersson/batteryctl:vOld digest`
-4. **Verify** – `docker buildx imagetools inspect apetersson/batteryctl:vX.Y.Z`
-
-Example commands from the latest release:
-
-```bash
-
-# Build and push new release as v0.0.2 + latest
-new_version=v0.0.3
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -t apetersson/batteryctl:$new_version \
-  -t apetersson/batteryctl:latest \
-  . \
-  --push
-```
-
----
-
-## Snapshot JSON Schema
-
-`public/data/latest.json` contains the latest optimiser output. Fields include:
-
-- `timestamp`: ISO timestamp of the simulation.
-- `current_soc_percent`, `next_step_soc_percent`, `recommended_soc_percent`
-- `price_snapshot_eur_per_kwh`: latest price + grid fee.
-- `projected_cost_eur`, `projected_grid_energy_kwh`
-- `trajectory`: array of hourly slots with start/end ISO strings, SOC progression, grid energy drawn, price per kWh.
-- `history`: recent measurements (up to `public.history_hours`) with actual SOC, price, and grid usage captured each controller run.
-- `warnings`, `errors`: arrays with any warnings encountered while fetching data or applying commands.
-
-This file is safe to expose read-only on your LAN, and can be used by third-party dashboards or scripts.
-
----
-
-## Testing
-
-Run the Python suite:
-
-```bash
-pytest
-```
-
-The tests cover the optimiser, price normalisation, and basic trajectory generation. Extend the test suite if you customise the optimiser or add new data sources.
-
----
+- `dashboard.summary` – single snapshot with `current_soc_percent`, `next_step_soc_percent`, price metrics, warnings/errors.
+- `dashboard.history` – chronological list of past optimiser runs (`entries` array with SOC, price, grid energy).
+- `dashboard.trajectory` – optimiser forecast with per-slot SOC + energy recommendations.
 
 ## Troubleshooting
 
-- **No forecast available**: Check both `evcc` and `market_data` settings. The controller logs an error listing both endpoints it attempted.
-- **Dashboard stale**: Ensure `/public/data/latest.json` is being updated. Inspect `docker compose logs` for `snapshot write failed` warnings and verify the host volume is writable.
-- **Digest auth failures**: Fronius endpoints require precise usernames/passwords; double-check the `fronius` section and the inverter’s digest auth settings.
-- **Cache issues**: Browsers cache favicons aggressively. Force-reload (`Shift+Cmd+R` / `Ctrl+F5`) after deploying a new image.
-
----
+- **404 on long tRPC URLs** – Ensure the backend was rebuilt after updating adapter settings (`yarn build`). Fastify must be initialised with `maxParamLength: 4096` (already configured in `src/main.ts`).
+- **better-sqlite3 install issues** – Make sure native build tooling is available (`xcode-select --install` on macOS, `build-essential` on Debian/Ubuntu).
+- **CORS errors in the browser** – The backend enables permissive CORS in development. If you customise origins, update both the Fastify CORS options and the frontend `VITE_TRPC_URL`.
+- **Stale fixtures** – Delete `data/db/backend.sqlite` to force reseeding from `fixtures/sample_data.json`.
 
 ## License
 
-This project is provided as-is. Adapt configuration and code to fit your hardware, tariff contracts, and safety requirements.
+Provided as-is, with no warranty. Adapt the stack to match your hardware, tariffs, and deployment constraints.

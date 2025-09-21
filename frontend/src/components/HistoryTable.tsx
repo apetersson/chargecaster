@@ -24,8 +24,6 @@ const HistoryTable = ({ history }: HistoryTableProps) => {
               <th>Timestamp</th>
               <th>Battery SOC %</th>
               <th>Price (€/kWh)</th>
-              <th>Grid Power (kW)</th>
-              <th>Grid Energy (kWh)</th>
             </tr>
           </thead>
           <tbody>
@@ -36,16 +34,6 @@ const HistoryTable = ({ history }: HistoryTableProps) => {
                 <td>{
                   typeof item.price_eur_per_kwh === "number"
                     ? formatNumber(item.price_eur_per_kwh, " €/kWh")
-                    : "n/a"
-                }</td>
-                <td>{
-                  typeof item.grid_power_kw === "number"
-                    ? formatNumber(item.grid_power_kw, " kW")
-                    : "n/a"
-                }</td>
-                <td>{
-                  typeof item.grid_energy_kwh === "number"
-                    ? formatNumber(item.grid_energy_kwh, " kWh")
                     : "n/a"
                 }</td>
               </tr>

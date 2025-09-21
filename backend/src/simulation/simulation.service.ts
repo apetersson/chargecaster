@@ -20,6 +20,9 @@ export interface SimulationInput {
   config: SimulationConfig;
   liveState: { battery_soc?: number | null };
   forecast: Record<string, unknown>[];
+  warnings?: string[];
+  errors?: string[];
+  priceSnapshotEurPerKwh?: number | null;
 }
 
 @Injectable()
@@ -119,7 +122,10 @@ export class SimulationService {
     }
     const slots = normalizePriceSlots(input.forecast);
     const result = simulateOptimalSchedule(input.config, input.liveState, slots);
-    const priceSnapshot = result.trajectory[0]?.price_eur_per_kwh ?? null;
+    const priceSnapshot =
+      input.priceSnapshotEurPerKwh ?? result.trajectory[0]?.price_eur_per_kwh ?? null;
+    const warnings = Array.isArray(input.warnings) ? [...input.warnings] : [];
+    const errors = Array.isArray(input.errors) ? [...input.errors] : [];
     const snapshot: SnapshotPayload = {
       timestamp: result.timestamp,
       interval_seconds: input.config.logic?.interval_seconds ?? null,
@@ -135,26 +141,16 @@ export class SimulationService {
       forecast_samples: result.forecast_samples,
       trajectory: result.trajectory,
       history: [],
-      warnings: [],
-      errors: [],
-    };
-
-    const historyEntry: HistoryPoint = {
-      timestamp: result.timestamp,
-      battery_soc_percent: result.next_step_soc_percent,
-      price_eur_per_kwh: priceSnapshot,
-      grid_energy_kwh: result.projected_grid_energy_kwh,
-      grid_power_kw: null,
+      warnings,
+      errors,
     };
 
     this.storageRef.replaceSnapshot(snapshot as unknown as Record<string, unknown>);
     this.storageRef.appendHistory([
       {
-        timestamp: historyEntry.timestamp,
-        battery_soc_percent: historyEntry.battery_soc_percent,
-        price_eur_per_kwh: historyEntry.price_eur_per_kwh,
-        grid_energy_kwh: historyEntry.grid_energy_kwh,
-        grid_power_kw: historyEntry.grid_power_kw,
+        timestamp: result.timestamp,
+        battery_soc_percent: result.next_step_soc_percent,
+        price_eur_per_kwh: priceSnapshot,
       },
     ]);
 
@@ -177,8 +173,8 @@ export class SimulationService {
           (entry as { battery_soc_percent?: unknown }).battery_soc_percent,
         ),
         price_eur_per_kwh: toNullableNumber((entry as { price_eur_per_kwh?: unknown }).price_eur_per_kwh),
-        grid_power_kw: toNullableNumber((entry as { grid_power_kw?: unknown }).grid_power_kw),
-        grid_energy_kwh: toNullableNumber((entry as { grid_energy_kwh?: unknown }).grid_energy_kwh),
+        grid_power_kw: null,
+        grid_energy_kwh: null,
       };
     });
     return entries.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -350,11 +346,11 @@ function simulateOptimalSchedule(
 
   const numStates = SOC_STEPS + 1;
   const horizon = slots.length;
-  const dp: number[][] = Array.from({ length: horizon + 1 }, () =>
-    Array.from({ length: numStates }, () => Number.POSITIVE_INFINITY),
+  const dp: number[][] = Array.from({length: horizon + 1}, () =>
+    Array.from({length: numStates}, () => Number.POSITIVE_INFINITY),
   );
-  const policy: number[][] = Array.from({ length: horizon }, () =>
-    Array.from({ length: numStates }, () => 0),
+  const policy: number[][] = Array.from({length: horizon}, () =>
+    Array.from({length: numStates}, () => 0),
   );
 
   for (let state = 0; state < numStates; state += 1) {
@@ -481,12 +477,19 @@ function extractForecastFromState(state: Record<string, unknown>): Record<string
     if (!Array.isArray(seq)) continue;
     for (const entry of seq) {
       if (typeof entry !== "object" || entry === null) continue;
-      const record = entry as { start?: unknown; from?: unknown; end?: unknown; to?: unknown; value?: unknown; price?: unknown };
+      const record = entry as {
+        start?: unknown;
+        from?: unknown;
+        end?: unknown;
+        to?: unknown;
+        value?: unknown;
+        price?: unknown
+      };
       const start = record.start ?? record.from;
       const end = record.end ?? record.to;
       const price = record.value ?? record.price;
       if (start && price != null) {
-        entries.push({ start, end, price });
+        entries.push({start, end, price});
       }
     }
   }

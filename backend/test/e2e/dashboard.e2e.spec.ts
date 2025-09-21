@@ -74,9 +74,16 @@ describe("dashboard tRPC", () => {
               throw new Error("Unsupported request input for tRPC client");
             }
 
-            const headers = requestInit.headers instanceof Headers
-              ? Object.fromEntries(requestInit.headers.entries())
-              : (requestInit.headers as Record<string, string> | undefined);
+            let headers: Record<string, string> | undefined;
+            if (requestInit.headers instanceof Headers) {
+              const headerPairs: [string, string][] = [];
+              requestInit.headers.forEach((value, key) => {
+                headerPairs.push([key, value]);
+              });
+              headers = Object.fromEntries(headerPairs);
+            } else {
+              headers = requestInit.headers as Record<string, string> | undefined;
+            }
 
             const method = (requestInit.method ?? "POST") as
               | "GET"
@@ -95,12 +102,20 @@ describe("dashboard tRPC", () => {
               headers,
             });
 
-            const normalizedHeaders = Object.fromEntries(
-              Object.entries(response.headers).map(([key, value]) => [
-                key,
-                Array.isArray(value) ? value.join(",") : String(value),
-              ]),
-            );
+            const headerEntries: [string, string][] = [];
+            if (response.headers && typeof response.headers === "object") {
+              const headerRecord = response.headers as Record<string, unknown>;
+              for (const key in headerRecord) {
+                if (!Object.hasOwn(headerRecord, key)) {
+                  continue;
+                }
+                const rawValue = headerRecord[key];
+                const normalized = Array.isArray(rawValue) ? rawValue.join(",") : String(rawValue);
+                headerEntries.push([key, normalized]);
+              }
+            }
+
+            const normalizedHeaders = Object.fromEntries(headerEntries);
 
             return new Response(response.payload, {
               status: response.statusCode,
