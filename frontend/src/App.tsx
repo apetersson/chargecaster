@@ -49,13 +49,61 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
   const record = (entry ?? {}) as Record<string, unknown>;
   const priceCt = toNumber(record.price_ct_per_kwh);
   const priceEur = toNumber(record.price_eur_per_kwh);
+  const gridPowerKw = toNumber(record.grid_power_kw ?? record.gridPowerKw);
+  const gridPower =
+    toNumber(record.grid_power_w ?? record.gridPowerW ?? record.grid_power ?? record.gridPower ?? record.grid_import_power ?? record.gridImportPower) ??
+    (gridPowerKw !== null ? gridPowerKw * 1000 : null);
+
+  const gridEnergyKwh = toNumber(record.grid_energy_kwh ?? record.gridEnergyKwh);
+  const gridEnergy =
+    toNumber(record.grid_energy_w ?? record.gridEnergyW ?? record.grid_energy_wh ?? record.gridEnergyWh) ??
+    (gridEnergyKwh !== null ? gridEnergyKwh * 1000 : null);
+
+  const solarPowerKw = toNumber(
+    record.solar_power_kw ??
+      record.solarPowerKw ??
+      record.pv_power_kw ??
+      record.pvPowerKw ??
+      record.solar_kw ??
+      record.solarKw ??
+      record.pv_kw ??
+      record.pvKw,
+  );
+  const solarPower =
+    toNumber(
+      record.solar_power_w ??
+        record.solarPowerW ??
+        record.solar_power ??
+        record.solarPower ??
+        record.pv_power_w ??
+        record.pvPowerW ??
+        record.pv_power ??
+        record.pvPower,
+    ) ?? (solarPowerKw !== null ? solarPowerKw * 1000 : null);
+
+  const solarEnergyKwh = toNumber(
+    record.solar_energy_kwh ??
+      record.solarEnergyKwh ??
+      record.pv_energy_kwh ??
+      record.pvEnergyKwh,
+  );
+  const solarEnergy =
+    toNumber(
+      record.solar_energy_wh ??
+        record.solarEnergyWh ??
+        record.pv_energy_wh ??
+        record.pvEnergyWh,
+    ) ?? (solarEnergyKwh !== null ? solarEnergyKwh * 1000 : null);
+
   return {
     timestamp: toTimestamp(record.timestamp),
     battery_soc_percent: toNumber(record.battery_soc_percent),
     price_ct_per_kwh: priceCt ?? (priceEur !== null ? priceEur * 100 : null),
     price_eur_per_kwh: priceEur,
-    grid_power_w: null,
-    grid_energy_w: null,
+    grid_power_w: gridPower,
+    grid_energy_w: gridEnergy,
+    solar_power_w: solarPower,
+    solar_energy_wh: solarEnergy,
   };
 };
 
