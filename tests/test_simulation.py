@@ -52,10 +52,11 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(result["forecast_samples"], len(slots))
         self.assertEqual(result["simulation_runs"], 100)
         self.assertGreater(result["projected_cost_eur"], 0.0)
-        self.assertEqual(len(result["trajectory"]), len(slots))
-        first_leg = result["trajectory"][0]
-        self.assertIn("soc_end_percent", first_leg)
-        self.assertIn("start", first_leg)
+        self.assertIn("oracle_entries", result)
+        self.assertEqual(len(result["oracle_entries"]), len(slots))
+        first_leg = result["oracle_entries"][0]
+        self.assertIn("era_id", first_leg)
+        self.assertIn("target_soc_percent", first_leg)
 
     def test_hourly_projection_sequence(self):
         slots = self.raw_prices
@@ -72,7 +73,7 @@ class SimulationTest(unittest.TestCase):
             result = core.simulate_optimal_schedule(self.cfg, live_state, window, house_load_w=house_load_w)
             horizon_results.append((slot["start"], result["recommended_soc_percent"]))
             current_soc = result["next_step_soc_percent"]
-            self.assertEqual(len(result["trajectory"]), len(window))
+            self.assertEqual(len(result["oracle_entries"]), len(window))
 
         self.assertEqual(len(horizon_results), 12)
         for ts, soc in horizon_results:

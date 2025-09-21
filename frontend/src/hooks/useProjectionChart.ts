@@ -17,10 +17,11 @@ import {
   type Plugin,
   type ScatterDataPoint,
   type ScriptableContext,
+  type ScriptableLineSegmentContext,
 } from "chart.js";
 import "chartjs-adapter-date-fns";
 
-import type { HistoryPoint, TrajectoryPoint } from "../types";
+import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../types";
 import {
   dateTimeFormatter,
   numberFormatter,
@@ -63,18 +64,23 @@ const SOC_BORDER = "#22c55e";
 const SOC_FILL = "rgba(34, 197, 94, 0.15)";
 const GRID_BORDER = "#f97316";
 const GRID_FILL = "rgba(249, 115, 22, 0.15)";
+const SOLAR_BORDER = "#facc15";
+const SOLAR_FILL = "rgba(250, 204, 21, 0.2)";
 const PRICE_BORDER = "#38bdf8";
 const PRICE_FILL = "rgba(56, 189, 248, 0.15)";
 const GRID_COLOR = "rgba(148, 163, 184, 0.25)";
 const TICK_COLOR = "#64748b";
 const LEGEND_COLOR = "#475569";
+const GRID_MARKERS_LABEL = "Grid Power Markers";
+const TARIFF_LABEL = "Tariff";
 const PRICE_HISTORY_BAR_BG = "rgba(148, 163, 184, 0.3)";
 const PRICE_HISTORY_BAR_BORDER = "rgba(100, 116, 139, 1)";
 const DEFAULT_SLOT_DURATION_MS = 3_600_000;
 
 const DEFAULT_SOC_BOUNDS = { min: 0, max: 100 };
-const DEFAULT_GRID_BOUNDS = { min: 0, max: 1 };
-const DEFAULT_PRICE_BOUNDS = { min: 0, max: 0.5 };
+const DEFAULT_GRID_BOUNDS = { min: -5000, max: 5000 };
+const DEFAULT_PRICE_BOUNDS = { min: 0, max: 50 };
+const DEFAULT_SOLAR_BOUNDS = { min: 0, max: 15000 };
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -86,25 +92,6 @@ const parseTimestamp = (value: string | null | undefined): number | null => {
   const parsed = new Date(value);
   const time = parsed.getTime();
   return Number.isFinite(time) ? time : null;
-};
-
-const filterFutureTrajectory = (trajectory: TrajectoryPoint[]): TrajectoryPoint[] => {
-  const now = Date.now();
-  return [...trajectory].filter((slot) => {
-    const start = parseTimestamp(slot.start);
-    const end = parseTimestamp(slot.end);
-    if (!start || !end) {
-      return false;
-    }
-    if (end <= now) {
-      return false;
-    }
-    return start > now;
-  }).sort((a, b) => {
-    const startA = parseTimestamp(a.start) ?? 0;
-    const startB = parseTimestamp(b.start) ?? 0;
-    return startA - startB;
-  });
 };
 
 const toHistoryPoint = (
@@ -123,24 +110,6 @@ const toHistoryPoint = (
   return { x: time, y: value, source: "history" };
 };
 
-const toForecastPoint = (
-  timestamp: string,
-  value: number | null | undefined,
-  endTimestamp?: string,
-): ProjectionPoint | null => {
-  if (!isFiniteNumber(value)) {
-    return null;
-  }
-
-  const time = parseTimestamp(timestamp);
-  if (time === null) {
-    return null;
-  }
-
-  const xEnd = parseTimestamp(endTimestamp ?? null);
-  return { x: time, xEnd, y: value, source: "forecast" };
-};
-
 const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
   if (!point) {
     return;
@@ -150,6 +119,155 @@ const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
     return;
   }
   target.push(point);
+};
+
+const toNumeric = (value: unknown): number | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.length > 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
+};
+
+const convertPriceToCents = (value: unknown, unit: unknown): number | null => {
+  const numeric = toNumeric(value);
+  if (numeric === null) {
+    return null;
+  }
+  const unitStr = typeof unit === "string" ? unit.trim().toLowerCase() : "";
+  if (!unitStr) {
+    return numeric * 100;
+  }
+  if (unitStr.includes("ct") && unitStr.includes("/wh")) {
+    return numeric * 1000;
+  }
+  if (unitStr.includes("ct") && unitStr.includes("kwh")) {
+    return numeric;
+  }
+  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("mwh")) {
+    return numeric / 10;
+  }
+  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("/wh")) {
+    return numeric * 100000;
+  }
+  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("kwh")) {
+    return numeric * 100;
+  }
+  if (unitStr.includes("ct")) {
+    return numeric;
+  }
+  if (unitStr.includes("eur")) {
+    return numeric * 100;
+  }
+  return numeric * 100;
+};
+
+const extractCostPrice = (era: ForecastEra): number | null => {
+  for (const source of era.sources) {
+    if (source.type !== "cost") {
+      continue;
+    }
+    const payload = source.payload;
+    if (!payload || typeof payload !== "object") {
+      continue;
+    }
+    const record = payload;
+    const cents = toNumeric(record.price_ct_per_kwh) ?? toNumeric(record.value_ct_per_kwh);
+    if (cents !== null) {
+      return cents;
+    }
+    const rawPrice = record.price ?? record.value;
+    const rawUnit = record.unit ?? record.price_unit ?? record.value_unit;
+    const price = convertPriceToCents(rawPrice, rawUnit);
+    if (price !== null) {
+      return price;
+    }
+  }
+  return null;
+};
+
+const extractSolarAverageWatts = (era: ForecastEra, durationHours: number | null): number | null => {
+  const solarSource = era.sources.find((source) => source.type === "solar");
+  if (!solarSource) {
+    return null;
+  }
+  const payload = solarSource.payload;
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const record = payload;
+  let energyKwh = toNumeric(record.energy_kwh);
+  if (energyKwh === null) {
+    const energyWh = toNumeric(record.energy_wh);
+    if (energyWh !== null) {
+      energyKwh = energyWh / 1000;
+    }
+  }
+  if (energyKwh !== null && durationHours && durationHours > 0) {
+    return (energyKwh / durationHours) * 1000;
+  }
+  const explicitPower =
+    toNumeric(record.power_w) ??
+    toNumeric(record.value) ??
+    toNumeric(record.power);
+  return explicitPower;
+};
+
+interface DerivedEra {
+  era: ForecastEra;
+  oracle?: OracleEntry;
+  startMs: number;
+  endMs: number;
+  durationHours: number;
+  priceCtPerKwh: number | null;
+  solarAverageW: number | null;
+}
+
+const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEntry[]): DerivedEra[] => {
+  const oracleMap = new Map<string, OracleEntry>();
+  for (const entry of oracleEntries) {
+    if (entry && typeof entry.era_id === "string") {
+      oracleMap.set(entry.era_id, entry);
+    }
+  }
+
+  const now = Date.now();
+  const derived: DerivedEra[] = [];
+  for (const era of forecast) {
+    const startMs = parseTimestamp(era.start);
+    if (startMs === null || startMs <= now) {
+      continue;
+    }
+    const rawEndMs = parseTimestamp(era.end);
+    const endMs = rawEndMs ?? startMs + DEFAULT_SLOT_DURATION_MS;
+    if (endMs <= startMs) {
+      continue;
+    }
+    const durationHours =
+      typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
+        ? era.duration_hours
+        : (endMs - startMs) / 3_600_000;
+    const price = extractCostPrice(era);
+    const solarAverage = extractSolarAverageWatts(era, durationHours);
+
+    derived.push({
+      era,
+      oracle: era.era_id ? oracleMap.get(era.era_id) : undefined,
+      startMs,
+      endMs,
+      durationHours,
+      priceCtPerKwh: price,
+      solarAverageW: solarAverage,
+    });
+  }
+
+  return derived.sort((a, b) => a.startMs - b.startMs);
 };
 
 const sortChronologically = (points: ProjectionPoint[]) =>
@@ -237,18 +355,42 @@ const computeBounds = (
   return { min, max, dataMin, dataMax };
 };
 
+const resolveInitialSoc = (
+  summary: SnapshotSummary | null,
+  historyPoints: ProjectionPoint[],
+): number => {
+  const lastHistory = historyPoints.length ? historyPoints[historyPoints.length - 1].y : null;
+  if (typeof lastHistory === "number" && Number.isFinite(lastHistory)) {
+    return lastHistory;
+  }
+  if (summary) {
+    if (isFiniteNumber(summary.next_step_soc_percent)) {
+      return summary.next_step_soc_percent;
+    }
+    if (isFiniteNumber(summary.current_soc_percent)) {
+      return summary.current_soc_percent;
+    }
+  }
+  return 0;
+};
+
 const buildSocSeries = (
   history: HistoryPoint[],
-  futureTrajectory: TrajectoryPoint[],
+  futureEras: DerivedEra[],
+  summary: SnapshotSummary | null,
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.battery_soc_percent))
     .filter((point): point is ProjectionPoint => point !== null);
 
+  let currentSoc = resolveInitialSoc(summary, historyPoints);
   const futurePoints: ProjectionPoint[] = [];
-  for (const slot of futureTrajectory) {
-    addPoint(futurePoints, toForecastPoint(slot.start, slot.soc_start_percent));
-    addPoint(futurePoints, toForecastPoint(slot.end, slot.soc_end_percent));
+  for (const era of futureEras) {
+    addPoint(futurePoints, { x: era.startMs, y: currentSoc, source: "forecast" });
+    const targetSoc = era.oracle?.target_soc_percent;
+    const endSoc = isFiniteNumber(targetSoc) ? targetSoc : currentSoc;
+    addPoint(futurePoints, { x: era.endMs, y: endSoc, source: "forecast" });
+    currentSoc = endSoc;
   }
 
   return buildCombinedSeries(historyPoints, futurePoints);
@@ -256,54 +398,68 @@ const buildSocSeries = (
 
 const buildGridSeries = (
   history: HistoryPoint[],
-  futureTrajectory: TrajectoryPoint[],
+  futureEras: DerivedEra[],
 ): ProjectionPoint[] => {
   const historyPoints = history
-    .map((entry) => toHistoryPoint(entry.timestamp, entry.grid_energy_kwh))
+    .map((entry) => toHistoryPoint(entry.timestamp, entry.grid_power_w ?? entry.grid_energy_w))
     .filter((point): point is ProjectionPoint => point !== null);
 
-  const futurePoints: ProjectionPoint[] = futureTrajectory
-    .map((slot) => {
-      const start = parseTimestamp(slot.start);
-      const end = parseTimestamp(slot.end);
-      if (start === null || end === null || end <= start) {
-        return null;
-      }
-      const midpoint = start + (end - start) / 2;
-      return { x: midpoint, y: slot.grid_energy_kwh, source: "forecast" as SeriesSource } satisfies ProjectionPoint;
-    })
-    .filter((value): value is ProjectionPoint => value !== null);
+  const futurePoints: ProjectionPoint[] = [];
+  for (const era of futureEras) {
+    const power = era.oracle?.grid_energy_w;
+    if (!isFiniteNumber(power)) {
+      continue;
+    }
+    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
+    futurePoints.push({ x: midpoint, y: power, source: "forecast" });
+  }
 
   return [...historyPoints, ...futurePoints];
 };
 
+const buildSolarSeries = (futureEras: DerivedEra[]): ProjectionPoint[] => {
+  const points: ProjectionPoint[] = [];
+  for (const era of futureEras) {
+    if (!isFiniteNumber(era.solarAverageW)) {
+      continue;
+    }
+    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
+    points.push({ x: midpoint, y: era.solarAverageW, source: "forecast" });
+  }
+  return points;
+};
+
 const buildPriceSeries = (
   history: HistoryPoint[],
-  futureTrajectory: TrajectoryPoint[],
+  futureEras: DerivedEra[],
 ): ProjectionPoint[] => {
   const historyPoints = history
-    .map((entry) => toHistoryPoint(entry.timestamp, entry.price_eur_per_kwh))
+    .map((entry) => {
+      const cents =
+        entry.price_ct_per_kwh ??
+        (typeof entry.price_eur_per_kwh === "number" ? entry.price_eur_per_kwh * 100 : null);
+      return toHistoryPoint(entry.timestamp, cents);
+    })
     .filter((point): point is ProjectionPoint => point !== null);
   const sortedHistory = sortChronologically(historyPoints);
+  const firstFutureStart = futureEras[0]?.startMs;
   for (let i = 0; i < sortedHistory.length; i += 1) {
     const current = sortedHistory[i];
     const next = sortedHistory[i + 1];
-    const fallbackStart = parseTimestamp(futureTrajectory[0]?.start) ?? current.x + DEFAULT_SLOT_DURATION_MS;
+    const fallbackStart = typeof firstFutureStart === "number" ? firstFutureStart : current.x + DEFAULT_SLOT_DURATION_MS;
     const rawEnd = next?.x ?? fallbackStart;
     current.xEnd = rawEnd > current.x ? rawEnd : current.x + DEFAULT_SLOT_DURATION_MS;
   }
 
   const futurePoints: ProjectionPoint[] = [];
-  for (const slot of futureTrajectory) {
-    const start = parseTimestamp(slot.start);
-    const end = parseTimestamp(slot.end);
-    if (start === null || end === null) {
+  for (const era of futureEras) {
+    if (!isFiniteNumber(era.priceCtPerKwh)) {
       continue;
     }
     futurePoints.push({
-      x: start,
-      xEnd: end,
-      y: slot.price_eur_per_kwh,
+      x: era.startMs,
+      xEnd: era.endMs,
+      y: era.priceCtPerKwh,
       source: "forecast",
     });
   }
@@ -314,12 +470,16 @@ const buildPriceSeries = (
 const resolvePointColor = (
   context: ScriptableContext<"line">,
   accent: string,
+  useAccentForHistory = false,
 ): string => {
   const raw = context.raw as ProjectionPoint | undefined;
   if (!raw || Number.isNaN(raw.y)) {
     return "rgba(0,0,0,0)";
   }
-  return raw.source === "history" ? HISTORY_POINT : accent;
+  if (raw.source === "history" && !useAccentForHistory) {
+    return HISTORY_POINT;
+  }
+  return accent;
 };
 
 const resolvePointRadius = (context: ScriptableContext<"line">): number => {
@@ -338,7 +498,7 @@ const resolveHoverRadius = (context: ScriptableContext<"line">): number => {
   return 6;
 };
 
-type LineSegmentContext = Parameters<Required<ChartDataset<"line">["segment"]>["borderColor"]>[0];
+type LineSegmentContext = ScriptableLineSegmentContext;
 
 const getSegmentSource = (
   context: LineSegmentContext,
@@ -380,17 +540,19 @@ const getSegmentSource = (
 const resolveSegmentBorder = (
   context: LineSegmentContext,
   accent: string,
+  historyAccent: string = HISTORY_BORDER,
 ) => {
   const source = getSegmentSource(context);
-  return source === "history" ? HISTORY_BORDER : accent;
+  return source === "history" ? historyAccent : accent;
 };
 
 const resolveSegmentBackground = (
   context: LineSegmentContext,
   accentFill: string,
+  historyFill: string = HISTORY_FILL,
 ) => {
   const source = getSegmentSource(context);
-  return source === "history" ? HISTORY_FILL : accentFill;
+  return source === "history" ? historyFill : accentFill;
 };
 
 const isProjectionPoint = (value: unknown): value is ProjectionPoint =>
@@ -423,7 +585,7 @@ const priceBarPlugin: Plugin = {
     }
 
     chart.data.datasets.forEach((dataset, datasetIndex) => {
-      if (dataset.label !== "Tariff") {
+      if (dataset.label !== TARIFF_LABEL) {
         return;
       }
 
@@ -473,28 +635,26 @@ Chart.register(priceBarPlugin);
 
 const buildDatasets = (
   history: HistoryPoint[],
-  trajectory: TrajectoryPoint[],
+  forecast: ForecastEra[],
+  oracleEntries: OracleEntry[],
+  summary: SnapshotSummary | null,
 ): {
-  datasets: Array<
-    | ChartDataset<"line", ProjectionPoint[]>
-    | ChartDataset<"scatter", ProjectionPoint[]>
-  >;
+  datasets: ChartDataset<"line", ProjectionPoint[]>[];
   bounds: {
     soc: AxisBounds;
     grid: AxisBounds;
+    solar: AxisBounds;
     price: AxisBounds;
   };
   timeRange: { min: number | null; max: number | null };
 } => {
-  const futureTrajectory = filterFutureTrajectory(trajectory);
-  const socSeries = buildSocSeries(history, futureTrajectory);
-  const gridSeries = buildGridSeries(history, futureTrajectory);
-  const priceSeries = buildPriceSeries(history, futureTrajectory);
+  const futureEras = buildFutureEras(forecast, oracleEntries);
+  const socSeries = buildSocSeries(history, futureEras, summary);
+  const gridSeries = buildGridSeries(history, futureEras);
+  const solarSeries = buildSolarSeries(futureEras);
+  const priceSeries = buildPriceSeries(history, futureEras);
 
-  const datasets: Array<
-    | ChartDataset<"line", ProjectionPoint[]>
-    | ChartDataset<"scatter", ProjectionPoint[]>
-  > = [
+  const datasets: ChartDataset<"line", ProjectionPoint[]>[] = [
     {
       type: "line",
       label: "State of Charge",
@@ -507,16 +667,16 @@ const buildDatasets = (
       pointBorderWidth: 1,
       pointRadius: resolvePointRadius,
       pointHoverRadius: resolveHoverRadius,
-      pointBackgroundColor: (ctx) => resolvePointColor(ctx, SOC_BORDER),
-      pointBorderColor: (ctx) => resolvePointColor(ctx, SOC_BORDER),
+      pointBackgroundColor: (ctx) => resolvePointColor(ctx, SOC_BORDER, true),
+      pointBorderColor: (ctx) => resolvePointColor(ctx, SOC_BORDER, true),
       segment: {
-        borderColor: (ctx) => resolveSegmentBorder(ctx, SOC_BORDER),
-        backgroundColor: (ctx) => resolveSegmentBackground(ctx, SOC_FILL),
+        borderColor: (ctx) => resolveSegmentBorder(ctx, SOC_BORDER, SOC_BORDER),
+        backgroundColor: (ctx) => resolveSegmentBackground(ctx, SOC_FILL, SOC_FILL),
       },
     },
     {
       type: "line",
-      label: "Energy from Grid",
+      label: "Grid Power",
       data: gridSeries,
       yAxisID: "grid",
       fill: "origin",
@@ -534,46 +694,54 @@ const buildDatasets = (
       },
     },
     {
-      type: "scatter",
-      label: "Grid Energy Markers",
-      data: (() => {
-        const historyDots = gridSeries
-          .filter((point) => point.source === "history")
-          .map((point) => ({ ...point }));
-        const futureDots = futureTrajectory
-          .map((slot) => {
-            const start = parseTimestamp(slot.start);
-            const end = parseTimestamp(slot.end);
-            if (start === null || end === null || end <= start) {
-              return null;
-            }
-            const midpoint = start + (end - start) / 2;
-            return {
-              x: midpoint,
-              y: slot.grid_energy_kwh,
-              source: "forecast" as SeriesSource,
-            } satisfies ProjectionPoint;
-          })
-          .filter((value): value is ProjectionPoint => value !== null);
-        return [...historyDots, ...futureDots];
-      })(),
+      type: "line",
+      label: "Solar Generation",
+      data: solarSeries,
+      yAxisID: "solar",
+      fill: "origin",
+      tension: 0.3,
+      spanGaps: false,
+      borderWidth: 2,
+      pointBorderWidth: 1,
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      pointBackgroundColor: (ctx) => resolvePointColor(ctx, SOLAR_BORDER),
+      pointBorderColor: (ctx) => resolvePointColor(ctx, SOLAR_BORDER),
+      segment: {
+        borderColor: (ctx) => resolveSegmentBorder(ctx, SOLAR_BORDER),
+        backgroundColor: (ctx) => resolveSegmentBackground(ctx, SOLAR_FILL),
+      },
+    },
+    {
+      type: "line",
+      label: GRID_MARKERS_LABEL,
+      data: gridSeries.map((point) => ({ ...point })),
       yAxisID: "grid",
       showLine: false,
       pointRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 5 : 3),
       pointHoverRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 7 : 5),
-      pointBackgroundColor: ({ raw }) =>
-        resolveBarColors(raw, GRID_BORDER, HISTORY_POINT),
+      pointBackgroundColor: ({ raw }) => resolveBarColors(raw, GRID_BORDER, HISTORY_POINT),
       pointBorderColor: ({ raw }) => resolveBarColors(raw, GRID_BORDER, HISTORY_BORDER),
     },
     {
       type: "line",
-      label: "Tariff",
+      label: TARIFF_LABEL,
       data: priceSeries,
       yAxisID: "price",
+      fill: false,
+      tension: 0.25,
+      spanGaps: false,
       showLine: false,
+      borderWidth: 2,
+      pointBorderWidth: 1,
       pointRadius: 0,
       pointHoverRadius: 4,
       pointHitRadius: 6,
+      segment: {
+        borderColor: (ctx) => resolveSegmentBorder(ctx, PRICE_BORDER),
+        backgroundColor: (ctx) => resolveSegmentBackground(ctx, PRICE_FILL),
+      },
+      borderColor: PRICE_BORDER,
       pointHoverBackgroundColor: ({ raw }) =>
         resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
       pointHoverBorderColor: ({ raw }) =>
@@ -582,26 +750,17 @@ const buildDatasets = (
   ];
 
   const socBounds = computeBounds(socSeries, DEFAULT_SOC_BOUNDS);
-  const gridBoundsRaw = computeBounds(gridSeries, DEFAULT_GRID_BOUNDS);
-  let gridMax = gridBoundsRaw.dataMax ?? DEFAULT_GRID_BOUNDS.max;
-  if (!(typeof gridMax === "number" && Number.isFinite(gridMax) && gridMax > 0)) {
-    gridMax = DEFAULT_GRID_BOUNDS.max;
-  }
-  const gridBounds: AxisBounds = {
-    ...gridBoundsRaw,
-    min: 0,
-    max: gridMax,
-    dataMin: gridBoundsRaw.dataMin === null ? 0 : Math.min(0, gridBoundsRaw.dataMin),
-    dataMax: gridBoundsRaw.dataMax,
-  };
+  const gridBounds = computeBounds(gridSeries, DEFAULT_GRID_BOUNDS);
+  const solarBounds = computeBounds(solarSeries, DEFAULT_SOLAR_BOUNDS);
   const priceBounds = computeBounds(priceSeries, DEFAULT_PRICE_BOUNDS);
-  const timeRange = findTimeRange(socSeries, gridSeries, priceSeries);
+  const timeRange = findTimeRange(socSeries, gridSeries, solarSeries, priceSeries);
 
   return {
     datasets,
     bounds: {
       soc: socBounds,
       grid: gridBounds,
+      solar: solarBounds,
       price: priceBounds,
     },
     timeRange,
@@ -612,6 +771,7 @@ const buildOptions = (config: {
   bounds: {
     soc: AxisBounds;
     grid: AxisBounds;
+    solar: AxisBounds;
     price: AxisBounds;
   };
   timeRange: { min: number | null; max: number | null };
@@ -629,6 +789,7 @@ const buildOptions = (config: {
         color: LEGEND_COLOR,
         boxWidth: 16,
         usePointStyle: true,
+        filter: (legendItem) => legendItem.text !== GRID_MARKERS_LABEL,
       },
     },
     tooltip: {
@@ -654,10 +815,13 @@ const buildOptions = (config: {
             return `${baseLabel}${percentFormatter.format(value)}%`;
           }
           if (dataset.yAxisID === "grid") {
-            return `${baseLabel}${numberFormatter.format(value)} kW`;
+            return `${baseLabel}${numberFormatter.format(value)} W`;
+          }
+          if (dataset.yAxisID === "solar") {
+            return `${baseLabel}${numberFormatter.format(value)} W`;
           }
           if (dataset.yAxisID === "price") {
-            return `${baseLabel}${numberFormatter.format(value * 100)} ct/kWh`;
+            return `${baseLabel}${numberFormatter.format(value)} ct/kWh`;
           }
           return `${baseLabel}${numberFormatter.format(value)}`;
         },
@@ -726,7 +890,29 @@ const buildOptions = (config: {
           if (!Number.isFinite(numeric)) {
             return "";
           }
-          return `${numberFormatter.format(numeric)} kW`;
+          return `${numberFormatter.format(numeric)} W`;
+        },
+      },
+      grid: {
+        drawOnChartArea: false,
+        color: GRID_COLOR,
+      },
+    },
+    solar: {
+      type: "linear",
+      position: "right",
+      offset: true,
+      min: config.bounds.solar.min,
+      max: config.bounds.solar.max,
+      ticks: {
+        color: TICK_COLOR,
+        callback: (value) => {
+          const numeric =
+            typeof value === "number" ? value : Number(value);
+          if (!Number.isFinite(numeric)) {
+            return "";
+          }
+          return `${numberFormatter.format(numeric)} W`;
         },
       },
       grid: {
@@ -747,7 +933,7 @@ const buildOptions = (config: {
           if (!Number.isFinite(numeric)) {
             return "";
           }
-          return `${numberFormatter.format(numeric * 100)} ct/kWh`;
+          return `${numberFormatter.format(numeric)} ct/kWh`;
         },
       },
       grid: {
@@ -760,7 +946,9 @@ const buildOptions = (config: {
 
 export const useProjectionChart = (
   history: HistoryPoint[],
-  trajectory: TrajectoryPoint[],
+  forecast: ForecastEra[],
+  oracleEntries: OracleEntry[],
+  summary: SnapshotSummary | null,
 ) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart<"line", ProjectionPoint[]> | null>(null);
@@ -776,7 +964,7 @@ export const useProjectionChart = (
       return;
     }
 
-    const { datasets, bounds, timeRange } = buildDatasets(history, trajectory);
+    const { datasets, bounds, timeRange } = buildDatasets(history, forecast, oracleEntries, summary);
     const options = buildOptions({ bounds, timeRange });
 
     if (chartInstance.current) {
@@ -796,7 +984,14 @@ export const useProjectionChart = (
       chart.destroy();
       chartInstance.current = null;
     };
-  }, [history, trajectory]);
+  }, [
+    history,
+    forecast,
+    oracleEntries,
+    summary?.timestamp,
+    summary?.current_soc_percent,
+    summary?.next_step_soc_percent,
+  ]);
 
   return canvasRef;
 };

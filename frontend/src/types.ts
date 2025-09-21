@@ -2,6 +2,9 @@ export type {
   SnapshotSummary,
   HistoryPoint,
   HistoryResponse,
-  TrajectoryPoint,
-  TrajectoryResponse,
+  ForecastEra,
+  ForecastResponse,
+  OracleEntry,
+  OracleResponse,
+  ForecastSourcePayload,
 } from "@backend/simulation-types";

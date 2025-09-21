@@ -143,7 +143,8 @@ describe("dashboard tRPC", () => {
     });
 
     expect(snapshot.forecast_samples).toBeGreaterThan(0);
-    expect(snapshot.trajectory.length).toBe(snapshot.forecast_samples);
+    expect(Array.isArray(snapshot.oracle_entries)).toBe(true);
+    expect(snapshot.oracle_entries.length).toBe(snapshot.forecast_samples);
     expect(snapshot.recommended_soc_percent).toBeGreaterThanOrEqual(0);
     expect(snapshot.recommended_soc_percent).toBeLessThanOrEqual(100);
     expect(snapshot.current_soc_percent).toBeGreaterThanOrEqual(0);
@@ -160,13 +161,20 @@ describe("dashboard tRPC", () => {
     expect(history.entries.length).toBeGreaterThan(0);
     expect(history.entries[0]?.timestamp).toBeDefined();
 
-    const trajectory = await client.dashboard.trajectory.query();
-    expect(trajectory.generated_at).toEqual(snapshot.timestamp);
-    expect(trajectory.points.length).toBe(snapshot.trajectory.length);
+    const forecastResponse = await client.dashboard.forecast.query();
+    expect(forecastResponse.generated_at).toEqual(snapshot.timestamp);
+    expect(Array.isArray(forecastResponse.eras)).toBe(true);
+    expect(forecastResponse.eras.length).toBeGreaterThan(0);
+
+    const oracle = await client.dashboard.oracle.query();
+    expect(oracle.generated_at).toEqual(snapshot.timestamp);
+    expect(Array.isArray(oracle.entries)).toBe(true);
+    expect(oracle.entries.length).toBeGreaterThan(0);
 
     const latest = await client.dashboard.snapshot.query();
     expect(latest.timestamp).toEqual(snapshot.timestamp);
     expect(latest.history.length).toBeGreaterThan(0);
-    expect(latest.trajectory.length).toBe(snapshot.trajectory.length);
+    expect(Array.isArray(latest.oracle_entries)).toBe(true);
+    expect(latest.oracle_entries.length).toBe(snapshot.oracle_entries.length);
   });
 });

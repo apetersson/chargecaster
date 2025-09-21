@@ -6,7 +6,12 @@ import SummaryCards from "./components/SummaryCards";
 import TrajectoryTable from "./components/TrajectoryTable";
 import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart";
-import type { HistoryPoint, SnapshotSummary, TrajectoryPoint } from "./types";
+import type {
+  ForecastEra,
+  HistoryPoint,
+  OracleEntry,
+  SnapshotSummary,
+} from "./types";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -42,46 +47,35 @@ const toTimestamp = (value: unknown): string => {
 
 const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
   const record = (entry ?? {}) as Record<string, unknown>;
+  const priceCt = toNumber(record.price_ct_per_kwh);
+  const priceEur = toNumber(record.price_eur_per_kwh);
   return {
     timestamp: toTimestamp(record.timestamp),
     battery_soc_percent: toNumber(record.battery_soc_percent),
-    price_eur_per_kwh: toNumber(record.price_eur_per_kwh),
-    grid_power_kw: null,
-    grid_energy_kwh: null,
+    price_ct_per_kwh: priceCt ?? (priceEur !== null ? priceEur * 100 : null),
+    price_eur_per_kwh: priceEur,
+    grid_power_w: null,
+    grid_energy_w: null,
   };
 };
 
-const normalizeTrajectoryPoint = (entry: unknown): TrajectoryPoint => {
-  const record = (entry ?? {}) as Record<string, unknown>;
-  const start = toTimestamp(record.start);
-  const end = toTimestamp(record.end);
-  const slotIndex = Number(record.slot_index);
-  return {
-    slot_index: Number.isFinite(slotIndex) ? slotIndex : 0,
-    start,
-    end,
-    duration_hours: toNumber(record.duration_hours) ?? 0,
-    soc_start_percent: toNumber(record.soc_start_percent) ?? 0,
-    soc_end_percent: toNumber(record.soc_end_percent) ?? 0,
-    grid_energy_kwh: toNumber(record.grid_energy_kwh) ?? 0,
-    price_eur_per_kwh: toNumber(record.price_eur_per_kwh) ?? 0,
-  };
-};
 
 const App = () => {
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
-  const [trajectory, setTrajectory] = useState<TrajectoryPoint[]>([]);
+  const [forecast, setForecast] = useState<ForecastEra[]>([]);
+  const [oracleEntries, setOracleEntries] = useState<OracleEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [summaryData, historyData, trajectoryData] = await Promise.all([
+      const [summaryData, historyData, forecastData, oracleData] = await Promise.all([
         trpcClient.dashboard.summary.query(),
         trpcClient.dashboard.history.query(),
-        trpcClient.dashboard.trajectory.query(),
+        trpcClient.dashboard.forecast.query(),
+        trpcClient.dashboard.oracle.query(),
       ]);
 
       setSummary(summaryData);
@@ -91,10 +85,8 @@ const App = () => {
       );
       setHistory(normalizedHistory);
 
-      const normalizedTrajectory = (trajectoryData.points ?? []).map((entry) =>
-        normalizeTrajectoryPoint(entry),
-      );
-      setTrajectory(normalizedTrajectory);
+      setForecast(Array.isArray(forecastData.eras) ? forecastData.eras : []);
+      setOracleEntries(Array.isArray(oracleData.entries) ? oracleData.entries : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -111,7 +103,7 @@ const App = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const chartRef = useProjectionChart(history, trajectory);
+  const chartRef = useProjectionChart(history, forecast, oracleEntries, summary);
 
   return (
     <>
@@ -128,7 +120,7 @@ const App = () => {
         <canvas ref={chartRef} aria-label="SOC projection chart" />
       </section>
 
-      <TrajectoryTable trajectory={trajectory} />
+      <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries} />
 
       <HistoryTable history={history} />
 

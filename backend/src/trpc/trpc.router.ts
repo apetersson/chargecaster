@@ -3,6 +3,10 @@ import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 
 import { SimulationService } from "../simulation/simulation.service.js";
+import { ForecastService } from "../simulation/forecast.service.js";
+import { HistoryService } from "../simulation/history.service.js";
+import { SummaryService } from "../simulation/summary.service.js";
+import { OracleService } from "../simulation/oracle.service.js";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -61,23 +65,26 @@ const historyInputSchema = z.object({
 export class TrpcRouter {
   public readonly router;
 
-  constructor(private readonly simulationService: SimulationService) {
+  constructor(
+    private readonly simulationService: SimulationService,
+    private readonly forecastService: ForecastService,
+    private readonly historyService: HistoryService,
+    private readonly summaryService: SummaryService,
+    private readonly oracleService: OracleService,
+  ) {
     this.router = t.router({
       health: t.procedure.query(() => ({ status: "ok" })),
       dashboard: t.router({
-        summary: t.procedure.query(({ ctx }) => {
-          const service = ctx.simulationService ?? this.simulationService;
-          return service.getSummary();
-        }),
-        history: t.procedure.input(historyInputSchema.optional()).query(({ ctx, input }) => {
-          const service = ctx.simulationService ?? this.simulationService;
+        summary: t.procedure.query(() => this.summaryService.toSummary(this.simulationService.ensureSeedFromFixture())),
+        history: t.procedure.input(historyInputSchema.optional()).query(({ input }) => {
           const limit = input?.limit ?? 96;
-          return service.getHistory(limit);
+          return this.historyService.getHistory(limit);
         }),
-        trajectory: t.procedure.query(({ ctx }) => {
-          const service = ctx.simulationService ?? this.simulationService;
-          return service.getTrajectory();
+        forecast: t.procedure.query(() => {
+          const snap = this.simulationService.ensureSeedFromFixture();
+          return this.forecastService.buildResponse(snap.timestamp, Array.isArray(snap.forecast_eras) ? snap.forecast_eras : []);
         }),
+        oracle: t.procedure.query(() => this.oracleService.build(this.simulationService.ensureSeedFromFixture())),
         snapshot: t.procedure.query(({ ctx }) => {
           const service = ctx.simulationService ?? this.simulationService;
           const latest = service.getLatestSnapshot();
