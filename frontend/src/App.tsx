@@ -9,7 +9,6 @@ import { useProjectionChart } from "./hooks/useProjectionChart";
 import type { HistoryPoint, SnapshotSummary, TrajectoryPoint } from "./types";
 
 const REFRESH_INTERVAL_MS = 60_000;
-const mockEnabled = import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === "true";
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined) {
@@ -47,8 +46,8 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
     timestamp: toTimestamp(record.timestamp),
     battery_soc_percent: toNumber(record.battery_soc_percent),
     price_eur_per_kwh: toNumber(record.price_eur_per_kwh),
-    grid_power_kw: toNumber(record.grid_power_kw),
-    grid_energy_kwh: toNumber(record.grid_energy_kwh),
+    grid_power_kw: null,
+    grid_energy_kwh: null,
   };
 };
 
@@ -76,51 +75,6 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadMockSnapshot = useCallback(async () => {
-    if (!mockEnabled) {
-      return false;
-    }
-    try {
-      const mockModule = await import("./mock/latest-mock.json");
-      const payload = mockModule.default as Record<string, unknown>;
-
-      const summaryPayload: SnapshotSummary = {
-        timestamp: toTimestamp(payload.timestamp),
-        interval_seconds: toNumber(payload.interval_seconds),
-        house_load_w: toNumber(payload.house_load_w),
-        current_soc_percent: toNumber(payload.current_soc_percent),
-        next_step_soc_percent: toNumber(payload.next_step_soc_percent),
-        recommended_soc_percent: toNumber(payload.recommended_soc_percent),
-        recommended_final_soc_percent: toNumber(payload.recommended_final_soc_percent),
-        price_snapshot_eur_per_kwh: toNumber(payload.price_snapshot_eur_per_kwh),
-        projected_cost_eur: toNumber(payload.projected_cost_eur),
-        projected_grid_energy_kwh: toNumber(payload.projected_grid_energy_kwh),
-        forecast_hours: toNumber(payload.forecast_hours),
-        forecast_samples: toNumber(payload.forecast_samples),
-        warnings: Array.isArray(payload.warnings)
-          ? (payload.warnings as string[])
-          : [],
-        errors: Array.isArray(payload.errors) ? (payload.errors as string[]) : [],
-      };
-
-      const historyEntries = Array.isArray(payload.history)
-        ? payload.history.map((entry) => normalizeHistoryEntry(entry))
-        : [];
-      const trajectoryPoints = Array.isArray(payload.trajectory)
-        ? payload.trajectory.map((entry) => normalizeTrajectoryPoint(entry))
-        : [];
-
-      setSummary(summaryPayload);
-      setHistory(historyEntries);
-      setTrajectory(trajectoryPoints);
-      setError(null);
-      return true;
-    } catch (mockErr) {
-      console.warn("failed to load mock snapshot", mockErr);
-      return false;
-    }
-  }, []);
-
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -131,22 +85,23 @@ const App = () => {
       ]);
 
       setSummary(summaryData);
-      setHistory(historyData.entries ?? []);
-      setTrajectory(trajectoryData.points ?? []);
+
+      const normalizedHistory = (historyData.entries ?? []).map((entry) =>
+        normalizeHistoryEntry(entry),
+      );
+      setHistory(normalizedHistory);
+
+      const normalizedTrajectory = (trajectoryData.points ?? []).map((entry) =>
+        normalizeTrajectoryPoint(entry),
+      );
+      setTrajectory(normalizedTrajectory);
       setError(null);
     } catch (err) {
-      if (mockEnabled) {
-        const loadedMock = await loadMockSnapshot();
-        if (!loadedMock) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      } else {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [loadMockSnapshot]);
+  }, []);
 
   useEffect(() => {
     void fetchData();
