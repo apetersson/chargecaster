@@ -71,6 +71,10 @@ describe("simulateOptimalSchedule oracle output", () => {
       const expectedEnergy = (first.grid_power_w / 1000) * slots[0].durationHours;
       expect(first.grid_energy_kwh).toBeCloseTo(expectedEnergy, 6);
     }
+
+    if (result.next_step_soc_percent !== null && first.end_soc_percent !== null) {
+      expect(result.next_step_soc_percent).toBeCloseTo(first.end_soc_percent, 6);
+    }
   });
 
   it("handles solar surplus with auto strategy and matches next-step SOC", () => {
