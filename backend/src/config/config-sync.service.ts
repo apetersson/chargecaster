@@ -193,11 +193,17 @@ export class ConfigSyncService {
 
     const canonicalForecast = futureEvccForecast.length ? futureEvccForecast : forecast;
 
+    const gridFeeForDisplay =
+      simulationConfig.price?.grid_fee_eur_per_kwh ??
+      simulationConfig.price?.network_tariff_eur_per_kwh ??
+      0;
+
     const { forecastEntries, eras } = this.buildForecastEras(
       canonicalForecast,
       futureEvccForecast,
       futureMarketForecast,
       solarForecast,
+      gridFeeForDisplay,
     );
 
     forecast = forecastEntries;
@@ -562,6 +568,7 @@ export class ConfigSyncService {
     evccForecast: Record<string, unknown>[],
     marketForecast: Record<string, unknown>[],
     solarForecast: Record<string, unknown>[],
+    gridFeeEurPerKwh: number,
   ): { forecastEntries: Record<string, unknown>[]; eras: ForecastEra[] } {
     if (!canonicalForecast.length) {
       return { forecastEntries: [], eras: [] };
@@ -628,18 +635,37 @@ export class ConfigSyncService {
       }
     };
 
-    const applySlotPrice = (entry: EraEntry, rawPrice: unknown, rawUnit: unknown): void => {
+    const sanitizedGridFeeEur = Number.isFinite(gridFeeEurPerKwh) ? Math.max(0, gridFeeEurPerKwh) : 0;
+    const gridFeeCt = sanitizedGridFeeEur * 100;
+
+    const applySlotPrice = (
+      entry: EraEntry,
+      rawPrice: unknown,
+      rawUnit: unknown,
+    ): { priceCt: number; priceEur: number; totalCt: number; totalEur: number } | null => {
       const priceCt = this.convertPriceToCents(rawPrice, rawUnit);
       if (priceCt === null) {
-        return;
+        return null;
       }
       const priceEur = priceCt / 100;
+      const totalCt = priceCt + gridFeeCt;
+      const totalEur = totalCt / 100;
       entry.slot.payload.price = priceEur;
       entry.slot.payload.unit = "EUR/kWh";
       entry.slot.payload.price_ct_per_kwh = priceCt;
+      entry.slot.payload.price_with_fee_ct_per_kwh = totalCt;
+      entry.slot.payload.price_with_fee_eur_per_kwh = totalEur;
       entry.payload.price = priceEur;
       entry.payload.unit = "EUR/kWh";
       entry.payload.price_ct_per_kwh = priceCt;
+      entry.payload.price_with_fee_ct_per_kwh = totalCt;
+      entry.payload.price_with_fee_eur_per_kwh = totalEur;
+      return {
+        priceCt,
+        priceEur,
+        totalCt,
+        totalEur,
+      };
     };
 
     for (const slot of canonicalSlots) {
@@ -669,7 +695,7 @@ export class ConfigSyncService {
         slot.payload.price_unit ??
         slot.payload.value_unit ??
         (slot.payload.price_ct_per_kwh != null ? "ct/kWh" : undefined);
-      applySlotPrice(entry, rawPrice, rawUnit);
+      const priceInfo = applySlotPrice(entry, rawPrice, rawUnit);
 
       const marketPayload = marketIndex.get(slot.startIso);
       if (marketPayload) {
@@ -681,7 +707,14 @@ export class ConfigSyncService {
         if (priceCt !== null) {
           record.price_ct_per_kwh = priceCt;
           record.unit = "ct/kWh";
-          applySlotPrice(entry, priceCt / 100, "EUR/kWh");
+          const marketInfo = applySlotPrice(entry, priceCt / 100, "EUR/kWh");
+          if (marketInfo) {
+            record.price_with_fee_ct_per_kwh = marketInfo.totalCt;
+            record.price_with_fee_eur_per_kwh = marketInfo.totalEur;
+          }
+        } else if (priceInfo) {
+          record.price_with_fee_ct_per_kwh = priceInfo.totalCt;
+          record.price_with_fee_eur_per_kwh = priceInfo.totalEur;
         }
         addSource(entry, "awattar", "cost", record);
       }
@@ -707,7 +740,7 @@ export class ConfigSyncService {
       sources: entry.sources,
     }));
     const deduped = this.dedupeErasAndEntries(forecastEntries, eras);
-    return deduped;
+    return this.trimForecastByPriceCoverage(deduped.forecastEntries, deduped.eras);
   }
 
   private buildStartIndex(entries: Record<string, unknown>[]): Map<string, Record<string, unknown>> {
@@ -826,6 +859,32 @@ export class ConfigSyncService {
 
   private cloneRecord(entry: Record<string, unknown>): Record<string, unknown> {
     return JSON.parse(JSON.stringify(entry)) as Record<string, unknown>;
+  }
+
+  private trimForecastByPriceCoverage(
+    entries: Record<string, unknown>[],
+    eras: ForecastEra[],
+  ): { forecastEntries: Record<string, unknown>[]; eras: ForecastEra[] } {
+    if (!entries.length || !eras.length) {
+      return { forecastEntries: [], eras: [] };
+    }
+
+    const trimmedEntries: Record<string, unknown>[] = [];
+    const trimmedEras: ForecastEra[] = [];
+
+    const total = Math.min(entries.length, eras.length);
+    for (let index = 0; index < total; index += 1) {
+      const entry = entries[index] ?? {};
+      const rawPrice = (entry as { price_ct_per_kwh?: unknown }).price_ct_per_kwh;
+      const priceCt = this.resolveNumber(rawPrice, null);
+      if (priceCt === null) {
+        break;
+      }
+      trimmedEntries.push(entry);
+      trimmedEras.push(eras[index]);
+    }
+
+    return { forecastEntries: trimmedEntries, eras: trimmedEras };
   }
 
   private convertPriceToCents(value: unknown, unit: unknown): number | null {

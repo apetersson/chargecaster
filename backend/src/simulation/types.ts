@@ -149,6 +149,8 @@ export interface ForecastSlotInput {
   price: number | null;
   unit: string | null;
   price_ct_per_kwh: number | null;
+  price_with_fee_ct_per_kwh?: number | null;
+  price_with_fee_eur_per_kwh?: number | null;
   duration_hours: number | null;
   era_id?: string;
 }
@@ -158,4 +160,3 @@ export interface SolarSlotInput {
   end: string | null;
   energy_kwh: number | null;
 }
-
