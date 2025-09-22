@@ -142,3 +142,20 @@ export interface OracleResponse {
   generated_at: string;
   entries: OracleEntry[];
 }
+
+export interface ForecastSlotInput {
+  start: string;
+  end: string | null;
+  price: number | null;
+  unit: string | null;
+  price_ct_per_kwh: number | null;
+  duration_hours: number | null;
+  era_id?: string;
+}
+
+export interface SolarSlotInput {
+  start: string;
+  end: string | null;
+  energy_kwh: number | null;
+}
+
