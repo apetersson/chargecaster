@@ -628,6 +628,20 @@ export class ConfigSyncService {
       }
     };
 
+    const applySlotPrice = (entry: EraEntry, rawPrice: unknown, rawUnit: unknown): void => {
+      const priceCt = this.convertPriceToCents(rawPrice, rawUnit);
+      if (priceCt === null) {
+        return;
+      }
+      const priceEur = priceCt / 100;
+      entry.slot.payload.price = priceEur;
+      entry.slot.payload.unit = "EUR/kWh";
+      entry.slot.payload.price_ct_per_kwh = priceCt;
+      entry.payload.price = priceEur;
+      entry.payload.unit = "EUR/kWh";
+      entry.payload.price_ct_per_kwh = priceCt;
+    };
+
     for (const slot of canonicalSlots) {
       if (!slot.startIso) {
         continue;
@@ -643,16 +657,31 @@ export class ConfigSyncService {
         eraMap.set(slot.startIso, entry);
       }
 
+      const rawPrice =
+        slot.payload.price ??
+        slot.payload.value ??
+        slot.payload.price_ct_per_kwh ??
+        slot.payload.value_ct_per_kwh ??
+        entry.payload.price ??
+        entry.payload.value;
+      const rawUnit =
+        slot.payload.unit ??
+        slot.payload.price_unit ??
+        slot.payload.value_unit ??
+        (slot.payload.price_ct_per_kwh != null ? "ct/kWh" : undefined);
+      applySlotPrice(entry, rawPrice, rawUnit);
+
       const marketPayload = marketIndex.get(slot.startIso);
       if (marketPayload) {
         const cloned = this.cloneRecord(marketPayload);
         const record: ForecastCostPayload = { ...cloned };
-        const rawPrice = record.price ?? record.value;
-        const rawUnit = record.unit ?? record.price_unit ?? record.value_unit;
-        const priceCt = this.convertPriceToCents(rawPrice, rawUnit);
+        const rawMarketPrice = record.price ?? record.value;
+        const rawMarketUnit = record.unit ?? record.price_unit ?? record.value_unit;
+        const priceCt = this.convertPriceToCents(rawMarketPrice, rawMarketUnit);
         if (priceCt !== null) {
           record.price_ct_per_kwh = priceCt;
           record.unit = "ct/kWh";
+          applySlotPrice(entry, priceCt / 100, "EUR/kWh");
         }
         addSource(entry, "awattar", "cost", record);
       }

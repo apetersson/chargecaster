@@ -685,8 +685,8 @@ function simulateOptimalSchedule(
     oracleEntries[oracleEntries.length - 1]?.end_soc_percent ??
     oracleEntries[oracleEntries.length - 1]?.target_soc_percent ??
     null;
-  const nextStepSocPercent = shouldChargeFromGrid ? 100 : firstTarget;
   const recommendedTarget = shouldChargeFromGrid ? 100 : finalTarget;
+  const nextStepSocPercent = firstTarget ?? currentState * percentStep;
   return {
     initial_soc_percent: currentState * percentStep,
     next_step_soc_percent: nextStepSocPercent,
