@@ -160,6 +160,7 @@ export class SimulationService {
       next_step_soc_percent: snapshot.next_step_soc_percent,
       recommended_soc_percent: snapshot.recommended_soc_percent,
       recommended_final_soc_percent: snapshot.recommended_final_soc_percent,
+      current_mode: snapshot.current_mode,
       price_snapshot_eur_per_kwh: snapshot.price_snapshot_eur_per_kwh,
       projected_cost_eur: snapshot.projected_cost_eur,
       baseline_cost_eur: snapshot.baseline_cost_eur,
@@ -232,8 +233,18 @@ export class SimulationService {
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic?.allow_battery_export ?? true,
     });
-    const mode = result.recommended_soc_percent === 100 ? "CHARGE" : "AUTO";
-    this.logger.log(`Simulation result: ${mode}`);
+    const initialSoc = result.initial_soc_percent;
+    const nextSoc = result.next_step_soc_percent ?? initialSoc;
+    const firstStrategy = result.oracle_entries[0]?.strategy ?? null;
+    let currentMode: "charge" | "auto";
+    if (firstStrategy) {
+      currentMode = firstStrategy;
+    } else if (nextSoc > initialSoc + 0.5) {
+      currentMode = "charge";
+    } else {
+      currentMode = "auto";
+    }
+    this.logger.log(`Simulation result: ${currentMode.toUpperCase()}`);
     if (result.oracle_entries.length) {
       const strategyLog = result.oracle_entries
         .map((entry) => `${(entry.strategy ?? "auto").toUpperCase()}@${entry.era_id}`)
@@ -265,6 +276,7 @@ export class SimulationService {
       next_step_soc_percent: result.next_step_soc_percent,
       recommended_soc_percent: result.recommended_soc_percent,
       recommended_final_soc_percent: result.recommended_final_soc_percent,
+      current_mode: currentMode,
       price_snapshot_ct_per_kwh: priceSnapshotCt,
       price_snapshot_eur_per_kwh: priceSnapshotEur,
       projected_cost_eur: result.projected_cost_eur,
@@ -740,7 +752,7 @@ function simulateOptimalSchedule(
       typeof slot.eraId === "string" && slot.eraId.length > 0
         ? slot.eraId
         : slot.start.toISOString();
-    const strategy: "charge" | "auto" = additionalGridCharge > 0.001 ? "charge" : "auto";
+    const strategy: OracleEntry["strategy"] = additionalGridCharge > 0.001 ? "charge" : "auto";
     const startSocPercent = stateIter * percentStep;
     const endSocPercent = nextState * percentStep;
     const normalizedGridPower = Number.isFinite(gridPowerW) ? gridPowerW : null;
