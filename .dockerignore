@@ -1,0 +1,16 @@
+*.log
+node_modules
+*/node_modules
+dist
+frontend/dist
+backend/dist
+data
+state
+__pycache__
+.git
+.gitignore
+.DS_Store
+coverage
+tmp
+*.local
+*.swp
