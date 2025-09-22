@@ -1,113 +1,88 @@
 # batteryctl
 
-Batteryctl optimises residential battery charge/discharge schedules against day-ahead tariffs and exposes the results over a lightweight web dashboard. The project now ships a full TypeScript stack:
+batteryctl plans charge/discharge schedules for a residential battery, persists the latest optimiser snapshot, and serves a React dashboard for quick monitoring. The codebase is TypeScript end-to-end: a NestJS backend publishes a tRPC API while a Vite bundle renders the UI.
 
-- **Backend** – NestJS + Fastify + tRPC (`backend/`)
-- **Frontend** – React + Vite + TanStack Query (`frontend/`)
-- **Storage** – better-sqlite3 for local persistence, JSON snapshots for the UI
+---
 
-Both apps run with hot-reload in development and share a common type layer so the dashboard speaks to the API without manual schema glue.
+## Features at a Glance
+- End-to-end optimiser that ingests tariff forecasts, solar estimates, and live SOC and outputs a cost-aware plan (`current_mode`, SOC targets, projected spend).
+- Shared TypeScript contracts between backend and frontend via direct source imports (`@backend/*` path aliases).
+- SQLite (via `better-sqlite3`) snapshot/history store managed by the backend.
+- Ready-to-run Docker image that serves the SPA through nginx and reverse-proxies API calls.
 
-## Highlights
+---
 
-- Fetches live state from EVCC (or bundled fixtures) and optional market data feeds.
-- Dynamic programming optimiser calculates cost-minimising trajectories while respecting battery constraints.
-- Exposes snapshot, history, forecast, and oracle endpoints over tRPC; the frontend consumes them via auto-generated TypeScript types.
-- Ships with fixtures for rapid local demos—no hardware connection required.
-- Supports Docker/Compose packaging for one-command deployments (API + UI + SQLite volume).
-
-## Repository Layout
-
+## Project Layout
 ```
 .
-├── backend/                # NestJS Fastify API + optimiser and storage layers
-│   ├── src/
-│   │   ├── simulation/     # Optimiser implementation + helpers
-│   │   ├── storage/        # better-sqlite3 persistence layer
-│   │   └── trpc/           # Router definitions exposed to the frontend
-│   ├── fixtures/           # Sample EVCC dumps used for seeding demo state
-│   ├── dev-server.mjs      # Build/watch helper used by `yarn start:dev`
+├── backend/            # NestJS + Fastify + tRPC API and optimiser
+│   ├── fixtures/       # Sample data used for seeding demos
+│   ├── src/            # Application code
 │   └── package.json
-├── frontend/               # React dashboard
-│   ├── src/
-│   │   ├── api/            # tRPC client bootstrap
-│   │   ├── components/     # UI widgets (summary cards, tables, charts)
+├── frontend/           # React + Vite dashboard
+│   ├── src/            # Components, hooks, API client
 │   └── package.json
-├── data/                   # Created at runtime; holds the SQLite database
-├── config.local.yaml       # Sample controller config (if running Python tools)
-└── README.md
+├── config.local.yaml   # Example runtime configuration
+├── data/               # Created at runtime; contains SQLite database
+├── Dockerfile          # Multi-stage image (frontend + backend + nginx)
+├── docker-compose.yml  # Local orchestration helper
+├── docker/entrypoint.sh
+└── nginx-default.conf
 ```
 
-> Legacy Python utilities (`controller.py`, `core.py`, etc.) remain in the repo for reference, but the actively maintained runtime is the TypeScript backend/frontend pair described here.
+---
 
 ## Prerequisites
+- **Node.js 20+** and **Yarn 1.22+** for development builds.
+- **Docker 24+** (optional) for container workflows.
+- Native build tools (`xcode-select --install` on macOS or `build-essential` + `python3` on Debian/Ubuntu) for `better-sqlite3`.
 
-- **Node.js 20+** (LTS recommended)
-- **Yarn 1.22+** (`npm install -g yarn` if you do not have it yet)
-- **SQLite** runtime libraries (bundled on macOS/Linux; required by `better-sqlite3`)
-- **Docker 24+** (optional) for containerised deployments
+---
 
-## Backend: NestJS + Fastify
+## Local Development
+1. Install backend dependencies:
+   ```bash
+   cd backend
+   yarn install
+   ```
+2. Install frontend dependencies:
+   ```bash
+   cd ../frontend
+   yarn install
+   ```
+3. Start the backend in one terminal:
+   ```bash
+   cd backend
+   yarn start
+   ```
+   - Listens on `http://localhost:4000`.
+   - Loads optimisation inputs from `config.local.yaml` by default.
+4. Start the frontend in another terminal:
+   ```bash
+   cd frontend
+   yarn dev
+   ```
+   - Serves the dashboard at `http://localhost:5173`.
+   - Uses `VITE_TRPC_URL` (defaults to `http://localhost:4000/trpc`).
 
-```bash
-cd backend
-yarn install
-# hot reload with TypeScript compilation + auto restart
-yarn start:dev
-```
+The dashboard batches tRPC calls such as `dashboard.summary`, `dashboard.history`, and `dashboard.oracle`. Snapshot data is persisted to `data/db/backend.sqlite` so subsequent loads reuse the latest optimiser output.
 
-The dev server runs on `http://localhost:4000`. It compiles TypeScript (`tsc --watch`) to `dist/` and restarts Fastify whenever the build succeeds. Key scripts:
+---
 
-- `yarn test` – unit tests (Vitest)
-- `yarn test:e2e` – end-to-end tRPC smoke tests
-- `yarn build` – production compile to `dist/`
-- `yarn lint` / `yarn typecheck` – static analysis
+## Configuration
+- `config.local.yaml` is the canonical sample. Copy or symlink it to customise credentials, tariff providers, or solar forecasts.
+- The backend reads `BATTERYCTL_CONFIG` if set; otherwise it falls back to `../config.local.yaml` relative to the backend working directory.
+- `data/db/backend.sqlite` is created automatically; mount `data/` as a volume to persist history.
 
-Environment tweaks:
+Key environment variables:
+- `BATTERYCTL_CONFIG` – absolute path to the YAML config (default `/app/config.yaml` inside Docker).
+- `PORT` / `HOST` – Fastify bind target (defaults `4000` / `0.0.0.0`).
+- `NODE_ENV` – set to `production` in the container image.
 
-- `PORT`/`HOST` override the Fastify listener (defaults `4000`, `0.0.0.0`).
-- `NODE_ENV=test` suppresses logging and prevents the bootstrap auto-start (tests call `bootstrap()` manually).
-- `fixtures/sample_data.json` seeds the SQLite store when no history exists; replace this file with a dump from your own system for realistic demos.
+---
 
-### Data storage
-
-The API writes to `../data/db/backend.sqlite` (relative to `backend/`). Delete the `data/` folder to reset the demo database, or mount the directory as a volume in Docker for persistence.
-
-## Frontend: React + Vite
-
-```bash
-cd frontend
-yarn install
-# dev server with fast refresh
-yarn dev
-```
-
-The dashboard is available at `http://localhost:5173` and proxies API calls directly to the backend:
-
-- By default it targets `http://localhost:4000/trpc`.
-- Override the target by exporting `VITE_TRPC_URL` before running `yarn dev`.
-
-Helpful scripts:
-
-- `yarn lint` – ESLint with TypeScript support
-- `yarn test` – Vitest component tests (if present)
-- `yarn build` – Production bundle (outputs to `dist/`)
-
-## Coordinated dev workflow
-
-1. Start the backend (`yarn start:dev` in `backend/`).
-2. Start the frontend (`yarn dev` in `frontend/`).
-3. Visit `http://localhost:5173` – the dashboard issues batched GET requests such as
-  `GET /trpc/dashboard.summary,dashboard.history,dashboard.forecast,dashboard.oracle?batch=1`.
-   Fastify’s `maxParamLength` is configured to allow these long URLs.
-4. Edit code in either project; both dev servers hot-reload automatically.
-
-If you change backend TypeScript that affects generated JavaScript, remember to run `yarn build` before building Docker images so `dist/` reflects the latest changes.
-
-## Testing checklist
-
+## Testing & Quality Gates
 Backend:
-
 ```bash
 cd backend
 yarn lint
@@ -117,48 +92,67 @@ yarn test:e2e
 ```
 
 Frontend:
-
 ```bash
 cd frontend
 yarn lint
-yarn test   # if suites are defined
+yarn test        # if suites exist
 yarn build
 ```
 
-## Docker & deployment
+---
 
-A container image can bundle both the API and the static frontend. The current workflow is:
+## Docker Image
+The root `Dockerfile` produces a single image with three stages:
+1. Build the Vite frontend into `/public`.
+2. Install backend dependencies (including the native SQLite binding).
+3. Serve the app via nginx while running the NestJS API with `tsx`.
 
+Build and run manually:
 ```bash
-# build the API
-cd backend
-yarn build
-
-# build the frontend bundle
-cd ../frontend
-yarn build
-
-# back at repo root, build the image (Dockerfile assumes prebuilt artifacts)
 docker build -t batteryctl:local .
+docker run \
+  -p 6969:80 \
+  -v $(pwd)/data:/data \
+  -v $(pwd)/config.local.yaml:/app/config.yaml:ro \
+  -e BATTERYCTL_CONFIG=/app/config.yaml \
+  --name batteryctl \
+  batteryctl:local
 ```
 
-The Dockerfile (not shown here) serves the compiled frontend via nginx and launches the backend API with Node.js. Mount `./data` into `/app/data` to persist SQLite state between restarts.
+- Visit `http://localhost:6969` for the UI.
+- `/data` persists `db/backend.sqlite` and any future runtime assets.
+- Logs from nginx and the backend are emitted to the container stdout/stderr streams.
 
-## Snapshot payload reference
+---
 
-The backend exposes tRPC procedures; the most commonly consumed responses include:
+## Docker Compose (local convenience)
+A helper compose file (`docker-compose.yml`) builds the image locally and wires the expected mounts:
+```bash
+docker compose up --build
+```
+Configuration highlights:
+- Binds host port `6969` to container port `80`.
+- Mounts the repository `data/` directory into `/data`.
+- Mounts `config.local.yaml` into `/app/config.yaml` (read-only) via the `BATTERYCTL_CONFIG_FILE` variable (defaults to `./config.local.yaml`).
+- Restarts the container unless stopped manually.
 
-- `dashboard.summary` – single snapshot with `current_soc_percent`, `next_step_soc_percent`, price metrics, warnings/errors.
-- `dashboard.history` – chronological list of past optimiser runs (`entries` array with SOC, price, grid energy).
-- `dashboard.oracle` – optimiser per-slot SOC + grid power recommendations.
+Update `docker-compose.yml` if your config file lives elsewhere or if you prefer a pre-built registry image.
 
-## Troubleshooting
+Example with an absolute config path:
+```bash
+BATTERYCTL_CONFIG_FILE=/Users/andreas/Documents/code/scripts/qnd/batteryctl/config.local.yaml \
+  docker compose up --build
+```
 
-- **404 on long tRPC URLs** – Ensure the backend was rebuilt after updating adapter settings (`yarn build`). Fastify must be initialised with `maxParamLength: 4096` (already configured in `src/main.ts`).
-- **better-sqlite3 install issues** – Make sure native build tooling is available (`xcode-select --install` on macOS, `build-essential` on Debian/Ubuntu).
-- **CORS errors in the browser** – The backend enables permissive CORS in development. If you customise origins, update both the Fastify CORS options and the frontend `VITE_TRPC_URL`.
-- **Stale fixtures** – Delete `data/db/backend.sqlite` to force reseeding from `fixtures/sample_data.json`.
+---
+
+## Operations & Troubleshooting
+- **Resetting state**: stop the container and delete `data/db/backend.sqlite`; the backend will reseed from fixtures.
+- **CORS errors**: ensure the frontend points to the same origin or update Fastify CORS rules in `backend/src/main.ts`.
+- **better-sqlite3 build failures**: confirm build tooling is installed before running `yarn install` or building the Docker image.
+- **Updating dependencies**: run `yarn upgrade` in each project and rebuild the Docker image.
+
+---
 
 ## License
-
-Provided as-is, with no warranty. Adapt the stack to match your hardware, tariffs, and deployment constraints.
+Provided as-is without warranty. Adapt configuration and deployment to suit your installation.
