@@ -123,9 +123,19 @@ export interface ForecastResponse {
 
 export interface OracleEntry {
   era_id: string;
-  target_soc_percent: number | null;
-  grid_energy_w: number | null;
-  strategy?: "charge" | "auto";
+  start_soc_percent: number | null;
+  end_soc_percent: number | null;
+  /**
+   * @deprecated use end_soc_percent instead
+   */
+  target_soc_percent?: number | null;
+  grid_power_w: number | null;
+  grid_energy_kwh: number | null;
+  /**
+   * @deprecated use grid_power_w/grid_energy_kwh instead
+   */
+  grid_energy_w?: number | null;
+  strategy: "charge" | "auto";
 }
 
 export interface OracleResponse {

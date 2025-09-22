@@ -218,14 +218,36 @@ export class SimulationService {
     };
 
     this.storageRef.replaceSnapshot(snapshot as unknown as Record<string, unknown>);
-    this.storageRef.appendHistory([
-      {
-        timestamp: result.timestamp,
-        battery_soc_percent: result.next_step_soc_percent,
-        price_eur_per_kwh: priceSnapshotEur,
-        price_ct_per_kwh: priceSnapshotCt,
-      },
-    ]);
+    const historyEntry: Record<string, unknown> = {
+      timestamp: result.timestamp,
+      battery_soc_percent: result.next_step_soc_percent,
+      price_eur_per_kwh: priceSnapshotEur,
+      price_ct_per_kwh: priceSnapshotCt,
+    };
+
+    const firstOracle = result.oracle_entries[0];
+    if (firstOracle) {
+      if (typeof firstOracle.grid_power_w === "number" && Number.isFinite(firstOracle.grid_power_w)) {
+        historyEntry.grid_power_w = firstOracle.grid_power_w;
+      }
+      if (typeof firstOracle.grid_energy_kwh === "number" && Number.isFinite(firstOracle.grid_energy_kwh)) {
+        historyEntry.grid_energy_wh = firstOracle.grid_energy_kwh * 1000;
+      }
+    }
+
+    const firstSolarKwh = solarGeneration[0];
+    const firstSlot = slots[0];
+    if (typeof firstSolarKwh === "number" && Number.isFinite(firstSolarKwh) && firstSlot) {
+      if (firstSolarKwh > 0) {
+        historyEntry.solar_energy_wh = firstSolarKwh * 1000;
+        const durationHours = firstSlot.durationHours ?? 0;
+        if (durationHours > 0) {
+          historyEntry.solar_power_w = (firstSolarKwh / durationHours) * 1000;
+        }
+      }
+    }
+
+    this.storageRef.appendHistory([historyEntry]);
 
     const historyRecords = this.storageRef.listHistory();
     return {
@@ -511,8 +533,8 @@ function simulateOptimalSchedule(
     const slot = slots[idx];
     const duration = slot.durationHours;
     const loadEnergy = (houseLoadWatts / 1000) * duration;
-    const priceTotal = slot.price + networkTariff;
     const solarKwh = solarGenerationPerSlot[idx] ?? 0;
+    const priceTotal = slot.price + networkTariff;
     const directTarget = Math.max(0, solarKwh * directUseRatio);
     const directUsed = Math.min(loadEnergy, directTarget);
     const loadAfterDirect = loadEnergy - directUsed;
@@ -597,7 +619,8 @@ function simulateOptimalSchedule(
     const nextState = policy[idx][stateIter];
     const delta = nextState - stateIter;
     const energyChange = delta * energyPerStep;
-    const loadEnergy = (houseLoadWatts / 1000) * slot.durationHours;
+    const slotDurationHours = slot.durationHours;
+    const loadEnergy = (houseLoadWatts / 1000) * slotDurationHours;
     const solarKwh = solarGenerationPerSlot[idx] ?? 0;
     const directTarget = Math.max(0, solarKwh * directUseRatio);
     const directUsed = Math.min(loadEnergy, directTarget);
@@ -624,7 +647,6 @@ function simulateOptimalSchedule(
       remainingSolar -= solarToBattery;
     }
 
-    const slotDurationHours = slot.durationHours;
     const durationForPower = slotDurationHours > 0 ? slotDurationHours : 1;
     const gridPowerW = durationForPower > 0 ? (gridEnergy / durationForPower) * 1000 : 0;
     const eraId =
@@ -632,10 +654,18 @@ function simulateOptimalSchedule(
         ? slot.eraId
         : slot.start.toISOString();
     const strategy: "charge" | "auto" = additionalGridCharge > 0.001 ? "charge" : "auto";
+    const startSocPercent = stateIter * percentStep;
+    const endSocPercent = nextState * percentStep;
+    const normalizedGridPower = Number.isFinite(gridPowerW) ? gridPowerW : null;
+    const normalizedGridEnergy = Number.isFinite(gridEnergy) ? gridEnergy : null;
     oracleEntries.push({
       era_id: eraId,
-      target_soc_percent: nextState * percentStep,
-      grid_energy_w: Number.isFinite(gridPowerW) ? gridPowerW : null,
+      start_soc_percent: Number.isFinite(startSocPercent) ? startSocPercent : null,
+      end_soc_percent: Number.isFinite(endSocPercent) ? endSocPercent : null,
+      target_soc_percent: Number.isFinite(endSocPercent) ? endSocPercent : null,
+      grid_power_w: normalizedGridPower,
+      grid_energy_kwh: normalizedGridEnergy,
+      grid_energy_w: normalizedGridPower,
       strategy,
     });
 
@@ -650,8 +680,11 @@ function simulateOptimalSchedule(
   const projectedGridPowerW = totalDuration > 0 ? (gridEnergyTotalKwh / totalDuration) * 1000 : 0;
 
   const shouldChargeFromGrid = gridChargeTotalKwh > 0.001;
-  const firstTarget = oracleEntries[0]?.target_soc_percent ?? null;
-  const finalTarget = oracleEntries[oracleEntries.length - 1]?.target_soc_percent ?? null;
+  const firstTarget = oracleEntries[0]?.end_soc_percent ?? oracleEntries[0]?.target_soc_percent ?? null;
+  const finalTarget =
+    oracleEntries[oracleEntries.length - 1]?.end_soc_percent ??
+    oracleEntries[oracleEntries.length - 1]?.target_soc_percent ??
+    null;
   const nextStepSocPercent = shouldChargeFromGrid ? 100 : firstTarget;
   const recommendedTarget = shouldChargeFromGrid ? 100 : finalTarget;
   return {

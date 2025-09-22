@@ -48,6 +48,7 @@ type SeriesSource = "history" | "forecast" | "gap";
 interface ProjectionPoint extends ScatterDataPoint {
   source: SeriesSource;
   xEnd?: number | null;
+  isCurrentMarker?: boolean;
 }
 
 interface AxisBounds {
@@ -386,7 +387,7 @@ const buildSocSeries = (
   history: HistoryPoint[],
   futureEras: DerivedEra[],
   summary: SnapshotSummary | null,
-): ProjectionPoint[] => {
+): { series: ProjectionPoint[]; currentMarker: ProjectionPoint | null } => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.battery_soc_percent))
     .filter((point): point is ProjectionPoint => point !== null);
@@ -395,13 +396,29 @@ const buildSocSeries = (
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
     addPoint(futurePoints, { x: era.startMs, y: currentSoc, source: "forecast" });
-    const targetSoc = era.oracle?.target_soc_percent;
+    const targetSoc = era.oracle?.end_soc_percent ?? era.oracle?.target_soc_percent ?? null;
     const endSoc = isFiniteNumber(targetSoc) ? targetSoc : currentSoc;
     addPoint(futurePoints, { x: era.endMs, y: endSoc, source: "forecast" });
     currentSoc = endSoc;
   }
 
-  return buildCombinedSeries(historyPoints, futurePoints);
+  const combined = buildCombinedSeries(historyPoints, futurePoints);
+
+  let currentMarker: ProjectionPoint | null = null;
+  if (historyPoints.length) {
+    const anchor = historyPoints[historyPoints.length - 1];
+    currentMarker = { ...anchor, isCurrentMarker: true };
+  } else if (summary && isFiniteNumber(summary.current_soc_percent)) {
+    const timestamp = parseTimestamp(summary.timestamp) ?? Date.now();
+    currentMarker = {
+      x: timestamp,
+      y: summary.current_soc_percent,
+      source: "history",
+      isCurrentMarker: true,
+    };
+  }
+
+  return { series: combined, currentMarker };
 };
 
 const buildGridSeries = (
@@ -414,7 +431,7 @@ const buildGridSeries = (
 
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    const power = era.oracle?.grid_energy_w;
+    const power = era.oracle?.grid_power_w ?? era.oracle?.grid_energy_w ?? null;
     if (!isFiniteNumber(power)) {
       continue;
     }
@@ -670,7 +687,7 @@ const buildDatasets = (
   timeRange: { min: number | null; max: number | null };
 } => {
   const futureEras = buildFutureEras(forecast, oracleEntries);
-  const socSeries = buildSocSeries(history, futureEras, summary);
+  const { series: socSeries, currentMarker } = buildSocSeries(history, futureEras, summary);
   const gridSeries = buildGridSeries(history, futureEras);
   const solarSeries = buildSolarSeries(history, futureEras);
   const priceSeries = buildPriceSeries(history, futureEras);
@@ -770,6 +787,21 @@ const buildDatasets = (
         resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
     },
   ];
+
+  if (currentMarker) {
+    datasets.push({
+      type: "line",
+      label: "Current SOC",
+      data: [{ ...currentMarker }],
+      yAxisID: "soc",
+      showLine: false,
+      pointRadius: 9,
+      pointHoverRadius: 11,
+      pointBorderWidth: 2,
+      pointBackgroundColor: SOC_BORDER,
+      pointBorderColor: "#ffffff",
+    });
+  }
 
   const powerBounds = includeZeroInBounds(computeBounds(powerSeries, DEFAULT_POWER_BOUNDS));
   const priceBounds = includeZeroInBounds(computeBounds(priceSeries, DEFAULT_PRICE_BOUNDS));

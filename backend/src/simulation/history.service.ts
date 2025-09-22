@@ -14,7 +14,7 @@ export class HistoryService {
   getHistory(limit = 96): HistoryResponse {
     const historyRecords = this.storage.listHistory(limit);
     const entries = this.serialize(historyRecords.map((i) => i.payload));
-    const generated_at = historyRecords[historyRecords.length - 1]?.payload?.timestamp as string | undefined;
+    const generated_at = historyRecords[0]?.payload?.timestamp as string | undefined;
     return { generated_at: generated_at ?? new Date().toISOString(), entries };
   }
 }
