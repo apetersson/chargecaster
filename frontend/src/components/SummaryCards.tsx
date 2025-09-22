@@ -9,6 +9,8 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
 
   const currentSoc = typeof data.current_soc_percent === "number" ? data.current_soc_percent : null;
   const recommendedSoc = typeof data.recommended_soc_percent === "number" ? data.recommended_soc_percent : null;
+  const activeControlSavings =
+    (data as { active_control_savings_eur?: number | null }).active_control_savings_eur ?? null;
 
   let actionLabel = "Auto";
   if (currentSoc !== null && recommendedSoc !== null) {
@@ -42,6 +44,10 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
           <span className="value small">{formatNumber(data.baseline_cost_eur, " €")}</span>
         </div>
         <div className="metric">
+          <span className="label">Basic Battery Cost</span>
+          <span className="value small">{formatNumber(data.basic_battery_cost_eur, " €")}</span>
+        </div>
+        <div className="metric">
           <span className="label">Price Snapshot</span>
           <span className="value small">
             {formatNumber(
@@ -58,8 +64,12 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
           <span className="value small">{formatNumber(data.projected_cost_eur, " €")}</span>
         </div>
         <div className="metric">
-          <span className="label">Projected Savings</span>
+          <span className="label">PV/Battery Savings</span>
           <span className="value small">{formatNumber(data.projected_savings_eur, " €")}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Active Control Savings</span>
+          <span className="value small">{formatNumber(activeControlSavings, " €")}</span>
         </div>
         <div className="metric">
           <span className="label">Projected Grid Power</span>

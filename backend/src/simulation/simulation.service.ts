@@ -28,6 +28,10 @@ export interface SimulationInput {
   priceSnapshotEurPerKwh?: number | null;
   solarForecast?: Record<string, unknown>[];
   forecastEras?: ForecastEra[];
+  observations?: {
+    gridPowerW?: number | null;
+    solarPowerW?: number | null;
+  };
 }
 
 @Injectable()
@@ -51,6 +55,51 @@ export class SimulationService {
       ...payload,
       history,
     };
+  }
+
+  private resolveLiveSoc(rawSoc: unknown): number | null {
+    const numeric = this.normalizeSoc(rawSoc);
+    if (numeric !== null) {
+      return numeric;
+    }
+    const previous = this.storageRef.getLatestSnapshot();
+    if (!previous) {
+      return null;
+    }
+    const payload = previous.payload as Partial<SnapshotPayload> | undefined;
+    if (!payload) {
+      return null;
+    }
+    const candidates = [
+      payload.current_soc_percent,
+      payload.next_step_soc_percent,
+      payload.recommended_soc_percent,
+      payload.recommended_final_soc_percent,
+    ];
+    for (const candidate of candidates) {
+      const value = this.normalizeSoc(candidate);
+      if (value !== null) {
+        this.logger.warn(`Live SOC missing from inputs; falling back to last snapshot (${value}%)`);
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private normalizeSoc(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value >= 0 && value <= 100) {
+        return value;
+      }
+      return Math.min(100, Math.max(0, value));
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        return Math.min(100, Math.max(0, numeric));
+      }
+    }
+    return null;
   }
 
   ensureSeedFromFixture(): SnapshotPayload {
@@ -111,6 +160,7 @@ export class SimulationService {
       price_snapshot_eur_per_kwh: snapshot.price_snapshot_eur_per_kwh,
       projected_cost_eur: snapshot.projected_cost_eur,
       baseline_cost_eur: snapshot.baseline_cost_eur,
+      basic_battery_cost_eur: snapshot.basic_battery_cost_eur,
       projected_savings_eur: snapshot.projected_savings_eur,
       projected_grid_energy_w: snapshot.projected_grid_energy_w,
       forecast_hours: snapshot.forecast_hours,
@@ -154,6 +204,8 @@ export class SimulationService {
     if (!this.storageRef) {
       throw new Error("Storage service not initialised");
     }
+    const resolvedSoc = this.resolveLiveSoc(input.liveState?.battery_soc);
+    const liveState = { battery_soc: resolvedSoc };
     const slots = normalizePriceSlots(input.forecast);
     const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
     const solarMap = new Map<number, number>();
@@ -171,7 +223,7 @@ export class SimulationService {
     const directUseRatio = clampRatio(input.config.solar?.direct_use_ratio ?? 0);
     const feedInTariff = Math.max(0, Number(input.config.price?.feed_in_tariff_eur_per_kwh ?? 0));
 
-    const result = simulateOptimalSchedule(input.config, input.liveState, slots, {
+    const result = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGeneration,
       pvDirectUseRatio: directUseRatio,
       feedInTariffEurPerKwh: feedInTariff,
@@ -195,6 +247,13 @@ export class SimulationService {
     const errors = Array.isArray(input.errors) ? [...input.errors] : [];
     const fallbackEras = buildErasFromSlots(slots);
     const hasProvidedEras = (input.forecastEras?.length ?? 0) > 0;
+    const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
+      solarGenerationKwhPerSlot: solarGeneration,
+      pvDirectUseRatio: directUseRatio,
+      feedInTariffEurPerKwh: feedInTariff,
+      allowBatteryExport: input.config.logic?.allow_battery_export ?? true,
+      allowGridChargeFromGrid: false,
+    });
     const snapshot: SnapshotPayload = {
       timestamp: result.timestamp,
       interval_seconds: input.config.logic?.interval_seconds ?? null,
@@ -206,8 +265,12 @@ export class SimulationService {
       price_snapshot_ct_per_kwh: priceSnapshotCt,
       price_snapshot_eur_per_kwh: priceSnapshotEur,
       projected_cost_eur: result.projected_cost_eur,
-      baseline_cost_eur: result.baseline_cost_eur,
+     baseline_cost_eur: result.baseline_cost_eur,
+     basic_battery_cost_eur: autoResult.projected_cost_eur,
       projected_savings_eur: result.projected_savings_eur,
+      active_control_savings_eur: autoResult.projected_cost_eur !== null && result.projected_cost_eur !== null
+        ? autoResult.projected_cost_eur - result.projected_cost_eur
+        : null,
       projected_grid_energy_w: result.projected_grid_energy_w,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
@@ -226,10 +289,17 @@ export class SimulationService {
       price_ct_per_kwh: priceSnapshotCt,
     };
 
+    const observedGridPower = input.observations?.gridPowerW;
+    if (typeof observedGridPower === "number" && Number.isFinite(observedGridPower)) {
+      historyEntry.grid_power_w = observedGridPower;
+    }
+
     const firstOracle = result.oracle_entries[0];
     if (firstOracle) {
       if (typeof firstOracle.grid_power_w === "number" && Number.isFinite(firstOracle.grid_power_w)) {
-        historyEntry.grid_power_w = firstOracle.grid_power_w;
+        if (historyEntry.grid_power_w === undefined) {
+          historyEntry.grid_power_w = firstOracle.grid_power_w;
+        }
       }
       if (typeof firstOracle.grid_energy_kwh === "number" && Number.isFinite(firstOracle.grid_energy_kwh)) {
         historyEntry.grid_energy_wh = firstOracle.grid_energy_kwh * 1000;
@@ -238,13 +308,27 @@ export class SimulationService {
 
     const firstSolarKwh = solarGeneration[0];
     const firstSlot = slots[0];
+    const observedSolarPower = input.observations?.solarPowerW;
     if (typeof firstSolarKwh === "number" && Number.isFinite(firstSolarKwh) && firstSlot) {
+      const durationHours = firstSlot.durationHours ?? 0;
       if (firstSolarKwh > 0) {
         historyEntry.solar_energy_wh = firstSolarKwh * 1000;
-        const durationHours = firstSlot.durationHours ?? 0;
         if (durationHours > 0) {
           historyEntry.solar_power_w = (firstSolarKwh / durationHours) * 1000;
         }
+      } else if (firstSolarKwh === 0) {
+        if (historyEntry.solar_energy_wh === undefined) {
+          historyEntry.solar_energy_wh = 0;
+        }
+        if (historyEntry.solar_power_w === undefined) {
+          historyEntry.solar_power_w = 0;
+        }
+      }
+    }
+    if (typeof observedSolarPower === "number" && Number.isFinite(observedSolarPower)) {
+      historyEntry.solar_power_w = observedSolarPower;
+      if (historyEntry.solar_energy_wh === undefined && typeof firstSolarKwh === "number" && Number.isFinite(firstSolarKwh) && firstSolarKwh === 0) {
+        historyEntry.solar_energy_wh = 0;
       }
     }
 
@@ -451,6 +535,7 @@ interface SimulationOptions {
   pvDirectUseRatio?: number;
   feedInTariffEurPerKwh?: number;
   allowBatteryExport?: boolean;
+  allowGridChargeFromGrid?: boolean;
 }
 
 interface SimulationOutput {
@@ -501,6 +586,8 @@ function simulateOptimalSchedule(
     typeof options.allowBatteryExport === "boolean"
       ? options.allowBatteryExport
       : cfg.logic?.allow_battery_export ?? true;
+  const allowGridChargeFromGrid =
+    typeof options.allowGridChargeFromGrid === "boolean" ? options.allowGridChargeFromGrid : true;
 
   let currentSoc = Number(liveState.battery_soc ?? 50);
   if (Number.isNaN(currentSoc)) {
@@ -546,7 +633,7 @@ function simulateOptimalSchedule(
     const loadAfterDirect = loadEnergy - directUsed;
     const availableSolar = Math.max(0, solarKwh - directUsed);
 
-    const gridChargeLimitKwh = maxChargePowerW > 0 ? (maxChargePowerW / 1000) * duration : 0;
+    const gridChargeLimitKwh = allowGridChargeFromGrid && maxChargePowerW > 0 ? (maxChargePowerW / 1000) * duration : 0;
     const solarChargeLimitKwh = (() => {
       if (availableSolar <= 0) {
         return 0;
