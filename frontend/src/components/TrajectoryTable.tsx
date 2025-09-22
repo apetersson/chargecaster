@@ -193,11 +193,10 @@ const TrajectoryTable = ({ forecast, oracleEntries }: TrajectoryTableProps) => {
               const strategy = oracle?.strategy ?? "auto";
               const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);
               const targetLabel = oracle ? `${endSocValue} (${strategy.toUpperCase()})` : "n/a";
-              const gridPower = typeof oracle?.grid_power_w === "number"
-                ? formatNumber(oracle.grid_power_w, " W")
-                : oracle?.grid_power_w === 0
-                  ? formatNumber(0, " W")
-                  : "n/a";
+              const gridPowerValue = oracle?.grid_power_w;
+              const gridPower = typeof gridPowerValue === "number" && Number.isFinite(gridPowerValue)
+                ? formatNumber(gridPowerValue, " W")
+                : "n/a";
               return (
                 <tr key={era.era_id}>
                   <td>{formatDate(era.start)}</td>

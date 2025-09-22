@@ -32,7 +32,6 @@ const config = {
 
 describe("dashboard tRPC", () => {
   const sampleDataPath = join(process.cwd(), "fixtures", "sample_data.json");
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const rawSample = JSON.parse(readFileSync(sampleDataPath, "utf-8")) as JsonObject;
   const forecast = extractForecastFromState(rawSample);
 

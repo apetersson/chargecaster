@@ -4,8 +4,6 @@ import type { Database } from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-
 import type { JsonObject } from "../common/json.ts";
 
 export interface SnapshotRecord {
