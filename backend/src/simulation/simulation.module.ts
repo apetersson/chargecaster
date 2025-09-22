@@ -6,11 +6,12 @@ import { HistoryService } from "./history.service.ts";
 import { SummaryService } from "./summary.service.ts";
 import { OracleService } from "./oracle.service.ts";
 import { ConfigSyncService } from "../config/config-sync.service.ts";
+import { FroniusService } from "../fronius/fronius.service.ts";
 import { StorageModule } from "../storage/storage.module.ts";
 
 @Module({
   imports: [StorageModule],
-  providers: [SimulationService, ForecastService, HistoryService, SummaryService, OracleService, ConfigSyncService],
-  exports: [SimulationService, ForecastService, HistoryService, SummaryService, OracleService, ConfigSyncService],
+  providers: [SimulationService, ForecastService, HistoryService, SummaryService, OracleService, ConfigSyncService, FroniusService],
+  exports: [SimulationService, ForecastService, HistoryService, SummaryService, OracleService, ConfigSyncService, FroniusService],
 })
 export class SimulationModule {}
