@@ -83,6 +83,7 @@ export class SimulationService {
         interval_seconds: 300,
         min_hold_minutes: 20,
         house_load_w: 1200,
+        allow_battery_export: true,
       },
       solar: {
         direct_use_ratio: 0.6,
@@ -177,6 +178,7 @@ export class SimulationService {
       solarGenerationKwhPerSlot: solarGeneration,
       pvDirectUseRatio: directUseRatio,
       feedInTariffEurPerKwh: feedInTariff,
+      allowBatteryExport: input.config.logic?.allow_battery_export ?? true,
     });
     const mode = result.recommended_soc_percent === 100 ? "CHARGE" : "AUTO";
     this.logger.log(`Simulation result: ${mode}`);
@@ -451,6 +453,7 @@ interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
   pvDirectUseRatio?: number;
   feedInTariffEurPerKwh?: number;
+  allowBatteryExport?: boolean;
 }
 
 interface SimulationOutput {
@@ -497,6 +500,10 @@ function simulateOptimalSchedule(
     0,
     Number(options.feedInTariffEurPerKwh ?? cfg.price?.feed_in_tariff_eur_per_kwh ?? 0),
   );
+  const allowBatteryExport =
+    typeof options.allowBatteryExport === "boolean"
+      ? options.allowBatteryExport
+      : cfg.logic?.allow_battery_export ?? true;
 
   let currentSoc = Number(liveState.battery_soc ?? 50);
   if (Number.isNaN(currentSoc)) {
@@ -554,7 +561,8 @@ function simulateOptimalSchedule(
       return availableSolar;
     })();
     const totalChargeLimitKwh = gridChargeLimitKwh + solarChargeLimitKwh;
-    const baselineGridImport = Math.max(0, loadAfterDirect - availableSolar);
+    const baselineGridEnergy = loadAfterDirect - availableSolar;
+    const baselineGridImport = Math.max(0, baselineGridEnergy);
 
     for (let state = 0; state < numStates; state += 1) {
       let bestCost = Number.POSITIVE_INFINITY;
@@ -576,6 +584,12 @@ function simulateOptimalSchedule(
         const nextState = state + delta;
         const energyChange = delta * energyPerStep;
         const gridEnergy = loadAfterDirect + energyChange - availableSolar;
+        if (!allowBatteryExport) {
+          const minGridEnergy = baselineGridEnergy < 0 ? baselineGridEnergy : 0;
+          if (gridEnergy < minGridEnergy - 1e-9) {
+            continue;
+          }
+        }
         if (energyChange > 0) {
           const gridImport = Math.max(0, gridEnergy);
           const additionalGridCharge = Math.max(0, gridImport - baselineGridImport);
