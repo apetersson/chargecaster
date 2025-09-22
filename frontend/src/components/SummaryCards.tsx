@@ -7,10 +7,20 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
   }
   const { label, className } = statusClass(data.errors, data.warnings);
 
-  const strategy = data.recommended_soc_percent === 100 ? "charge" : "auto";
-  const actionLabel = strategy === "charge" ? "Charge to 100%" : "Auto";
-  const nextTargetLabel = `${formatPercent(data.next_step_soc_percent)} (${strategy === "charge" ? "Charge" : "Auto"})`;
-  const finalTargetLabel = `${formatPercent(data.recommended_final_soc_percent)} (${strategy === "charge" ? "Charge" : "Auto"})`;
+  const currentSoc = typeof data.current_soc_percent === "number" ? data.current_soc_percent : null;
+  const recommendedSoc = typeof data.recommended_soc_percent === "number" ? data.recommended_soc_percent : null;
+
+  let actionLabel = "Auto";
+  if (currentSoc !== null && recommendedSoc !== null) {
+    const delta = recommendedSoc - currentSoc;
+    if (delta > 1) {
+      actionLabel = "Charge";
+    } else if (delta < -1) {
+      actionLabel = "Discharge";
+    } else {
+      actionLabel = "Hold";
+    }
+  }
 
   return (
     <section className="card">
@@ -26,14 +36,6 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
         <div className="metric">
           <span className="label">Current SOC</span>
           <span className="value">{formatPercent(data.current_soc_percent)}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Next Target</span>
-          <span className="value">{nextTargetLabel}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Recommended Final</span>
-          <span className="value">{finalTargetLabel}</span>
         </div>
         <div className="metric">
           <span className="label">Baseline Cost</span>
@@ -62,6 +64,14 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
         <div className="metric">
           <span className="label">Projected Grid Power</span>
           <span className="value small">{formatNumber(data.projected_grid_energy_w, " W")}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Forecast Horizon</span>
+          <span className="value small">{formatNumber(data.forecast_hours, " h")}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Forecast Samples</span>
+          <span className="value small">{formatNumber(data.forecast_samples, " slots")}</span>
         </div>
       </div>
       <small className="timestamp">Last update: {formatDate(data.timestamp)}</small>
