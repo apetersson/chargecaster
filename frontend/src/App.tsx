@@ -15,6 +15,22 @@ import type {
 
 const REFRESH_INTERVAL_MS = 60_000;
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    const candidate = (error as { message?: unknown }).message;
+    if (typeof candidate === "string") {
+      return candidate;
+    }
+  }
+  return "Unknown error";
+};
+
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined) {
     return null;
@@ -139,7 +155,7 @@ const App = () => {
       setOracleEntries(Array.isArray(oracleData.entries) ? oracleData.entries : []);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }

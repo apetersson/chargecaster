@@ -14,6 +14,7 @@ import {
   Tooltip,
   type ChartDataset,
   type ChartOptions,
+  type LegendItem,
   type Plugin,
   type ScatterDataPoint,
   type ScriptableContext,
@@ -232,6 +233,12 @@ interface DerivedEra {
   durationHours: number;
   priceCtPerKwh: number | null;
   solarAverageW: number | null;
+}
+
+interface LegendGroup {
+  label: string;
+  color: string;
+  datasetIndices: number[];
 }
 
 const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEntry[]): DerivedEra[] => {
@@ -713,6 +720,7 @@ const buildDatasets = (
     price: AxisBounds;
   };
   timeRange: { min: number | null; max: number | null };
+  legendGroups: LegendGroup[];
 } => {
   const futureEras = buildFutureEras(forecast, oracleEntries);
   const { series: socSeries, currentMarker } = buildSocSeries(history, futureEras, summary);
@@ -835,6 +843,32 @@ const buildDatasets = (
   const priceBounds = includeZeroInBounds(computeBounds(priceSeries, DEFAULT_PRICE_BOUNDS));
   const timeRange = findTimeRange(socSeries, gridSeries, solarSeries, priceSeries);
 
+  const labelToIndices = new Map<string, number[]>();
+  datasets.forEach((dataset, index) => {
+    const key = dataset.label ?? `dataset-${index}`;
+    const existing = labelToIndices.get(key);
+    if (existing) {
+      existing.push(index);
+    } else {
+      labelToIndices.set(key, [index]);
+    }
+  });
+
+  const legendConfig = [
+    { label: "State of Charge", color: SOC_BORDER, datasetLabels: ["State of Charge"] },
+    { label: "Grid Power", color: GRID_BORDER, datasetLabels: ["Grid Power", GRID_MARKERS_LABEL] },
+    { label: "Solar Generation", color: SOLAR_BORDER, datasetLabels: ["Solar Generation"] },
+    { label: TARIFF_LABEL, color: PRICE_BORDER, datasetLabels: [TARIFF_LABEL] },
+    { label: "Current SOC", color: SOC_BORDER, datasetLabels: ["Current SOC"] },
+  ] as const;
+
+  const legendGroups: LegendGroup[] = legendConfig
+    .map((entry) => {
+      const indices = entry.datasetLabels.flatMap((datasetLabel) => labelToIndices.get(datasetLabel) ?? []);
+      return indices.length ? { label: entry.label, color: entry.color, datasetIndices: indices } : null;
+    })
+    .filter((item): item is LegendGroup => item !== null);
+
   return {
     datasets,
     bounds: {
@@ -842,6 +876,7 @@ const buildDatasets = (
       price: priceBounds,
     },
     timeRange,
+    legendGroups,
   };
 };
 
@@ -851,166 +886,217 @@ const buildOptions = (config: {
     price: AxisBounds;
   };
   timeRange: { min: number | null; max: number | null };
-}): ChartOptions<"line"> => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  interaction: {
-    mode: "nearest",
-    intersect: false,
-  },
-  plugins: {
-    legend: {
-      position: "top",
-      labels: {
-        color: LEGEND_COLOR,
-        boxWidth: 16,
-        usePointStyle: true,
-        filter: (legendItem) => legendItem.text !== GRID_MARKERS_LABEL,
-      },
-    },
-    tooltip: {
-      callbacks: {
-        title(items) {
-          const value = items[0]?.parsed?.x;
-          if (typeof value !== "number" || !Number.isFinite(value)) {
-            return "";
-          }
-          return dateTimeFormatter.format(new Date(value));
-        },
-        label(item) {
-          const { dataset, parsed } = item;
-          const value =
-            typeof parsed.y === "number" && Number.isFinite(parsed.y)
-              ? parsed.y
-              : null;
-          if (value === null) {
-            return "";
-          }
-          const baseLabel = dataset.label ? `${dataset.label}: ` : "";
-          if (dataset.yAxisID === "soc") {
-            return `${baseLabel}${percentFormatter.format(value)}%`;
-          }
-          if (dataset.yAxisID === "power") {
-            return `${baseLabel}${numberFormatter.format(value)} W`;
-          }
-          if (dataset.yAxisID === "price") {
-            return `${baseLabel}${numberFormatter.format(value)} ct/kWh`;
-          }
-          return `${baseLabel}${numberFormatter.format(value)}`;
-        },
-      },
-    },
-  },
-  scales: {
-    x: {
-      type: "time",
-      min: config.timeRange.min ?? undefined,
-      max: config.timeRange.max ?? undefined,
-      time: {
-        unit: "hour",
-        displayFormats: {
-          hour: "HH:mm",
-        },
-      },
-      ticks: {
-        color: TICK_COLOR,
-        maxRotation: 0,
-        autoSkip: true,
-        callback: (value) => {
-          const numeric =
-            typeof value === "number" ? value : Number(value);
-          if (!Number.isFinite(numeric)) {
-            return "";
-          }
-          const date = new Date(numeric);
-          return timeFormatter.format(date);
-        },
-      },
-      grid: {
-        color: GRID_COLOR,
-      },
-    },
-    soc: {
-      type: "linear",
-      position: "left",
-      min: DEFAULT_SOC_BOUNDS.min,
-      max: DEFAULT_SOC_BOUNDS.max,
-      display: false,
-      ticks: {
-        color: TICK_COLOR,
-        callback: (value) => {
-          const numeric =
-            typeof value === "number" ? value : Number(value);
-          if (!Number.isFinite(numeric)) {
-            return "";
-          }
-          return `${percentFormatter.format(numeric)}%`;
-        },
-      },
-      grid: {
-        display: false,
-      },
-    },
-    power: {
-      type: "linear",
-      position: "left",
-      min: config.bounds.power.min,
-      max: config.bounds.power.max,
-      ticks: {
-        color: TICK_COLOR,
-        callback: (value) => {
-          const numeric =
-            typeof value === "number" ? value : Number(value);
-          if (!Number.isFinite(numeric)) {
-            return "";
-          }
-          return `${numberFormatter.format(numeric)} W`;
-        },
-      },
-      grid: {
-        color: GRID_COLOR,
-      },
-      title: {
-        display: true,
-        text: "Watts",
-        color: TICK_COLOR,
-        font: {
-          size: 12,
-        },
-      },
-    },
-    price: {
-      type: "linear",
-      position: "right",
-      min: config.bounds.price.min,
-      max: config.bounds.price.max,
-      ticks: {
-        color: TICK_COLOR,
-        callback: (value) => {
-          const numeric =
-            typeof value === "number" ? value : Number(value);
-          if (!Number.isFinite(numeric)) {
-            return "";
-          }
-          return `${numberFormatter.format(numeric)} ct/kWh`;
-        },
-      },
-      grid: {
-        drawOnChartArea: false,
-        color: GRID_COLOR,
-      },
-      title: {
-        display: true,
-        text: "ct/kWh",
-        color: TICK_COLOR,
-        font: {
-          size: 12,
-        },
-      },
-    },
-  },
-});
+  legendGroups: LegendGroup[];
+}): ChartOptions<"line"> => {
+  const { bounds, timeRange, legendGroups } = config;
+  const groupedLegendEntries = legendGroups.filter((group) => group.datasetIndices.length > 0);
+  const legendDefaults = Chart.defaults.plugins.legend;
+  const legendLabelDefaults = legendDefaults.labels;
+  const legendClickDefault = legendDefaults.onClick
+    ? legendDefaults.onClick.bind(legendDefaults)
+    : undefined;
 
+  const generateDefaultLabels = (chart: Chart): LegendItem[] =>
+    legendLabelDefaults.generateLabels.call(legendLabelDefaults, chart);
+
+  const options: ChartOptions<"line"> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {
+      mode: "nearest",
+      intersect: false,
+    },
+    plugins: {
+      legend: {
+        position: "top",
+        labels: {
+          color: LEGEND_COLOR,
+          boxWidth: 16,
+          usePointStyle: true,
+          generateLabels: (chart) => {
+            if (!groupedLegendEntries.length) {
+              return generateDefaultLabels(chart).filter((item) => item.text !== GRID_MARKERS_LABEL);
+            }
+            const template = generateDefaultLabels(chart)[0];
+            return groupedLegendEntries.map((group) => {
+              const datasetIndex = group.datasetIndices[0];
+              const hidden = group.datasetIndices.every((index) => chart.getDatasetMeta(index).hidden === true);
+              return {
+                text: group.label,
+                fillStyle: group.color,
+                strokeStyle: group.color,
+                lineCap: template?.lineCap ?? "round",
+                lineDash: template?.lineDash ?? [],
+                lineDashOffset: template?.lineDashOffset ?? 0,
+                lineJoin: template?.lineJoin ?? "round",
+                lineWidth: template?.lineWidth ?? 2,
+                hidden,
+                datasetIndex,
+                datasetIndices: group.datasetIndices,
+              } as LegendItem & { datasetIndices: number[] };
+            });
+          },
+        },
+        onClick: (event, legendItem, legend) => {
+          const chart = legend.chart;
+          const datasetIndices = (legendItem as LegendItem & { datasetIndices?: number[] }).datasetIndices;
+          if (!datasetIndices || !datasetIndices.length || !groupedLegendEntries.length) {
+            legendClickDefault?.(event, legendItem, legend);
+            return;
+          }
+          datasetIndices.forEach((index) => {
+            const meta = chart.getDatasetMeta(index);
+            const visible = chart.isDatasetVisible(index);
+            meta.hidden = visible ? true : null;
+          });
+          chart.update();
+        },
+      },
+      tooltip: {
+        callbacks: {
+          title(items) {
+            const value = items[0]?.parsed?.x;
+            if (typeof value !== "number" || !Number.isFinite(value)) {
+              return "";
+            }
+            return dateTimeFormatter.format(new Date(value));
+          },
+          label(item) {
+            const { dataset, parsed } = item;
+            const value =
+              typeof parsed.y === "number" && Number.isFinite(parsed.y)
+                ? parsed.y
+                : null;
+            if (value === null) {
+              return "";
+            }
+            const baseLabel = dataset.label ? `${dataset.label}: ` : "";
+            if (dataset.yAxisID === "soc") {
+              return `${baseLabel}${percentFormatter.format(value)}%`;
+            }
+            if (dataset.yAxisID === "power") {
+              return `${baseLabel}${numberFormatter.format(value)} W`;
+            }
+            if (dataset.yAxisID === "price") {
+              return `${baseLabel}${numberFormatter.format(value)} ct/kWh`;
+            }
+            return `${baseLabel}${numberFormatter.format(value)}`;
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        type: "time",
+        min: timeRange.min ?? undefined,
+        max: timeRange.max ?? undefined,
+        time: {
+          unit: "hour",
+          displayFormats: {
+            hour: "HH:mm",
+          },
+        },
+        ticks: {
+          color: TICK_COLOR,
+          maxRotation: 0,
+          autoSkip: true,
+          callback: (value) => {
+            const numeric =
+              typeof value === "number" ? value : Number(value);
+            if (!Number.isFinite(numeric)) {
+              return "";
+            }
+            const date = new Date(numeric);
+            return timeFormatter.format(date);
+          },
+        },
+        grid: {
+          color: GRID_COLOR,
+        },
+      },
+      soc: {
+        type: "linear",
+        position: "left",
+        min: DEFAULT_SOC_BOUNDS.min,
+        max: DEFAULT_SOC_BOUNDS.max,
+        display: false,
+        ticks: {
+          color: TICK_COLOR,
+          callback: (value) => {
+            const numeric =
+              typeof value === "number" ? value : Number(value);
+            if (!Number.isFinite(numeric)) {
+              return "";
+            }
+            return `${percentFormatter.format(numeric)}%`;
+          },
+        },
+        grid: {
+          display: false,
+        },
+      },
+      power: {
+        type: "linear",
+        position: "left",
+        min: bounds.power.min,
+        max: bounds.power.max,
+        ticks: {
+          color: TICK_COLOR,
+          callback: (value) => {
+            const numeric =
+              typeof value === "number" ? value : Number(value);
+            if (!Number.isFinite(numeric)) {
+              return "";
+            }
+            return `${numberFormatter.format(numeric)} W`;
+          },
+        },
+        grid: {
+          color: GRID_COLOR,
+        },
+        title: {
+          display: true,
+          text: "Watts",
+          color: TICK_COLOR,
+          font: {
+            size: 12,
+          },
+        },
+      },
+      price: {
+        type: "linear",
+        position: "right",
+        min: bounds.price.min,
+        max: bounds.price.max,
+        ticks: {
+          color: TICK_COLOR,
+          callback: (value) => {
+            const numeric =
+              typeof value === "number" ? value : Number(value);
+            if (!Number.isFinite(numeric)) {
+              return "";
+            }
+            return `${numberFormatter.format(numeric)} ct/kWh`;
+          },
+        },
+        grid: {
+          drawOnChartArea: false,
+          color: GRID_COLOR,
+        },
+        title: {
+          display: true,
+          text: "ct/kWh",
+          color: TICK_COLOR,
+          font: {
+            size: 12,
+          },
+        },
+      },
+    },
+  };
+
+  return options;
+};
 export const useProjectionChart = (
   history: HistoryPoint[],
   forecast: ForecastEra[],
@@ -1031,8 +1117,8 @@ export const useProjectionChart = (
       return;
     }
 
-    const { datasets, bounds, timeRange } = buildDatasets(history, forecast, oracleEntries, summary);
-    const options = buildOptions({ bounds, timeRange });
+    const { datasets, bounds, timeRange, legendGroups } = buildDatasets(history, forecast, oracleEntries, summary);
+    const options = buildOptions({ bounds, timeRange, legendGroups });
 
     if (chartInstance.current) {
       chartInstance.current.destroy();
