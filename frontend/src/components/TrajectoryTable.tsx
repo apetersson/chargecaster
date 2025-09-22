@@ -186,14 +186,19 @@ const TrajectoryTable = ({ forecast, oracleEntries }: TrajectoryTableProps) => {
                   : solar.energyKwh !== null
                     ? formatNumber(solar.energyKwh, " kWh")
                     : "n/a";
-              const gridPower = oracle ? formatNumber(oracle.grid_energy_w, " W") : "n/a";
+              const strategy = oracle?.strategy ?? "auto";
+              const targetValue = formatPercent(oracle?.target_soc_percent ?? null);
+              const targetLabel = `${targetValue} (${strategy.toUpperCase()})`;
+              const gridPower = strategy === "charge"
+                ? formatNumber(oracle?.grid_energy_w, " W")
+                : "Auto";
               return (
                 <tr key={era.era_id}>
                   <td>{formatDate(era.start)}</td>
                   <td>{era.end ? timeFormatter.format(new Date(era.end)) : "n/a"}</td>
                   <td>{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
                   <td>{solarLabel}</td>
-                  <td>{formatPercent(oracle?.target_soc_percent ?? null)}</td>
+                  <td>{targetLabel}</td>
                   <td>{gridPower}</td>
                 </tr>
               );

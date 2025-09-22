@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 
-import { TrpcRouter } from "./trpc.router.js";
-import { SimulationModule } from "../simulation/simulation.module.js";
+import { TrpcRouter } from "./trpc.router.ts";
+import { SimulationModule } from "../simulation/simulation.module.ts";
 
 @Module({
   imports: [SimulationModule],

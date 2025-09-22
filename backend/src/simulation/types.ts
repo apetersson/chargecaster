@@ -18,6 +18,7 @@ export interface LogicConfig {
 
 export interface SolarConfig {
   direct_use_ratio?: number;
+  max_charge_power_w?: number;
 }
 
 export interface StateConfig {
@@ -124,15 +125,10 @@ export interface OracleEntry {
   era_id: string;
   target_soc_percent: number | null;
   grid_energy_w: number | null;
+  strategy?: "charge" | "auto";
 }
 
 export interface OracleResponse {
   generated_at: string;
   entries: OracleEntry[];
-}
-
-export interface SimulationResult {
-  snapshot: SnapshotPayload;
-  historyEntries: HistoryPoint[];
-  rawOutput: Record<string, unknown>;
 }

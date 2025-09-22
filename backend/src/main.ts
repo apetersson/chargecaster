@@ -8,10 +8,10 @@ import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 
-import { AppModule } from "./app.module.js";
-import { SimulationService } from "./simulation/simulation.service.js";
-import { ConfigSyncService } from "./config/config-sync.service.js";
-import { TrpcRouter } from "./trpc/trpc.router.js";
+import { AppModule } from "./app.module.ts";
+import { SimulationService } from "./simulation/simulation.service.ts";
+import { ConfigSyncService } from "./config/config-sync.service.ts";
+import { TrpcRouter } from "./trpc/trpc.router.ts";
 
 const isAddressInfo = (value: AddressInfo | string | null): value is AddressInfo =>
   typeof value === "object" && value !== null && "port" in value;

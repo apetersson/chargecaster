@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import type { ForecastEra, ForecastResponse, PriceSlot } from "./types.js";
-import { normalizePriceSlots } from "./simulation.service.js";
+import type { ForecastEra, ForecastResponse, PriceSlot } from "./types.ts";
+import { normalizePriceSlots } from "./simulation.service.ts";
 
 @Injectable()
 export class ForecastService {

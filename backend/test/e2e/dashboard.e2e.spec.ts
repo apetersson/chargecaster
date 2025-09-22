@@ -8,10 +8,10 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { AppModule } from "../../src/app.module.js";
-import { SimulationService, extractForecastFromState } from "../../src/simulation/simulation.service.js";
-import type { AppRouter } from "../../src/trpc/trpc.router.js";
-import { TrpcRouter } from "../../src/trpc/trpc.router.js";
+import { AppModule } from "../../src/app.module.ts";
+import { SimulationService, extractForecastFromState } from "../../src/simulation/simulation.service.ts";
+import type { AppRouter } from "../../src/trpc/trpc.router.ts";
+import { TrpcRouter } from "../../src/trpc/trpc.router.ts";
 
 const config = {
   battery: {

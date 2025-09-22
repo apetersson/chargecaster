@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -13,9 +13,9 @@ import type {
   SimulationConfig,
   SnapshotPayload,
   SnapshotSummary,
-} from "./types.js";
-import { normalizeHistoryList } from "./history.serializer.js";
-import { StorageService } from "../storage/storage.service.js";
+} from "./types.ts";
+import { normalizeHistoryList } from "./history.serializer.ts";
+import { StorageService } from "../storage/storage.service.ts";
 
 const SOC_STEPS = 100;
 const SLOT_DURATION_MS = 3_600_000;
@@ -33,6 +33,8 @@ export interface SimulationInput {
 
 @Injectable()
 export class SimulationService {
+  private readonly logger = new Logger(SimulationService.name);
+
   constructor(@Inject(StorageService) private readonly storageRef: StorageService) {
   }
 
@@ -174,6 +176,14 @@ export class SimulationService {
       pvDirectUseRatio: directUseRatio,
       feedInTariffEurPerKwh: feedInTariff,
     });
+    const mode = result.recommended_soc_percent === 100 ? "CHARGE" : "AUTO";
+    this.logger.log(`Simulation result: ${mode}`);
+    if (result.oracle_entries.length) {
+      const strategyLog = result.oracle_entries
+        .map((entry) => `${(entry.strategy ?? "auto").toUpperCase()}@${entry.era_id}`)
+        .join(", ");
+      this.logger.log(`Era strategies: ${strategyLog}`);
+    }
     const fallbackPriceEur = slots.length
       ? slots[0].price + gridFee(input.config)
       : null;
@@ -421,9 +431,9 @@ interface SimulationOptions {
 
 interface SimulationOutput {
   initial_soc_percent: number;
-  next_step_soc_percent: number;
-  recommended_soc_percent: number;
-  recommended_final_soc_percent: number;
+  next_step_soc_percent: number | null;
+  recommended_soc_percent: number | null;
+  recommended_final_soc_percent: number | null;
   simulation_runs: number;
   projected_cost_eur: number;
   baseline_cost_eur: number;
@@ -451,6 +461,9 @@ function simulateOptimalSchedule(
     throw new Error("battery.capacity_kwh must be > 0");
   }
   const maxChargePowerW = Number(cfg.battery?.max_charge_power_w ?? 0);
+  const maxSolarChargePowerW = cfg.solar?.max_charge_power_w != null
+    ? Math.max(0, Number(cfg.solar.max_charge_power_w))
+    : null;
   const networkTariff = gridFee(cfg);
   const solarGenerationPerSlot = options.solarGenerationKwhPerSlot ?? [];
   const directUseRatio = clampRatio(
@@ -498,7 +511,6 @@ function simulateOptimalSchedule(
     const slot = slots[idx];
     const duration = slot.durationHours;
     const loadEnergy = (houseLoadWatts / 1000) * duration;
-    const chargeLimitKwh = (maxChargePowerW / 1000) * duration;
     const priceTotal = slot.price + networkTariff;
     const solarKwh = solarGenerationPerSlot[idx] ?? 0;
     const directTarget = Math.max(0, solarKwh * directUseRatio);
@@ -506,12 +518,33 @@ function simulateOptimalSchedule(
     const loadAfterDirect = loadEnergy - directUsed;
     const availableSolar = Math.max(0, solarKwh - directUsed);
 
-    const maxChargeSteps = Math.floor(chargeLimitKwh / energyPerStep + 1e-9);
+    const gridChargeLimitKwh = maxChargePowerW > 0 ? (maxChargePowerW / 1000) * duration : 0;
+    const solarChargeLimitKwh = (() => {
+      if (availableSolar <= 0) {
+        return 0;
+      }
+      if (maxSolarChargePowerW != null) {
+        const limit = (maxSolarChargePowerW / 1000) * duration;
+        return Math.min(availableSolar, limit);
+      }
+      return availableSolar;
+    })();
+    const totalChargeLimitKwh = gridChargeLimitKwh + solarChargeLimitKwh;
+    const baselineGridImport = Math.max(0, loadAfterDirect - availableSolar);
 
     for (let state = 0; state < numStates; state += 1) {
       let bestCost = Number.POSITIVE_INFINITY;
       let bestNext = state;
 
+      let maxChargeSteps = numStates - 1 - state;
+      if (totalChargeLimitKwh > 0) {
+        maxChargeSteps = Math.min(
+          maxChargeSteps,
+          Math.floor(totalChargeLimitKwh / energyPerStep + 1e-9),
+        );
+      } else {
+        maxChargeSteps = Math.min(maxChargeSteps, 0);
+      }
       const upLimit = Math.min(maxChargeSteps, numStates - 1 - state);
       const downLimit = state;
 
@@ -519,6 +552,17 @@ function simulateOptimalSchedule(
         const nextState = state + delta;
         const energyChange = delta * energyPerStep;
         const gridEnergy = loadAfterDirect + energyChange - availableSolar;
+        if (energyChange > 0) {
+          const gridImport = Math.max(0, gridEnergy);
+          const additionalGridCharge = Math.max(0, gridImport - baselineGridImport);
+          if (additionalGridCharge > gridChargeLimitKwh + 1e-9) {
+            continue;
+          }
+          const solarChargingKwh = Math.max(0, energyChange - additionalGridCharge);
+          if (solarChargingKwh > solarChargeLimitKwh + 1e-9) {
+            continue;
+          }
+        }
         const slotCost = computeSlotCost(gridEnergy, priceTotal, feedInTariff);
         const totalCost = slotCost + dp[idx + 1][nextState];
         if (totalCost < bestCost) {
@@ -542,6 +586,7 @@ function simulateOptimalSchedule(
 
   const path = [currentState];
   let gridEnergyTotalKwh = 0;
+  let gridChargeTotalKwh = 0;
   let costTotal = 0;
   let baselineCost = 0;
   let stateIter = currentState;
@@ -564,6 +609,12 @@ function simulateOptimalSchedule(
     const gridEnergy = loadAfterDirect + energyChange - availableSolar;
     costTotal += computeSlotCost(gridEnergy, importPrice, feedInTariff);
     gridEnergyTotalKwh += gridEnergy;
+    const baselineGridImport = Math.max(0, baselineGridEnergy);
+    const gridImport = Math.max(0, gridEnergy);
+    const additionalGridCharge = energyChange > 0 ? Math.max(0, gridImport - baselineGridImport) : 0;
+    if (additionalGridCharge > 0) {
+      gridChargeTotalKwh += additionalGridCharge;
+    }
     path.push(nextState);
     const solarToLoad = Math.min(availableSolar, loadAfterDirect);
     let remainingSolar = availableSolar - solarToLoad;
@@ -580,10 +631,12 @@ function simulateOptimalSchedule(
       typeof slot.eraId === "string" && slot.eraId.length > 0
         ? slot.eraId
         : slot.start.toISOString();
+    const strategy: "charge" | "auto" = additionalGridCharge > 0.001 ? "charge" : "auto";
     oracleEntries.push({
       era_id: eraId,
       target_soc_percent: nextState * percentStep,
       grid_energy_w: Number.isFinite(gridPowerW) ? gridPowerW : null,
+      strategy,
     });
 
     stateIter = nextState;
@@ -596,12 +649,14 @@ function simulateOptimalSchedule(
   const projectedSavings = baselineCost - costTotal;
   const projectedGridPowerW = totalDuration > 0 ? (gridEnergyTotalKwh / totalDuration) * 1000 : 0;
 
-  const nextState = path[1] ?? path[0];
-  const recommendedTarget = path[path.length - 1] * percentStep;
-
+  const shouldChargeFromGrid = gridChargeTotalKwh > 0.001;
+  const firstTarget = oracleEntries[0]?.target_soc_percent ?? null;
+  const finalTarget = oracleEntries[oracleEntries.length - 1]?.target_soc_percent ?? null;
+  const nextStepSocPercent = shouldChargeFromGrid ? 100 : firstTarget;
+  const recommendedTarget = shouldChargeFromGrid ? 100 : finalTarget;
   return {
     initial_soc_percent: currentState * percentStep,
-    next_step_soc_percent: nextState * percentStep,
+    next_step_soc_percent: nextStepSocPercent,
     recommended_soc_percent: recommendedTarget,
     recommended_final_soc_percent: recommendedTarget,
     simulation_runs: SOC_STEPS,

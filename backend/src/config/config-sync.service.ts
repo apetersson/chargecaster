@@ -1,17 +1,17 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import YAML from "yaml";
 
-import { SimulationService } from "../simulation/simulation.service.js";
-import type { ForecastEra, SimulationConfig } from "../simulation/types.js";
+import { SimulationService } from "../simulation/simulation.service.ts";
+import type { ForecastEra, SimulationConfig } from "../simulation/types.ts";
 import {
   extractForecastFromState,
   extractSolarForecastFromState,
   normalizePriceSlots,
-} from "../simulation/simulation.service.js";
+} from "../simulation/simulation.service.ts";
 
 const DEFAULT_CONFIG_FILE = "../config.local.yaml";
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
@@ -74,7 +74,7 @@ type ForecastCostPayload = Record<string, unknown> & {
 export class ConfigSyncService {
   private readonly logger = new Logger(ConfigSyncService.name);
 
-  constructor(private readonly simulationService: SimulationService) {}
+  constructor(@Inject(SimulationService) private readonly simulationService: SimulationService) {}
 
   async seedFromConfig(): Promise<void> {
     const configPath = this.resolveConfigPath();
@@ -237,6 +237,10 @@ export class ConfigSyncService {
     const minHoldMinutes = this.resolveNumber(logic.min_hold_minutes, 0);
     const houseLoad = this.resolveNumber(logic.house_load_w, 1200);
     const directUseRatio = this.resolveNumber(solar.direct_use_ratio, null);
+    const maxSolarChargePower = this.resolveNumber(
+      solar.max_charge_power_solar_w ?? solar.max_charge_power_w,
+      null,
+    );
 
     const simulationConfig: SimulationConfig = {
       battery: {
@@ -255,10 +259,19 @@ export class ConfigSyncService {
         house_load_w: houseLoad ?? undefined,
       },
       solar:
-        directUseRatio === null
+        directUseRatio === null && maxSolarChargePower === null
           ? undefined
           : {
-              direct_use_ratio: Math.min(Math.max(directUseRatio, 0), 1),
+              ...(directUseRatio === null
+                ? {}
+                : {
+                    direct_use_ratio: Math.min(Math.max(directUseRatio, 0), 1),
+                  }),
+              ...(maxSolarChargePower === null
+                ? {}
+                : {
+                    max_charge_power_w: Math.max(0, maxSolarChargePower),
+                  }),
             },
       state: typeof stateCfg.path === "string" ? { path: stateCfg.path } : undefined,
     };
@@ -554,25 +567,19 @@ export class ConfigSyncService {
       return { forecastEntries: [], eras: [] };
     }
 
-    const canonicalSlots = canonicalForecast
-      .map((entry) => this.normalizeForecastSlot(entry))
-      .filter((slot) => slot.startIso !== null)
-      .sort((a, b) => {
-        const aTime = a.startDate?.getTime() ?? 0;
-        const bTime = b.startDate?.getTime() ?? 0;
-        return aTime - bTime;
-      });
+    const canonicalSlots = this.dedupeSlots(
+      canonicalForecast
+        .map((entry) => this.normalizeForecastSlot(entry))
+        .filter((slot) => slot.startIso !== null),
+    );
 
     const marketIndex = this.buildStartIndex(marketForecast);
 
-    const solarSlots = solarForecast
-      .map((entry) => this.normalizeForecastSlot(entry))
-      .filter((slot) => slot.startDate !== null)
-      .sort((a, b) => {
-        const aTime = a.startDate?.getTime() ?? 0;
-        const bTime = b.startDate?.getTime() ?? 0;
-        return aTime - bTime;
-      });
+    const solarSlots = this.dedupeSlots(
+      solarForecast
+        .map((entry) => this.normalizeForecastSlot(entry))
+        .filter((slot) => slot.startDate !== null),
+    );
 
     const findSolarPayload = (
       startDate: Date | null,
@@ -601,18 +608,40 @@ export class ConfigSyncService {
       return undefined;
     };
 
-    const forecastEntries: Record<string, unknown>[] = [];
-    const eras: ForecastEra[] = [];
+    interface EraEntry {
+      slot: NormalizedSlot;
+      payload: Record<string, unknown> & { era_id: string };
+      sources: ForecastEra["sources"];
+    }
+
+    const eraMap = new Map<string, EraEntry>();
+
+    const addSource = (
+      entry: EraEntry,
+      provider: string,
+      type: ForecastEra["sources"][number]["type"],
+      payload: Record<string, unknown>,
+    ): void => {
+      const exists = entry.sources.some((source) => source.provider === provider && source.type === type);
+      if (!exists) {
+        entry.sources.push({ provider, type, payload });
+      }
+    };
 
     for (const slot of canonicalSlots) {
       if (!slot.startIso) {
         continue;
       }
-      const eraId = randomUUID();
-      const payload = { ...slot.payload, era_id: eraId };
-      forecastEntries.push(payload);
-
-      const sources: ForecastEra["sources"] = [];
+      let entry = eraMap.get(slot.startIso);
+      if (!entry) {
+        const eraId = randomUUID();
+        entry = {
+          slot,
+          payload: { ...slot.payload, era_id: eraId } as Record<string, unknown> & { era_id: string },
+          sources: [],
+        };
+        eraMap.set(slot.startIso, entry);
+      }
 
       const marketPayload = marketIndex.get(slot.startIso);
       if (marketPayload) {
@@ -625,24 +654,31 @@ export class ConfigSyncService {
           record.price_ct_per_kwh = priceCt;
           record.unit = "ct/kWh";
         }
-        sources.push({ provider: "awattar", type: "cost", payload: record });
+        addSource(entry, "awattar", "cost", record);
       }
 
       const solarPayload = findSolarPayload(slot.startDate, slot.endDate);
       if (solarPayload) {
-        sources.push({ provider: "solar", type: "solar", payload: solarPayload });
+        addSource(entry, "solar", "solar", this.cloneRecord(solarPayload));
       }
-
-      eras.push({
-        era_id: eraId,
-        start: slot.startIso,
-        end: slot.endIso,
-        duration_hours: slot.durationHours,
-        sources,
-      });
     }
 
-    return { forecastEntries, eras };
+    const sortedEntries = [...eraMap.values()].sort((a, b) => {
+      const aTime = a.slot.startDate?.getTime() ?? 0;
+      const bTime = b.slot.startDate?.getTime() ?? 0;
+      return aTime - bTime;
+    });
+
+    const forecastEntries = sortedEntries.map((entry) => ({ ...entry.payload }));
+    const eras = sortedEntries.map((entry) => ({
+      era_id: entry.payload.era_id,
+      start: entry.slot.startIso,
+      end: entry.slot.endIso,
+      duration_hours: entry.slot.durationHours,
+      sources: entry.sources,
+    }));
+    const deduped = this.dedupeErasAndEntries(forecastEntries, eras);
+    return deduped;
   }
 
   private buildStartIndex(entries: Record<string, unknown>[]): Map<string, Record<string, unknown>> {
@@ -682,6 +718,81 @@ export class ConfigSyncService {
       endIso,
       durationHours,
     };
+  }
+
+  private dedupeSlots(slots: NormalizedSlot[]): NormalizedSlot[] {
+    const map = new Map<string, NormalizedSlot>();
+    for (const slot of slots) {
+      const key = slot.startIso ?? "";
+      if (!map.has(key)) {
+        map.set(key, slot);
+      }
+    }
+    return [...map.values()].sort((a, b) => {
+      const aTime = a.startDate?.getTime() ?? 0;
+      const bTime = b.startDate?.getTime() ?? 0;
+      return aTime - bTime;
+    });
+  }
+
+  private dedupeErasAndEntries(
+    entries: Record<string, unknown>[],
+    eras: ForecastEra[],
+  ): { forecastEntries: Record<string, unknown>[]; eras: ForecastEra[] } {
+    const map = new Map<string, { entry: Record<string, unknown>; era: ForecastEra }>();
+
+    for (let index = 0; index < eras.length; index += 1) {
+      const era = eras[index];
+      const entry = entries[index] ?? {};
+      const start = typeof era.start === "string" ? era.start : null;
+      if (!start) {
+        const key = `__unknown_${index}`;
+        map.set(key, { entry, era });
+        continue;
+      }
+
+      const existing = map.get(start);
+      if (!existing) {
+        map.set(start, {
+          entry,
+          era: {
+            ...era,
+            sources: [...era.sources],
+          },
+        });
+        continue;
+      }
+
+      this.mergeSources(existing.era.sources, era.sources);
+    }
+
+    const sorted = [...map.entries()].sort((a, b) => {
+      const aStart = this.parseDate(a[0])?.getTime() ?? 0;
+      const bStart = this.parseDate(b[0])?.getTime() ?? 0;
+      return aStart - bStart;
+    });
+
+    const dedupedEntries: Record<string, unknown>[] = [];
+    const dedupedEras: ForecastEra[] = [];
+    for (const [, value] of sorted) {
+      dedupedEntries.push(value.entry);
+      dedupedEras.push(value.era);
+    }
+
+    return { forecastEntries: dedupedEntries, eras: dedupedEras };
+  }
+
+  private mergeSources(target: ForecastEra["sources"], incoming: ForecastEra["sources"]): void {
+    for (const source of incoming) {
+      const exists = target.find((item) => item.provider === source.provider && item.type === source.type);
+      if (!exists) {
+        target.push({ provider: source.provider, type: source.type, payload: this.cloneRecord(source.payload) });
+        continue;
+      }
+      if (!exists.payload || Object.keys(exists.payload).length === 0) {
+        exists.payload = this.cloneRecord(source.payload);
+      }
+    }
   }
 
   private cloneRecord(entry: Record<string, unknown>): Record<string, unknown> {

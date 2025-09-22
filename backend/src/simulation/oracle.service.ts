@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { OracleEntry, OracleResponse, SnapshotPayload } from "./types.js";
+import type { OracleEntry, OracleResponse, SnapshotPayload } from "./types.ts";
 
 @Injectable()
 export class OracleService {

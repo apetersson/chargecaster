@@ -1,12 +1,13 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 
-import { SimulationService } from "../simulation/simulation.service.js";
-import { ForecastService } from "../simulation/forecast.service.js";
-import { HistoryService } from "../simulation/history.service.js";
-import { SummaryService } from "../simulation/summary.service.js";
-import { OracleService } from "../simulation/oracle.service.js";
+import type { SimulationConfig } from "../simulation/types.ts";
+import { SimulationService } from "../simulation/simulation.service.ts";
+import { ForecastService } from "../simulation/forecast.service.ts";
+import { HistoryService } from "../simulation/history.service.ts";
+import { SummaryService } from "../simulation/summary.service.ts";
+import { OracleService } from "../simulation/oracle.service.ts";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -31,10 +32,18 @@ const logicSchema = z.object({
   house_load_w: z.number().nonnegative().optional(),
 });
 
-const configSchema = z.object({
+const solarSchema = z
+  .object({
+    direct_use_ratio: z.number().min(0).max(1).optional(),
+    max_charge_power_w: z.number().nonnegative().optional(),
+  })
+  .optional();
+
+const configSchema: z.ZodType<SimulationConfig> = z.object({
   battery: batterySchema,
   price: priceSchema,
   logic: logicSchema,
+  solar: solarSchema,
   state: z.object({ path: z.string().optional() }).optional(),
 });
 
@@ -66,11 +75,11 @@ export class TrpcRouter {
   public readonly router;
 
   constructor(
-    private readonly simulationService: SimulationService,
-    private readonly forecastService: ForecastService,
-    private readonly historyService: HistoryService,
-    private readonly summaryService: SummaryService,
-    private readonly oracleService: OracleService,
+    @Inject(SimulationService) private readonly simulationService: SimulationService,
+    @Inject(ForecastService) private readonly forecastService: ForecastService,
+    @Inject(HistoryService) private readonly historyService: HistoryService,
+    @Inject(SummaryService) private readonly summaryService: SummaryService,
+    @Inject(OracleService) private readonly oracleService: OracleService,
   ) {
     this.router = t.router({
       health: t.procedure.query(() => ({ status: "ok" })),

@@ -1,4 +1,4 @@
-import type { HistoryPoint } from "./types.js";
+import type { HistoryPoint } from "./types.ts";
 
 interface NumericSelector {
   key: string;
