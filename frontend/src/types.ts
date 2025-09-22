@@ -1,5 +1,5 @@
-export type {
-  SnapshotSummary,
+import type {
+  SnapshotSummary as BackendSnapshotSummary,
   HistoryPoint,
   HistoryResponse,
   ForecastEra,
@@ -8,3 +8,14 @@ export type {
   OracleResponse,
   ForecastSourcePayload,
 } from "@backend/simulation-types";
+
+export type SnapshotSummary = BackendSnapshotSummary;
+export type {
+  HistoryPoint,
+  HistoryResponse,
+  ForecastEra,
+  ForecastResponse,
+  OracleEntry,
+  OracleResponse,
+  ForecastSourcePayload,
+};

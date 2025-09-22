@@ -72,7 +72,7 @@ const PRICE_BORDER = "#38bdf8";
 const PRICE_FILL = "rgba(56, 189, 248, 0.15)";
 const GRID_COLOR = "rgba(148, 163, 184, 0.25)";
 const TICK_COLOR = "#64748b";
-const LEGEND_COLOR = "#475569";
+const LEGEND_COLOR = "#ffffff";
 const GRID_MARKERS_LABEL = "Grid Power Markers";
 const TARIFF_LABEL = "Tariff";
 const PRICE_HISTORY_BAR_BG = "rgba(148, 163, 184, 0.3)";
@@ -911,6 +911,9 @@ const buildOptions = (config: {
         position: "top",
         labels: {
           color: LEGEND_COLOR,
+          font: {
+            weight: "500",
+          },
           boxWidth: 16,
           usePointStyle: true,
           generateLabels: (chart) => {
@@ -930,6 +933,8 @@ const buildOptions = (config: {
                 lineDashOffset: template?.lineDashOffset ?? 0,
                 lineJoin: template?.lineJoin ?? "round",
                 lineWidth: template?.lineWidth ?? 2,
+                color: LEGEND_COLOR,
+                fontColor: LEGEND_COLOR,
                 hidden,
                 datasetIndex,
                 datasetIndices: group.datasetIndices,

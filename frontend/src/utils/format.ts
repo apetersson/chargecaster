@@ -3,6 +3,11 @@ export const numberFormatter = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 2,
 });
 
+export const integerFormatter = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
 export const percentFormatter = new Intl.NumberFormat(undefined, {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
@@ -33,6 +38,9 @@ export function formatNumber(value: number | null | undefined, unit = "") {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
+  if (unit === " slots") {
+    return `${integerFormatter.format(value)}${unit}`;
+  }
   return `${numberFormatter.format(value)}${unit}`;
 }
 
@@ -49,10 +57,10 @@ export function formatDate(value: string | null | undefined) {
 
 export function statusClass(errors?: string[], warnings?: string[]) {
   if (errors && errors.length) {
-    return { label: "Errors", className: "status err" };
+    return {label: "Errors", className: "status err"};
   }
   if (warnings && warnings.length) {
-    return { label: "Warnings", className: "status warn" };
+    return {label: "Warnings", className: "status warn"};
   }
-  return { label: "OK", className: "status ok" };
+  return {label: "OK", className: "status ok"};
 }

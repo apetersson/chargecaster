@@ -51,6 +51,8 @@ interface PreparedSimulation {
   priceSnapshot: number | null;
   solarForecast: Record<string, unknown>[];
   forecastEras: ForecastEra[];
+  liveGridPowerW: number | null;
+  liveSolarPowerW: number | null;
 }
 
 interface NormalizedSlot {
@@ -119,6 +121,10 @@ export class ConfigSyncService implements OnModuleDestroy {
         warnings: prepared.warnings,
         errors: prepared.errors,
         priceSnapshotEurPerKwh: prepared.priceSnapshot,
+        observations: {
+          gridPowerW: prepared.liveGridPowerW,
+          solarPowerW: prepared.liveSolarPowerW,
+        },
       });
       this.logger.log("Seeded snapshot using config data.");
       await this.froniusService.applyOptimization(rawConfig, snapshot);
@@ -244,6 +250,8 @@ export class ConfigSyncService implements OnModuleDestroy {
       warnings,
       errors,
       priceSnapshot: priceSnapshot ?? null,
+      liveGridPowerW: evccResult.gridPowerW,
+      liveSolarPowerW: evccResult.solarPowerW,
     };
   }
 
@@ -323,6 +331,8 @@ export class ConfigSyncService implements OnModuleDestroy {
     solarForecast: Record<string, unknown>[];
     priceSnapshot: number | null;
     batterySoc: number | null;
+    gridPowerW: number | null;
+    solarPowerW: number | null;
   }> {
     const enabled = this.resolveBoolean(evccConfig?.enabled, true);
     if (!enabled) {
@@ -333,6 +343,8 @@ export class ConfigSyncService implements OnModuleDestroy {
         solarForecast: [],
         priceSnapshot: null,
         batterySoc: null,
+        gridPowerW: null,
+        solarPowerW: null,
       };
     }
 
@@ -346,6 +358,8 @@ export class ConfigSyncService implements OnModuleDestroy {
         solarForecast: [],
         priceSnapshot: null,
         batterySoc: null,
+        gridPowerW: null,
+        solarPowerW: null,
       };
     }
 
@@ -361,6 +375,8 @@ export class ConfigSyncService implements OnModuleDestroy {
         solarForecast: [],
         priceSnapshot: null,
         batterySoc: null,
+        gridPowerW: null,
+        solarPowerW: null,
       };
     }
 
@@ -395,12 +411,16 @@ export class ConfigSyncService implements OnModuleDestroy {
       const solarForecast = extractSolarForecastFromState(record);
       const batterySoc = this.extractBatterySoc(record);
       const priceSnapshot = this.extractPriceFromState(record);
+      const gridPower = this.extractGridPower(record);
+      const solarPower = this.extractSolarPower(record);
 
       return {
         forecast,
         solarForecast,
         priceSnapshot,
         batterySoc,
+        gridPowerW: gridPower,
+        solarPowerW: solarPower,
       };
     } catch (error) {
       const message = `EVCC data fetch failed: ${this.describeError(error)}`;
@@ -411,6 +431,8 @@ export class ConfigSyncService implements OnModuleDestroy {
         solarForecast: [],
         priceSnapshot: null,
         batterySoc: null,
+        gridPowerW: null,
+        solarPowerW: null,
       };
     }
   }
@@ -1046,6 +1068,43 @@ export class ConfigSyncService implements OnModuleDestroy {
   private extractBatterySoc(payload: Record<string, unknown>): number | null {
     const site = this.extractRecord(payload.site);
     const candidates = [site?.batterySoc, payload.batterySoc, payload.battery_soc];
+    for (const value of candidates) {
+      const numeric = this.resolveNumber(value, null);
+      if (numeric !== null) {
+        return numeric;
+      }
+    }
+    return null;
+  }
+
+  private extractGridPower(payload: Record<string, unknown>): number | null {
+    const site = this.extractRecord(payload.site);
+    const candidates = [
+      site?.gridPower,
+      site?.grid_power,
+      payload.gridPower,
+      payload.grid_power,
+      payload.grid_import_power,
+    ];
+    for (const value of candidates) {
+      const numeric = this.resolveNumber(value, null);
+      if (numeric !== null) {
+        return numeric;
+      }
+    }
+    return null;
+  }
+
+  private extractSolarPower(payload: Record<string, unknown>): number | null {
+    const site = this.extractRecord(payload.site);
+    const candidates = [
+      site?.pvPower,
+      site?.pv_power,
+      payload.pvPower,
+      payload.pv_power,
+      payload.solarPower,
+      payload.solar_power,
+    ];
     for (const value of candidates) {
       const numeric = this.resolveNumber(value, null);
       if (numeric !== null) {

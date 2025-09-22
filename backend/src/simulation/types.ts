@@ -81,6 +81,9 @@ export interface SnapshotPayload {
   price_snapshot_eur_per_kwh: number | null; // deprecated
   projected_cost_eur: number | null;
   baseline_cost_eur: number | null;
+  basic_battery_cost_eur?: number | null;
+  active_control_savings_eur?: number | null;
+  active_control_savings_eur?: number | null;
   projected_savings_eur: number | null;
   projected_grid_energy_w: number | null;
   forecast_hours: number | null;
@@ -104,6 +107,7 @@ export interface SnapshotSummary {
   price_snapshot_eur_per_kwh: number | null;
   projected_cost_eur: number | null;
   baseline_cost_eur: number | null;
+  basic_battery_cost_eur?: number | null;
   projected_savings_eur: number | null;
   projected_grid_energy_w: number | null;
   forecast_hours: number | null;
