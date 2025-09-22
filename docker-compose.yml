@@ -1,0 +1,12 @@
+services:
+  batteryctl:
+    build: .
+    container_name: batteryctl
+    ports:
+      - "6969:80"
+    environment:
+      BATTERYCTL_CONFIG: /app/config.yaml
+    volumes:
+      - ./data:/data
+      - ${BATTERYCTL_CONFIG_FILE:-./config.local.yaml}:/app/config.yaml:ro
+    restart: unless-stopped

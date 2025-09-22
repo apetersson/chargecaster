@@ -22,7 +22,7 @@ import {
 
 const DEFAULT_CONFIG_FILE = "../config.local.yaml";
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
-const REQUEST_TIMEOUT_MS = 5000;
+const REQUEST_TIMEOUT_MS = 15000;
 const SLOT_DURATION_MS = 3_600_000;
 
 interface ConfigSection extends Partial<JsonObject> {
@@ -224,11 +224,21 @@ export class ConfigSyncService implements OnModuleDestroy {
     let solarForecast: RawSolarEntry[] = [];
 
     const marketResult = await this.collectFromMarket(configFile.market_data, simulationConfig, warnings);
+    this.logger.log(
+      `Market data fetch summary: raw_slots=${marketResult.forecast.length}, price_snapshot=${marketResult.priceSnapshot ?? "n/a"}`,
+    );
     const futureMarketForecast = this.filterFutureEntries(marketResult.forecast);
 
     const evccResult = await this.collectFromEvcc(configFile.evcc, warnings);
+    this.logger.log(
+      `EVCC fetch summary: raw_slots=${evccResult.forecast.length}, solar_slots=${evccResult.solarForecast.length}, battery_soc=${evccResult.batterySoc ?? "n/a"}`,
+    );
+    const nowIso = new Date().toISOString();
     const futureEvccForecast = this.filterFutureEntries(evccResult.forecast);
     const futureSolarForecast = this.filterFutureEntries(evccResult.solarForecast);
+    this.logger.log(
+      `Future entry counts (ref=${nowIso}): evcc=${futureEvccForecast.length}, market=${futureMarketForecast.length}, solar=${futureSolarForecast.length}`,
+    );
 
     const preferMarket = this.resolveBoolean(configFile.market_data?.prefer_market, true);
     this.logger.log(
@@ -261,8 +271,10 @@ export class ConfigSyncService implements OnModuleDestroy {
     }
 
     if (!forecast.length) {
-      const message = "Unable to retrieve a price forecast from market data endpoint.";
-      errors.push(message);
+      const message =
+        `Unable to retrieve a price forecast from market data endpoint (market_raw=${marketResult.forecast.length}, ` +
+        `market_future=${futureMarketForecast.length}, evcc_raw=${evccResult.forecast.length}, evcc_future=${futureEvccForecast.length}).`;
+      errors.push("Unable to retrieve a price forecast from market data endpoint.");
       this.logger.warn(message);
     }
 
@@ -272,6 +284,12 @@ export class ConfigSyncService implements OnModuleDestroy {
       : futureEvccForecast.length
         ? futureEvccForecast
         : forecast;
+
+    this.logger.log(
+      `Canonical forecast selection: prefer_market=${preferMarket}, using=${
+        useMarketForPrice ? "market" : futureEvccForecast.length ? "evcc" : "fallback"
+      }, canonical_slots=${canonicalForecast.length}`,
+    );
 
     const gridFeeForDisplay =
       simulationConfig.price?.grid_fee_eur_per_kwh ??

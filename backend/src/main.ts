@@ -22,6 +22,9 @@ async function bootstrap(): Promise<NestFastifyApplication> {
     bufferLogs: true,
   });
 
+  app.useLogger(new Logger("bootstrap"));
+  app.flushLogs();
+
   const fastify = app.getHttpAdapter().getInstance();
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any
   await (fastify.register as any)(cors, {
