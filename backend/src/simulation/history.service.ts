@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { HistoryPoint, HistoryResponse } from "./types.ts";
+import type { HistoryPoint, HistoryRawEntry, HistoryResponse } from "./types.ts";
 import { normalizeHistoryList } from "./history.serializer.ts";
 import { StorageService } from "../storage/storage.service.ts";
 
@@ -7,7 +7,7 @@ import { StorageService } from "../storage/storage.service.ts";
 export class HistoryService {
   constructor(@Inject(StorageService) private readonly storage: StorageService) {}
 
-  private serialize(history: Record<string, unknown>[]): HistoryPoint[] {
+  private serialize(history: HistoryRawEntry[]): HistoryPoint[] {
     return normalizeHistoryList(history);
   }
 

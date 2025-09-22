@@ -4,16 +4,20 @@ import type { Database } from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+
+import type { JsonObject } from "../common/json.ts";
+
 export interface SnapshotRecord {
   id: number;
   timestamp: string;
-  payload: Record<string, unknown>;
+  payload: JsonObject;
 }
 
 export interface HistoryRecord {
   id: number;
   timestamp: string;
-  payload: Record<string, unknown>;
+  payload: JsonObject;
 }
 
 @Injectable()
@@ -53,12 +57,12 @@ export class StorageService implements OnModuleDestroy {
     `);
   }
 
-  saveSnapshot(timestamp: string, payload: Record<string, unknown>): void {
+  saveSnapshot(timestamp: string, payload: JsonObject): void {
     const stmt = this.db.prepare("INSERT INTO snapshots (timestamp, payload) VALUES (?, ?)");
     stmt.run(timestamp, JSON.stringify(payload));
   }
 
-  replaceSnapshot(payload: Record<string, unknown>): void {
+  replaceSnapshot(payload: JsonObject): void {
     const rawTimestamp = payload.timestamp;
     const timestamp = typeof rawTimestamp === "string" && rawTimestamp.length > 0 ? rawTimestamp : new Date().toISOString();
     const deleteStmt = this.db.prepare("DELETE FROM snapshots");
@@ -70,12 +74,12 @@ export class StorageService implements OnModuleDestroy {
     txn();
   }
 
-  appendHistory(entries: Record<string, unknown>[]): void {
+  appendHistory(entries: JsonObject[]): void {
     if (!entries.length) {
       return;
     }
     const stmt = this.db.prepare("INSERT INTO history (timestamp, payload) VALUES (?, ?)");
-    const txn = this.db.transaction((items: Record<string, unknown>[]) => {
+    const txn = this.db.transaction((items: JsonObject[]) => {
       for (const entry of items) {
         const rawTimestamp = entry.timestamp;
         const timestamp = typeof rawTimestamp === "string" && rawTimestamp.length > 0 ? rawTimestamp : new Date().toISOString();
@@ -94,7 +98,7 @@ export class StorageService implements OnModuleDestroy {
     return {
       id: row.id,
       timestamp: row.timestamp,
-      payload: JSON.parse(row.payload) as Record<string, unknown>,
+      payload: JSON.parse(row.payload) as JsonObject,
     };
   }
 
@@ -104,7 +108,7 @@ export class StorageService implements OnModuleDestroy {
     return rows.map((row) => ({
       id: row.id,
       timestamp: row.timestamp,
-      payload: JSON.parse(row.payload) as Record<string, unknown>,
+      payload: JSON.parse(row.payload) as JsonObject,
     }));
   }
 }

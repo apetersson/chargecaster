@@ -7,7 +7,14 @@ import YAML from "yaml";
 
 import { SimulationService } from "../simulation/simulation.service.ts";
 import { FroniusService } from "../fronius/fronius.service.ts";
-import type { ForecastEra, SimulationConfig } from "../simulation/types.ts";
+import type {
+  ForecastEra,
+  RawForecastEntry,
+  RawSolarEntry,
+  SimulationConfig,
+} from "../simulation/types.ts";
+import type { JsonObject, JsonValue, MutableJsonObject } from "../common/json.ts";
+import { isJsonObject, sanitizeJsonObject, sanitizeMutableJsonObject } from "../common/json.ts";
 import {
   extractForecastFromState,
   extractSolarForecastFromState,
@@ -19,19 +26,47 @@ const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
 const REQUEST_TIMEOUT_MS = 5000;
 const SLOT_DURATION_MS = 3_600_000;
 
-interface ConfigSection {
+interface ConfigSection extends Partial<JsonObject> {
   enabled?: boolean;
-  [key: string]: unknown;
 }
 
-interface ConfigFile {
-  battery?: Record<string, unknown>;
-  price?: Record<string, unknown>;
-  logic?: Record<string, unknown>;
-  evcc?: EvccConfig;
-  market_data?: ConfigSection;
-  state?: Record<string, unknown>;
-  solar?: Record<string, unknown>;
+interface FroniusConfigFile extends Partial<JsonObject> {
+  host?: string;
+  user?: string;
+  password?: string;
+  batteries_path?: string;
+  verify_tls?: boolean;
+  timeout_s?: number;
+}
+
+interface BatteryConfigFile extends Partial<JsonObject> {
+  capacity_kwh?: number;
+  max_charge_power_w?: number;
+  auto_mode_floor_soc?: number;
+  max_charge_power_solar_w?: number;
+}
+
+interface PriceConfigFile extends Partial<JsonObject> {
+  grid_fee_eur_per_kwh?: number;
+  network_tariff_eur_per_kwh?: number;
+  feed_in_tariff_eur_per_kwh?: number;
+}
+
+interface LogicConfigFile extends Partial<JsonObject> {
+  interval_seconds?: number;
+  min_hold_minutes?: number;
+  house_load_w?: number;
+  allow_battery_export?: boolean;
+}
+
+interface SolarConfigFile extends Partial<JsonObject> {
+  direct_use_ratio?: number;
+  max_charge_power_w?: number;
+  max_charge_power_solar_w?: number;
+}
+
+interface StateConfigFile extends Partial<JsonObject> {
+  path?: string;
 }
 
 interface EvccConfig extends ConfigSection {
@@ -42,21 +77,32 @@ interface EvccConfig extends ConfigSection {
   timeoutMs?: number;
 }
 
+interface ConfigFile {
+  fronius?: FroniusConfigFile;
+  battery?: BatteryConfigFile;
+  price?: PriceConfigFile;
+  logic?: LogicConfigFile;
+  evcc?: EvccConfig;
+  market_data?: ConfigSection;
+  state?: StateConfigFile;
+  solar?: SolarConfigFile;
+}
+
 interface PreparedSimulation {
   simulationConfig: SimulationConfig;
   liveState: { battery_soc?: number | null };
-  forecast: Record<string, unknown>[];
+  forecast: RawForecastEntry[];
   warnings: string[];
   errors: string[];
   priceSnapshot: number | null;
-  solarForecast: Record<string, unknown>[];
+  solarForecast: RawSolarEntry[];
   forecastEras: ForecastEra[];
   liveGridPowerW: number | null;
   liveSolarPowerW: number | null;
 }
 
 interface NormalizedSlot {
-  payload: Record<string, unknown>;
+  payload: MutableJsonObject;
   startDate: Date | null;
   endDate: Date | null;
   startIso: string | null;
@@ -64,7 +110,7 @@ interface NormalizedSlot {
   durationHours: number | null;
 }
 
-type ForecastCostPayload = Record<string, unknown> & {
+type ForecastCostPayload = MutableJsonObject & {
   price?: unknown;
   value?: unknown;
   unit?: unknown;
@@ -127,7 +173,8 @@ export class ConfigSyncService implements OnModuleDestroy {
         },
       });
       this.logger.log("Seeded snapshot using config data.");
-      await this.froniusService.applyOptimization(rawConfig, snapshot);
+      const froniusPayload = JSON.parse(JSON.stringify(rawConfig)) as JsonObject;
+      await this.froniusService.applyOptimization(froniusPayload, snapshot);
     } catch (error) {
       this.logger.error(`Config sync failed: ${this.describeError(error)}`);
       throw error;
@@ -173,9 +220,9 @@ export class ConfigSyncService implements OnModuleDestroy {
     const errors: string[] = [];
     const liveState: { battery_soc?: number | null } = {};
 
-    let forecast: Record<string, unknown>[] = [];
+    let forecast: RawForecastEntry[] = [];
     let priceSnapshot: number | null = null;
-    let solarForecast: Record<string, unknown>[] = [];
+    let solarForecast: RawSolarEntry[] = [];
 
     const marketResult = await this.collectFromMarket(configFile.market_data, simulationConfig, warnings);
     const futureMarketForecast = this.filterFutureEntries(marketResult.forecast);
@@ -328,12 +375,13 @@ export class ConfigSyncService implements OnModuleDestroy {
     return simulationConfig;
   }
 
+  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
   private async collectFromEvcc(
     evccConfig: EvccConfig | undefined,
     warnings: string[],
   ): Promise<{
-    forecast: Record<string, unknown>[];
-    solarForecast: Record<string, unknown>[];
+    forecast: RawForecastEntry[];
+    solarForecast: RawSolarEntry[];
     priceSnapshot: number | null;
     batterySoc: number | null;
     gridPowerW: number | null;
@@ -408,10 +456,12 @@ export class ConfigSyncService implements OnModuleDestroy {
           solarForecast: [],
           priceSnapshot: null,
           batterySoc: null,
+          gridPowerW: null,
+          solarPowerW: null,
         };
       }
 
-      const record = payload as Record<string, unknown>;
+      const record = payload as JsonObject;
       const forecast = extractForecastFromState(record);
       const solarForecast = extractSolarForecastFromState(record);
       const batterySoc = this.extractBatterySoc(record);
@@ -441,14 +491,16 @@ export class ConfigSyncService implements OnModuleDestroy {
       };
     }
   }
+  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 
+  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
   private async collectFromMarket(
     marketConfig: ConfigSection | undefined,
     simulationConfig: SimulationConfig,
     warnings: string[],
-  ): Promise<{ forecast: Record<string, unknown>[]; priceSnapshot: number | null; solar: Record<string, unknown>[] }> {
+  ): Promise<{ forecast: RawForecastEntry[]; priceSnapshot: number | null; solar: RawSolarEntry[] }> {
     const enabled = this.resolveBoolean(marketConfig?.enabled, true);
-    const forecast: Record<string, unknown>[] = [];
+    const forecast: RawForecastEntry[] = [];
     let priceSnapshot: number | null = null;
 
     if (!enabled) {
@@ -477,9 +529,11 @@ export class ConfigSyncService implements OnModuleDestroy {
 
     return { forecast, priceSnapshot, solar: [] };
   }
+  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 
-  private normalizeForecastEntries(payload: unknown, maxHours = 72): Record<string, unknown>[] {
-    const records: Record<string, unknown>[] = [];
+  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
+  private normalizeForecastEntries(payload: unknown, maxHours = 72): RawForecastEntry[] {
+    const records: RawForecastEntry[] = [];
     if (!payload) {
       return records;
     }
@@ -488,7 +542,7 @@ export class ConfigSyncService implements OnModuleDestroy {
     if (Array.isArray(payload)) {
       data = payload;
     } else if (typeof payload === "object" && payload !== null) {
-      const container = payload as Record<string, unknown>;
+      const container = payload as JsonObject;
       const nested = container.data ?? container.items ?? container.forecast ?? [];
       if (Array.isArray(nested)) {
         data = nested;
@@ -502,7 +556,7 @@ export class ConfigSyncService implements OnModuleDestroy {
       if (!entry || typeof entry !== "object") {
         continue;
       }
-      const record = entry as Record<string, unknown>;
+      const record = entry as RawForecastEntry;
       const startValue = record.start_timestamp ?? record.startTimestamp ?? record.start ?? record.from;
       const endValue = record.end_timestamp ?? record.endTimestamp ?? record.end ?? record.to;
       const priceValue = record.marketprice ?? record.price ?? record.value;
@@ -534,35 +588,35 @@ export class ConfigSyncService implements OnModuleDestroy {
         start: startDate.toISOString(),
         end: endDate.toISOString(),
         price,
-        unit: record.unit ?? record.price_unit ?? record.value_unit,
-      });
+        unit: (record.unit ?? record.price_unit ?? record.value_unit) as JsonValue,
+      } as RawForecastEntry);
     }
 
     return records;
   }
 
-  private extractSolarForecast(state: Record<string, unknown>): Record<string, unknown>[] {
+  private extractSolarForecast(state: JsonObject): RawSolarEntry[] {
     const forecastRecord = this.extractRecord((state as { forecast?: unknown }).forecast);
     const solarRecord = this.extractRecord(forecastRecord?.solar);
     const timeseries = Array.isArray(solarRecord?.timeseries)
       ? (solarRecord?.timeseries as unknown[])
       : [];
 
-    const entries: Record<string, unknown>[] = [];
+    const entries: RawSolarEntry[] = [];
     for (let index = 0; index < timeseries.length; index += 1) {
       const item = timeseries[index];
       if (!item || typeof item !== "object") {
         continue;
       }
-      const record = item as { ts?: unknown; val?: unknown; value?: unknown; energy_kwh?: unknown; energy_wh?: unknown };
+      const record = item as RawSolarEntry;
       const start = this.parseDate(record.ts);
       if (!start) {
         continue;
       }
 
-      const next = index + 1 < timeseries.length ? timeseries[index + 1] : undefined;
+      const next = index + 1 < timeseries.length ? (timeseries[index + 1] as JsonObject | undefined) : undefined;
       const end =
-        this.parseDate((next as { ts?: unknown } | undefined)?.ts) ??
+        this.parseDate(next?.ts) ??
         new Date(start.getTime() + SLOT_DURATION_MS);
 
       const durationMs = end.getTime() - start.getTime();
@@ -594,21 +648,22 @@ export class ConfigSyncService implements OnModuleDestroy {
         continue;
       }
 
-      entries.push({
-        start: start.toISOString(),
-        end: end.toISOString(),
-        energy_kwh: energyKwh,
-      });
+    entries.push({
+      start: start.toISOString(),
+      end: end.toISOString(),
+      energy_kwh: energyKwh,
+    } as RawSolarEntry);
     }
 
     return entries;
   }
+  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 
-  private filterFutureEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
+  private filterFutureEntries(entries: RawForecastEntry[]): RawForecastEntry[] {
     const now = Date.now();
     return entries.filter((entry) => {
-      const start = this.parseDate(entry.start ?? entry.from);
-      const end = this.parseDate(entry.end ?? entry.to);
+      const start = this.parseDate((entry.start ?? entry.from) ?? null);
+      const end = this.parseDate((entry.end ?? entry.to) ?? null);
 
       if (end && end.getTime() <= now) {
         return false;
@@ -621,12 +676,12 @@ export class ConfigSyncService implements OnModuleDestroy {
   }
 
   private buildForecastEras(
-    canonicalForecast: Record<string, unknown>[],
-    evccForecast: Record<string, unknown>[],
-    marketForecast: Record<string, unknown>[],
-    solarForecast: Record<string, unknown>[],
+    canonicalForecast: RawForecastEntry[],
+    evccForecast: RawForecastEntry[],
+    marketForecast: RawForecastEntry[],
+    solarForecast: RawSolarEntry[],
     gridFeeEurPerKwh: number,
-  ): { forecastEntries: Record<string, unknown>[]; eras: ForecastEra[] } {
+  ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
     if (!canonicalForecast.length) {
       return { forecastEntries: [], eras: [] };
     }
@@ -648,7 +703,7 @@ export class ConfigSyncService implements OnModuleDestroy {
     const findSolarPayload = (
       startDate: Date | null,
       endDate: Date | null,
-    ): Record<string, unknown> | undefined => {
+    ): MutableJsonObject | undefined => {
       if (!startDate) {
         return undefined;
       }
@@ -674,7 +729,7 @@ export class ConfigSyncService implements OnModuleDestroy {
 
     interface EraEntry {
       slot: NormalizedSlot;
-      payload: Record<string, unknown> & { era_id: string };
+      payload: MutableJsonObject & { era_id: string };
       sources: ForecastEra["sources"];
     }
 
@@ -684,11 +739,11 @@ export class ConfigSyncService implements OnModuleDestroy {
       entry: EraEntry,
       provider: string,
       type: ForecastEra["sources"][number]["type"],
-      payload: Record<string, unknown>,
+      payload: MutableJsonObject,
     ): void => {
       const exists = entry.sources.some((source) => source.provider === provider && source.type === type);
       if (!exists) {
-        entry.sources.push({ provider, type, payload });
+        entry.sources.push({ provider, type, payload: this.toJsonObject(payload) });
       }
     };
 
@@ -734,7 +789,7 @@ export class ConfigSyncService implements OnModuleDestroy {
         const eraId = randomUUID();
         entry = {
           slot,
-          payload: { ...slot.payload, era_id: eraId } as Record<string, unknown> & { era_id: string },
+          payload: { ...slot.payload, era_id: eraId } as MutableJsonObject & { era_id: string },
           sources: [],
         };
         eraMap.set(slot.startIso, entry);
@@ -788,7 +843,9 @@ export class ConfigSyncService implements OnModuleDestroy {
       return aTime - bTime;
     });
 
-    const forecastEntries = sortedEntries.map((entry) => ({ ...entry.payload }));
+    const forecastEntries = sortedEntries.map(
+      (entry) => JSON.parse(JSON.stringify(entry.payload)) as RawForecastEntry,
+    );
     const eras = sortedEntries.map((entry) => ({
       era_id: entry.payload.era_id,
       start: entry.slot.startIso,
@@ -800,8 +857,8 @@ export class ConfigSyncService implements OnModuleDestroy {
     return this.trimForecastByPriceCoverage(deduped.forecastEntries, deduped.eras);
   }
 
-  private buildStartIndex(entries: Record<string, unknown>[]): Map<string, Record<string, unknown>> {
-    const index = new Map<string, Record<string, unknown>>();
+  private buildStartIndex(entries: RawForecastEntry[]): Map<string, MutableJsonObject> {
+    const index = new Map<string, MutableJsonObject>();
     for (const entry of entries) {
       const slot = this.normalizeForecastSlot(entry);
       if (!slot.startIso) {
@@ -812,8 +869,8 @@ export class ConfigSyncService implements OnModuleDestroy {
     return index;
   }
 
-  private normalizeForecastSlot(entry: Record<string, unknown>): NormalizedSlot {
-    const payload = JSON.parse(JSON.stringify(entry)) as Record<string, unknown>;
+  private normalizeForecastSlot(entry: RawForecastEntry): NormalizedSlot {
+    const payload = JSON.parse(JSON.stringify(entry)) as MutableJsonObject;
     const startDate = this.parseDate(payload.start ?? payload.from);
     const endDateCandidate = this.parseDate(payload.end ?? payload.to);
     const endDate =
@@ -855,14 +912,14 @@ export class ConfigSyncService implements OnModuleDestroy {
   }
 
   private dedupeErasAndEntries(
-    entries: Record<string, unknown>[],
+    entries: RawForecastEntry[],
     eras: ForecastEra[],
-  ): { forecastEntries: Record<string, unknown>[]; eras: ForecastEra[] } {
-    const map = new Map<string, { entry: Record<string, unknown>; era: ForecastEra }>();
+  ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
+    const map = new Map<string, { entry: MutableJsonObject; era: ForecastEra }>();
 
     for (let index = 0; index < eras.length; index += 1) {
       const era = eras[index];
-      const entry = entries[index] ?? {};
+      const entry = (entries[index] as MutableJsonObject | undefined) ?? {};
       const start = typeof era.start === "string" ? era.start : null;
       if (!start) {
         const key = `__unknown_${index}`;
@@ -891,10 +948,10 @@ export class ConfigSyncService implements OnModuleDestroy {
       return aStart - bStart;
     });
 
-    const dedupedEntries: Record<string, unknown>[] = [];
+    const dedupedEntries: RawForecastEntry[] = [];
     const dedupedEras: ForecastEra[] = [];
     for (const [, value] of sorted) {
-      dedupedEntries.push(value.entry);
+      dedupedEntries.push(JSON.parse(JSON.stringify(value.entry)) as RawForecastEntry);
       dedupedEras.push(value.era);
     }
 
@@ -905,17 +962,21 @@ export class ConfigSyncService implements OnModuleDestroy {
     for (const source of incoming) {
       const exists = target.find((item) => item.provider === source.provider && item.type === source.type);
       if (!exists) {
-        target.push({ provider: source.provider, type: source.type, payload: this.cloneRecord(source.payload) });
+        target.push({ provider: source.provider, type: source.type, payload: this.toJsonObject(source.payload) });
         continue;
       }
       if (!exists.payload || Object.keys(exists.payload).length === 0) {
-        exists.payload = this.cloneRecord(source.payload);
+        exists.payload = this.toJsonObject(source.payload);
       }
     }
   }
 
-  private cloneRecord(entry: Record<string, unknown>): Record<string, unknown> {
-    return JSON.parse(JSON.stringify(entry)) as Record<string, unknown>;
+  private cloneRecord(entry: MutableJsonObject | JsonObject): MutableJsonObject {
+    return JSON.parse(JSON.stringify(entry)) as MutableJsonObject;
+  }
+
+  private toJsonObject(entry: MutableJsonObject | JsonObject): JsonObject {
+    return JSON.parse(JSON.stringify(entry)) as JsonObject;
   }
 
   private scheduleNextRun(referenceDate: Date = new Date()): void {
@@ -960,25 +1021,26 @@ export class ConfigSyncService implements OnModuleDestroy {
   }
 
   private trimForecastByPriceCoverage(
-    entries: Record<string, unknown>[],
+    entries: RawForecastEntry[],
     eras: ForecastEra[],
-  ): { forecastEntries: Record<string, unknown>[]; eras: ForecastEra[] } {
+  ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
     if (!entries.length || !eras.length) {
       return { forecastEntries: [], eras: [] };
     }
 
-    const trimmedEntries: Record<string, unknown>[] = [];
+    const trimmedEntries: RawForecastEntry[] = [];
     const trimmedEras: ForecastEra[] = [];
 
     const total = Math.min(entries.length, eras.length);
     for (let index = 0; index < total; index += 1) {
-      const entry = entries[index] ?? {};
-      const rawPrice = (entry as { price_ct_per_kwh?: unknown }).price_ct_per_kwh;
+      const entry = (entries[index] as MutableJsonObject | undefined) ?? {};
+      const sanitizedEntry = JSON.parse(JSON.stringify(entry)) as RawForecastEntry;
+      const rawPrice = (sanitizedEntry as { price_ct_per_kwh?: unknown }).price_ct_per_kwh;
       const priceCt = this.resolveNumber(rawPrice, null);
       if (priceCt === null) {
         break;
       }
-      trimmedEntries.push(entry);
+      trimmedEntries.push(sanitizedEntry);
       trimmedEras.push(eras[index]);
     }
 
@@ -1039,7 +1101,7 @@ export class ConfigSyncService implements OnModuleDestroy {
   }
 
   private derivePriceSnapshot(
-    forecast: Record<string, unknown>[],
+    forecast: RawForecastEntry[],
     simulationConfig: SimulationConfig,
   ): number | null {
     if (!forecast.length) {
@@ -1070,7 +1132,7 @@ export class ConfigSyncService implements OnModuleDestroy {
     }
   }
 
-  private extractBatterySoc(payload: Record<string, unknown>): number | null {
+  private extractBatterySoc(payload: JsonObject): number | null {
     const site = this.extractRecord(payload.site);
     const candidates = [site?.batterySoc, payload.batterySoc, payload.battery_soc];
     for (const value of candidates) {
@@ -1082,7 +1144,7 @@ export class ConfigSyncService implements OnModuleDestroy {
     return null;
   }
 
-  private extractGridPower(payload: Record<string, unknown>): number | null {
+  private extractGridPower(payload: JsonObject): number | null {
     const site = this.extractRecord(payload.site);
     const candidates = [
       site?.gridPower,
@@ -1100,7 +1162,7 @@ export class ConfigSyncService implements OnModuleDestroy {
     return null;
   }
 
-  private extractSolarPower(payload: Record<string, unknown>): number | null {
+  private extractSolarPower(payload: JsonObject): number | null {
     const site = this.extractRecord(payload.site);
     const candidates = [
       site?.pvPower,
@@ -1119,7 +1181,7 @@ export class ConfigSyncService implements OnModuleDestroy {
     return null;
   }
 
-  private extractPriceFromState(payload: Record<string, unknown>): number | null {
+  private extractPriceFromState(payload: JsonObject): number | null {
     const site = this.extractRecord(payload.site);
     const keys = ["tariffGrid", "tariffPriceLoadpoints", "tariffPriceHome", "gridPrice"];
     for (const key of keys) {
@@ -1135,7 +1197,7 @@ export class ConfigSyncService implements OnModuleDestroy {
 
     const forecast = payload.forecast;
     if (forecast && typeof forecast === "object") {
-      const sequences = Object.values(forecast as Record<string, unknown>);
+      const sequences = Object.values(forecast as JsonObject);
       for (const seq of sequences) {
         if (!Array.isArray(seq) || !seq.length) {
           continue;
@@ -1145,7 +1207,7 @@ export class ConfigSyncService implements OnModuleDestroy {
         if (!first || typeof first !== "object") {
           continue;
         }
-        const record = first as Record<string, unknown>;
+        const record = first as JsonObject;
         const value = this.resolveNumber(record.value ?? record.price, null);
         if (value !== null) {
           return value;
@@ -1218,9 +1280,9 @@ export class ConfigSyncService implements OnModuleDestroy {
     return null;
   }
 
-  private extractRecord(value: unknown): Record<string, unknown> | null {
+  private extractRecord(value: unknown): JsonObject | null {
     if (value && typeof value === "object" && !Array.isArray(value)) {
-      return value as Record<string, unknown>;
+      return value as JsonObject;
     }
     return null;
   }

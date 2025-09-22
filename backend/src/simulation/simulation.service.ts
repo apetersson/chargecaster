@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { JsonObject } from "../common/json.ts";
 import type {
   ForecastEra,
   ForecastResponse,
@@ -9,6 +10,8 @@ import type {
   OracleEntry,
   OracleResponse,
   PriceSlot,
+  RawForecastEntry,
+  RawSolarEntry,
   SimulationConfig,
   SnapshotPayload,
   SnapshotSummary,
@@ -22,11 +25,11 @@ const SLOT_DURATION_MS = 3_600_000;
 export interface SimulationInput {
   config: SimulationConfig;
   liveState: { battery_soc?: number | null };
-  forecast: Record<string, unknown>[];
+  forecast: RawForecastEntry[];
   warnings?: string[];
   errors?: string[];
   priceSnapshotEurPerKwh?: number | null;
-  solarForecast?: Record<string, unknown>[];
+  solarForecast?: RawSolarEntry[];
   forecastEras?: ForecastEra[];
   observations?: {
     gridPowerW?: number | null;
@@ -112,7 +115,7 @@ export class SimulationService {
     }
 
     const fixturePath = join(process.cwd(), "fixtures", "sample_data.json");
-    const raw = JSON.parse(readFileSync(fixturePath, "utf-8")) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(fixturePath, "utf-8")) as JsonObject;
     const tariffGrid = Number((raw as { tariffGrid?: unknown }).tariffGrid ?? 0.02);
 
     const config: SimulationConfig = {
@@ -281,8 +284,8 @@ export class SimulationService {
       errors,
     };
 
-    this.storageRef.replaceSnapshot(snapshot as unknown as Record<string, unknown>);
-    const historyEntry: Record<string, unknown> = {
+    this.storageRef.replaceSnapshot(JSON.parse(JSON.stringify(snapshot)) as JsonObject);
+    const historyEntry: JsonObject = {
       timestamp: result.timestamp,
       battery_soc_percent: result.initial_soc_percent,
       price_eur_per_kwh: priceSnapshotEur,
@@ -297,7 +300,7 @@ export class SimulationService {
     const firstOracle = result.oracle_entries[0];
     if (firstOracle) {
       if (typeof firstOracle.grid_power_w === "number" && Number.isFinite(firstOracle.grid_power_w)) {
-        if (historyEntry.grid_power_w === undefined) {
+        if (!("grid_power_w" in historyEntry)) {
           historyEntry.grid_power_w = firstOracle.grid_power_w;
         }
       }
@@ -317,17 +320,17 @@ export class SimulationService {
           historyEntry.solar_power_w = (firstSolarKwh / durationHours) * 1000;
         }
       } else if (firstSolarKwh === 0) {
-        if (historyEntry.solar_energy_wh === undefined) {
+        if (!("solar_energy_wh" in historyEntry)) {
           historyEntry.solar_energy_wh = 0;
         }
-        if (historyEntry.solar_power_w === undefined) {
+        if (!("solar_power_w" in historyEntry)) {
           historyEntry.solar_power_w = 0;
         }
       }
     }
     if (typeof observedSolarPower === "number" && Number.isFinite(observedSolarPower)) {
       historyEntry.solar_power_w = observedSolarPower;
-      if (historyEntry.solar_energy_wh === undefined && typeof firstSolarKwh === "number" && Number.isFinite(firstSolarKwh) && firstSolarKwh === 0) {
+      if (!("solar_energy_wh" in historyEntry) && typeof firstSolarKwh === "number" && Number.isFinite(firstSolarKwh) && firstSolarKwh === 0) {
         historyEntry.solar_energy_wh = 0;
       }
     }
@@ -348,29 +351,14 @@ function gridFee(cfg: SimulationConfig): number {
   return Number(value) || 0;
 }
 
-function normalizePriceSlots(raw: Record<string, unknown>[]): PriceSlot[] {
+function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
   const slotsByStart = new Map<number, PriceSlot>();
   for (const entry of raw) {
     if (!entry) continue;
-    const record = entry as {
-      start?: unknown;
-      from?: unknown;
-      end?: unknown;
-      to?: unknown;
-      price?: unknown;
-      unit?: unknown;
-      value?: unknown;
-      value_unit?: unknown;
-      duration_hours?: unknown;
-      durationHours?: unknown;
-      duration_minutes?: unknown;
-      durationMinutes?: unknown;
-      era_id?: unknown;
-      eraId?: unknown;
-    };
-    const startValue = record.start ?? record.from;
-    const endValue = record.end ?? record.to;
-    const priceValue = normalizePriceValue(record.price, record.unit) ?? normalizePriceValue(record.value, record.value_unit);
+    const startValue = entry.start ?? entry.from;
+    const endValue = entry.end ?? entry.to;
+    const priceValue =
+      normalizePriceValue(entry.price, entry.unit) ?? normalizePriceValue(entry.value, entry.value_unit);
     if (!startValue || priceValue == null) {
       continue;
     }
@@ -380,8 +368,8 @@ function normalizePriceSlots(raw: Record<string, unknown>[]): PriceSlot[] {
     }
     let end = endValue ? parseTimestamp(endValue) : null;
     if (!end) {
-      const durationHours = Number(record.duration_hours ?? record.durationHours ?? 1);
-      const durationMinutes = Number(record.duration_minutes ?? record.durationMinutes ?? 0);
+      const durationHours = Number(entry.duration_hours ?? entry.durationHours ?? 1);
+      const durationMinutes = Number(entry.duration_minutes ?? entry.durationMinutes ?? 0);
       if (!Number.isNaN(durationHours) && durationHours > 0) {
         end = new Date(start.getTime() + durationHours * 3600_000);
       } else if (!Number.isNaN(durationMinutes) && durationMinutes > 0) {
@@ -394,7 +382,7 @@ function normalizePriceSlots(raw: Record<string, unknown>[]): PriceSlot[] {
       continue;
     }
     const durationHours = (end.getTime() - start.getTime()) / 3600_000;
-    const rawEraId = record.era_id ?? record.eraId;
+    const rawEraId = entry.era_id ?? entry.eraId;
     const eraId = typeof rawEraId === "string" && rawEraId.length > 0 ? rawEraId : undefined;
     const slot: PriceSlot = {
       start,
@@ -418,17 +406,16 @@ interface SolarSlot {
   energy_kwh: number;
 }
 
-function normalizeSolarSlots(raw: Record<string, unknown>[]): SolarSlot[] {
+function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
   const slots: SolarSlot[] = [];
   for (const entry of raw) {
     if (!entry) continue;
-    const record = entry as { start?: unknown; end?: unknown; energy_kwh?: unknown };
-    const start = parseTimestamp(record.start);
+    const start = parseTimestamp(entry.start);
     if (!start) {
       continue;
     }
-    const end = parseTimestamp(record.end) ?? new Date(start.getTime() + SLOT_DURATION_MS);
-    const energy = Number(record.energy_kwh ?? 0);
+    const end = parseTimestamp(entry.end) ?? new Date(start.getTime() + SLOT_DURATION_MS);
+    const energy = Number(entry.energy_kwh ?? 0);
     if (!Number.isFinite(energy) || energy <= 0) {
       continue;
     }
@@ -469,7 +456,7 @@ function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
     const eraId = `${slot.start.getTime()}`;
     const durationHours = slot.durationHours;
     const priceCt = Number.isFinite(slot.price) ? slot.price * 100 : null;
-    const payload: Record<string, unknown> = {};
+    const payload: JsonObject = {};
     if (priceCt !== null) {
       payload.price_ct_per_kwh = priceCt;
       payload.unit = "ct/kWh";
@@ -805,7 +792,7 @@ function simulateOptimalSchedule(
   };
 }
 
-function extractForecastFromState(state: Record<string, unknown>): Record<string, unknown>[] {
+function extractForecastFromState(state: JsonObject): RawForecastEntry[] {
   const forecast = (state as { forecast?: unknown }).forecast;
   if (!forecast) return [];
   const sequences: unknown[] = [];
@@ -818,34 +805,27 @@ function extractForecastFromState(state: Record<string, unknown>): Record<string
       }
     }
   }
-  const entries: Record<string, unknown>[] = [];
+  const entries: RawForecastEntry[] = [];
   for (const seq of sequences) {
     if (!Array.isArray(seq)) continue;
     for (const entry of seq) {
       if (typeof entry !== "object" || entry === null) continue;
-      const record = entry as {
-        start?: unknown;
-        from?: unknown;
-        end?: unknown;
-        to?: unknown;
-        value?: unknown;
-        price?: unknown
-      };
+      const record = entry as RawForecastEntry;
       const start = record.start ?? record.from;
       const end = record.end ?? record.to;
       const price = record.value ?? record.price;
       if (start && price != null) {
-        entries.push({start, end, price});
+        entries.push({ start, end, price } as RawForecastEntry);
       }
     }
   }
   return entries;
 }
 
-function extractSolarForecastFromState(state: Record<string, unknown>): Record<string, unknown>[] {
-  const asRecord = (value: unknown): Record<string, unknown> | null =>
+function extractSolarForecastFromState(state: JsonObject): RawSolarEntry[] {
+  const asRecord = (value: unknown): JsonObject | null =>
     value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
+      ? (value as JsonObject)
       : null;
 
   const forecastRecord = asRecord((state as { forecast?: unknown }).forecast);
@@ -858,21 +838,21 @@ function extractSolarForecastFromState(state: Record<string, unknown>): Record<s
     ? (solarRecord?.timeseries as unknown[])
     : [];
 
-  const entries: Record<string, unknown>[] = [];
+  const entries: RawSolarEntry[] = [];
   for (let index = 0; index < timeseries.length; index += 1) {
     const item = asRecord(timeseries[index]);
     if (!item) {
       continue;
     }
 
-    const start = parseTimestamp(item.ts ?? item.start ?? item.from);
+    const start = parseTimestamp((item.ts ?? item.start ?? item.from) ?? null);
     if (!start) {
       continue;
     }
 
     const next = index + 1 < timeseries.length ? asRecord(timeseries[index + 1]) : null;
     const end =
-      parseTimestamp(next?.ts ?? next?.end ?? next?.to) ??
+      parseTimestamp((next?.ts ?? next?.end ?? next?.to) ?? null) ??
       new Date(start.getTime() + SLOT_DURATION_MS);
 
     const durationMs = end.getTime() - start.getTime();
@@ -908,7 +888,7 @@ function extractSolarForecastFromState(state: Record<string, unknown>): Record<s
       start: start.toISOString(),
       end: end.toISOString(),
       energy_kwh: energyKwh,
-    });
+    } as RawSolarEntry);
   }
 
   return entries;

@@ -30,6 +30,16 @@ export default [
       "@typescript-eslint/explicit-module-boundary-types": "off",
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": ["error", { "checksVoidReturn": { "attributes": false } }],
+      "@typescript-eslint/no-restricted-types": [
+        "error",
+        {
+          types: {
+            "Record<string, unknown>": {
+              message: "Use JsonObject or a specific interface instead of Record<string, unknown>.",
+            },
+          },
+        },
+      ],
       ...eslintConfigPrettier.rules
     }
   }

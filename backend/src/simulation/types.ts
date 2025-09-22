@@ -1,3 +1,8 @@
+import type { JsonObject, MutableJsonObject } from "../common/json.ts";
+
+type TimestampInput = string | number | Date | null;
+type NumericInput = string | number | null;
+
 export interface BatteryConfig {
   capacity_kwh: number;
   max_charge_power_w: number;
@@ -34,6 +39,39 @@ export interface SimulationConfig {
   state?: StateConfig;
 }
 
+export interface RawForecastEntry extends MutableJsonObject {
+  start?: TimestampInput;
+  from?: TimestampInput;
+  end?: TimestampInput;
+  to?: TimestampInput;
+  price?: NumericInput;
+  value?: NumericInput;
+  unit?: string | null;
+  price_unit?: string | null;
+  value_unit?: string | null;
+  price_ct_per_kwh?: NumericInput;
+  price_with_fee_ct_per_kwh?: NumericInput;
+  price_with_fee_eur_per_kwh?: NumericInput;
+  value_ct_per_kwh?: NumericInput;
+  duration_hours?: NumericInput;
+  durationHours?: NumericInput;
+  duration_minutes?: NumericInput;
+  durationMinutes?: NumericInput;
+  era_id?: string | null;
+  eraId?: string | null;
+}
+
+export interface RawSolarEntry extends MutableJsonObject {
+  start?: TimestampInput;
+  end?: TimestampInput;
+  energy_kwh?: NumericInput;
+  energy_wh?: NumericInput;
+  value?: NumericInput;
+  val?: NumericInput;
+}
+
+export type HistoryRawEntry = MutableJsonObject;
+
 export interface PriceSlot {
   start: Date;
   end: Date;
@@ -58,7 +96,7 @@ export type ForecastSourceType = "cost" | "solar" | (string & {});
 export interface ForecastSourcePayload {
   provider: string;
   type: ForecastSourceType;
-  payload: Record<string, unknown>;
+  payload: JsonObject;
 }
 
 export interface ForecastEra {
@@ -82,7 +120,6 @@ export interface SnapshotPayload {
   projected_cost_eur: number | null;
   baseline_cost_eur: number | null;
   basic_battery_cost_eur?: number | null;
-  active_control_savings_eur?: number | null;
   active_control_savings_eur?: number | null;
   projected_savings_eur: number | null;
   projected_grid_energy_w: number | null;
@@ -109,6 +146,7 @@ export interface SnapshotSummary {
   baseline_cost_eur: number | null;
   basic_battery_cost_eur?: number | null;
   projected_savings_eur: number | null;
+  active_control_savings_eur?: number | null;
   projected_grid_energy_w: number | null;
   forecast_hours: number | null;
   forecast_samples: number | null;

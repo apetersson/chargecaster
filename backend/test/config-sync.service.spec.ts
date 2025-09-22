@@ -3,19 +3,23 @@ import { describe, expect, it } from "vitest";
 import { ConfigSyncService } from "../src/config/config-sync.service.ts";
 import type { SimulationService } from "../src/simulation/simulation.service.ts";
 import { normalizePriceSlots } from "../src/simulation/simulation.service.ts";
+import type { FroniusService } from "../src/fronius/fronius.service.ts";
+import type { RawForecastEntry, RawSolarEntry } from "../src/simulation/types.ts";
 
 describe("ConfigSyncService price normalization", () => {
-  const service = new ConfigSyncService({
+  const simulation = {
     runSimulation: () => {
       throw new Error("not needed for test");
     },
-  } as unknown as SimulationService);
+  } as unknown as SimulationService;
+  const fronius = { applyOptimization: async () => Promise.resolve() } as unknown as FroniusService;
+  const service = new ConfigSyncService(simulation, fronius);
 
   it("converts cost sources to EUR per kWh for simulation", () => {
     const start = new Date(Date.UTC(2025, 0, 1, 12, 0, 0)).toISOString();
     const end = new Date(Date.UTC(2025, 0, 1, 13, 0, 0)).toISOString();
 
-    const canonicalForecast = [
+    const canonicalForecast: RawForecastEntry[] = [
       {
         start,
         end,
@@ -23,7 +27,7 @@ describe("ConfigSyncService price normalization", () => {
       },
     ];
 
-    const marketForecast = [
+    const marketForecast: RawForecastEntry[] = [
       {
         start,
         end,
@@ -34,11 +38,11 @@ describe("ConfigSyncService price normalization", () => {
 
     const { forecastEntries } = (service as unknown as {
       buildForecastEras(
-        canonicalForecast: Record<string, unknown>[],
-        evccForecast: Record<string, unknown>[],
-        marketForecast: Record<string, unknown>[],
-        solarForecast: Record<string, unknown>[],
-      ): { forecastEntries: Record<string, unknown>[] };
+        canonicalForecast: RawForecastEntry[],
+        evccForecast: RawForecastEntry[],
+        marketForecast: RawForecastEntry[],
+        solarForecast: RawSolarEntry[],
+      ): { forecastEntries: RawForecastEntry[] };
     }).buildForecastEras(canonicalForecast, [], marketForecast, []);
 
     expect(forecastEntries).toHaveLength(1);
