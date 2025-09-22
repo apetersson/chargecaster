@@ -33,9 +33,9 @@ export class FroniusService {
     const url = this.buildUrl(froniusConfig.host, froniusConfig.batteriesPath);
 
     try {
-      const currentConfig = await this.requestJson("GET", url, froniusConfig);
-      const currentMode = this.extractCurrentMode(currentConfig);
-      if (currentMode === desiredMode && this.lastAppliedMode === desiredMode) {
+      // const currentConfig = await this.requestJson("GET", url, froniusConfig);
+      // const currentMode = this.extractCurrentMode(currentConfig);
+      if (this.lastAppliedMode === desiredMode) {
         this.logger.log(`Fronius already in ${desiredMode} mode; skipping update.`);
         return;
       }
@@ -154,10 +154,10 @@ export class FroniusService {
     mode: "charge" | "auto",
   ): JsonObject | null {
     if (mode === "charge") {
-      return { BAT_M0_SOC_MIN: 100, BAT_M0_SOC_MODE: "manual" };
+      return {BAT_M0_SOC_MIN: 100, BAT_M0_SOC_MODE: "manual"};
     }
     const floorSoc = this.resolveAutoFloor(config, snapshot);
-    return { BAT_M0_SOC_MIN: floorSoc, BAT_M0_SOC_MODE: "auto" };
+    return {BAT_M0_SOC_MIN: floorSoc, BAT_M0_SOC_MODE: "auto"};
   }
 
   private resolveAutoFloor(config: JsonObject, snapshot: SnapshotPayload): number {
@@ -203,7 +203,7 @@ export class FroniusService {
     credentials: FroniusConfig,
     payload: JsonObject | null = null,
   ): Promise<unknown> {
-    const headers = new Headers({ Accept: "application/json, text/plain, */*" });
+    const headers = new Headers({Accept: "application/json, text/plain, */*"});
     let body: string | undefined;
     if (payload) {
       body = JSON.stringify(payload);
@@ -236,7 +236,7 @@ export class FroniusService {
     body: string | undefined,
   ): Promise<Response> {
     const url = new URL(urlString);
-    const { timeoutSeconds } = credentials;
+    const {timeoutSeconds} = credentials;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), Math.max(1, timeoutSeconds) * 1000);
 
