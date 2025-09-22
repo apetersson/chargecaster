@@ -178,6 +178,11 @@ const extractCostPrice = (era: ForecastEra): number | null => {
       continue;
     }
     const record = payload;
+    const centsWithFee =
+      toNumeric(record.price_with_fee_ct_per_kwh) ?? toNumeric(record.total_price_ct_per_kwh);
+    if (centsWithFee !== null) {
+      return centsWithFee;
+    }
     const cents = toNumeric(record.price_ct_per_kwh) ?? toNumeric(record.value_ct_per_kwh);
     if (cents !== null) {
       return cents;
