@@ -20,6 +20,7 @@ const DIGEST_PREFIX = "digest";
 export class FroniusService {
   private readonly logger = new Logger(FroniusService.name);
   private lastAppliedTarget: number | null = null;
+  private lastAppliedMode: "charge" | "auto" | null = null;
 
   async applyOptimization(config: JsonObject, snapshot: SnapshotPayload): Promise<void> {
     const froniusConfig = this.extractConfig(config);
@@ -27,35 +28,33 @@ export class FroniusService {
       return;
     }
 
-    const targetPercent = this.resolveTargetSoc(snapshot);
-    if (targetPercent === null) {
-      return;
-    }
+    const desiredMode = this.resolveDesiredMode(snapshot);
 
     const url = this.buildUrl(froniusConfig.host, froniusConfig.batteriesPath);
 
     try {
       const currentConfig = await this.requestJson("GET", url, froniusConfig);
-      const currentTarget = this.extractCurrentTarget(currentConfig);
-      const roundedTarget = Math.max(0, Math.min(100, Math.round(targetPercent)));
-
-      if (currentTarget !== null && Math.abs(currentTarget - roundedTarget) < 0.5) {
-        this.lastAppliedTarget = roundedTarget;
+      const currentMode = this.extractCurrentMode(currentConfig);
+      if (currentMode === desiredMode && this.lastAppliedMode === desiredMode) {
+        this.logger.log(`Fronius already in ${desiredMode} mode; skipping update.`);
         return;
       }
 
-      if (this.lastAppliedTarget !== null && Math.abs(this.lastAppliedTarget - roundedTarget) < 0.5) {
+      const payload = this.buildPayload(config, snapshot, desiredMode);
+      if (!payload) {
+        this.logger.warn("Unable to construct Fronius payload; skipping update.");
         return;
       }
 
-      const payload = {
-        BAT_M0_SOC_MIN: roundedTarget,
-        BAT_M0_SOC_MODE: "manual",
-      };
-
+      this.logger.log(
+        `Issuing Fronius command ${JSON.stringify(payload)} (mode=${desiredMode}) to ${url}`,
+      );
       await this.requestJson("POST", url, froniusConfig, payload);
-      this.lastAppliedTarget = roundedTarget;
-      this.logger.log(`Updated Fronius battery target to ${roundedTarget}%`);
+      this.lastAppliedMode = desiredMode;
+      if (typeof payload.BAT_M0_SOC_MIN === "number") {
+        this.lastAppliedTarget = payload.BAT_M0_SOC_MIN;
+      }
+      this.logger.log("Fronius command applied successfully.");
     } catch (error: unknown) {
       this.logger.warn(`Fronius update failed: ${this.describeError(error)}`);
     }
@@ -87,18 +86,16 @@ export class FroniusService {
     } satisfies FroniusConfig;
   }
 
-  private resolveTargetSoc(snapshot: SnapshotPayload): number | null {
-    const candidates = [
-      snapshot.recommended_final_soc_percent,
-      snapshot.recommended_soc_percent,
-      snapshot.next_step_soc_percent,
-    ];
-    for (const value of candidates) {
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return value;
-      }
+  private resolveDesiredMode(snapshot: SnapshotPayload): "charge" | "auto" {
+    if (snapshot.current_mode === "charge" || snapshot.current_mode === "auto") {
+      return snapshot.current_mode;
     }
-    return null;
+    const currentSoc = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
+    const nextSoc = typeof snapshot.next_step_soc_percent === "number" ? snapshot.next_step_soc_percent : null;
+    if (currentSoc !== null && nextSoc !== null && nextSoc > currentSoc + 0.5) {
+      return "charge";
+    }
+    return "auto";
   }
 
   private extractCurrentTarget(payload: unknown): number | null {
@@ -118,6 +115,77 @@ export class FroniusService {
       }
     }
     return null;
+  }
+
+  private extractCurrentMode(payload: unknown): "charge" | "auto" | null {
+    if (!isJsonObject(payload)) {
+      return null;
+    }
+    const record = payload;
+    const direct = record.BAT_M0_SOC_MODE ?? record.bat_m0_soc_mode;
+    const mode = this.normaliseMode(direct);
+    if (mode) {
+      return mode;
+    }
+    const primary = record.primary;
+    if (isJsonObject(primary)) {
+      return this.normaliseMode(primary.BAT_M0_SOC_MODE ?? primary.bat_m0_soc_mode);
+    }
+    return null;
+  }
+
+  private normaliseMode(value: unknown): "charge" | "auto" | null {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const lowered = value.trim().toLowerCase();
+    if (lowered === "manual" || lowered === "charge") {
+      return "charge";
+    }
+    if (lowered === "auto") {
+      return "auto";
+    }
+    return null;
+  }
+
+  private buildPayload(
+    config: JsonObject,
+    snapshot: SnapshotPayload,
+    mode: "charge" | "auto",
+  ): JsonObject | null {
+    if (mode === "charge") {
+      return { BAT_M0_SOC_MIN: 100, BAT_M0_SOC_MODE: "manual" };
+    }
+    const floorSoc = this.resolveAutoFloor(config, snapshot);
+    return { BAT_M0_SOC_MIN: floorSoc, BAT_M0_SOC_MODE: "auto" };
+  }
+
+  private resolveAutoFloor(config: JsonObject, snapshot: SnapshotPayload): number {
+    const batteryCfg = isJsonObject(config.battery) ? config.battery : null;
+    const configFloor = batteryCfg && typeof batteryCfg.auto_mode_floor_soc === "number"
+      ? batteryCfg.auto_mode_floor_soc
+      : null;
+    if (typeof configFloor === "number" && Number.isFinite(configFloor)) {
+      return this.clampSoc(configFloor);
+    }
+    const snapshotNext = snapshot.next_step_soc_percent;
+    if (typeof snapshotNext === "number" && Number.isFinite(snapshotNext)) {
+      return this.clampSoc(Math.max(0, Math.min(snapshotNext, 100)));
+    }
+    return 5;
+  }
+
+  private clampSoc(value: number): number {
+    if (!Number.isFinite(value)) {
+      return 5;
+    }
+    if (value < 0) {
+      return 0;
+    }
+    if (value > 100) {
+      return 100;
+    }
+    return Math.round(value);
   }
 
   private buildUrl(host: string, path: string): string {

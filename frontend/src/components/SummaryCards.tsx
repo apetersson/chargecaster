@@ -12,17 +12,16 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
   const activeControlSavings =
     (data as { active_control_savings_eur?: number | null }).active_control_savings_eur ?? null;
 
-  let actionLabel = "Auto";
-  if (currentSoc !== null && recommendedSoc !== null) {
-    const delta = recommendedSoc - currentSoc;
-    if (delta > 1) {
-      actionLabel = "Charge";
-    } else if (delta < -1) {
-      actionLabel = "Discharge";
-    } else {
-      actionLabel = "Hold";
+  const currentMode = data.current_mode ?? null;
+  const actionLabel = (() => {
+    if (currentMode === "charge") {
+      return "Charge";
     }
-  }
+    if (currentMode === "auto") {
+      return "Auto";
+    }
+    return ""
+  })();
 
   return (
     <section className="card">

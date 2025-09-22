@@ -115,6 +115,7 @@ export interface SnapshotPayload {
   next_step_soc_percent: number | null;
   recommended_soc_percent: number | null;
   recommended_final_soc_percent: number | null;
+  current_mode?: "charge" | "auto";
   price_snapshot_ct_per_kwh?: number | null;
   price_snapshot_eur_per_kwh: number | null; // deprecated
   projected_cost_eur: number | null;
@@ -140,6 +141,7 @@ export interface SnapshotSummary {
   next_step_soc_percent: number | null;
   recommended_soc_percent: number | null;
   recommended_final_soc_percent: number | null;
+  current_mode?: "charge" | "auto";
   price_snapshot_ct_per_kwh?: number | null;
   price_snapshot_eur_per_kwh: number | null;
   projected_cost_eur: number | null;
