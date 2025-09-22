@@ -14,7 +14,6 @@ import type {
   SimulationConfig,
 } from "../simulation/types.ts";
 import type { JsonObject, JsonValue, MutableJsonObject } from "../common/json.ts";
-import { isJsonObject, sanitizeJsonObject, sanitizeMutableJsonObject } from "../common/json.ts";
 import {
   extractForecastFromState,
   extractSolarForecastFromState,
@@ -375,7 +374,6 @@ export class ConfigSyncService implements OnModuleDestroy {
     return simulationConfig;
   }
 
-  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
   private async collectFromEvcc(
     evccConfig: EvccConfig | undefined,
     warnings: string[],
@@ -491,9 +489,7 @@ export class ConfigSyncService implements OnModuleDestroy {
       };
     }
   }
-  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 
-  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
   private async collectFromMarket(
     marketConfig: ConfigSection | undefined,
     simulationConfig: SimulationConfig,
@@ -529,9 +525,7 @@ export class ConfigSyncService implements OnModuleDestroy {
 
     return { forecast, priceSnapshot, solar: [] };
   }
-  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 
-  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
   private normalizeForecastEntries(payload: unknown, maxHours = 72): RawForecastEntry[] {
     const records: RawForecastEntry[] = [];
     if (!payload) {
@@ -657,7 +651,6 @@ export class ConfigSyncService implements OnModuleDestroy {
 
     return entries;
   }
-  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 
   private filterFutureEntries(entries: RawForecastEntry[]): RawForecastEntry[] {
     const now = Date.now();

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/unbound-method */
+
 import { useEffect, useRef } from "react";
 import {
   BarController,
@@ -854,18 +856,21 @@ const buildDatasets = (
     }
   });
 
-  const legendConfig = [
+  const legendConfig: Array<{ label: string; color: string; datasetLabels: string[] }> = [
     { label: "State of Charge", color: SOC_BORDER, datasetLabels: ["State of Charge"] },
     { label: "Grid Power", color: GRID_BORDER, datasetLabels: ["Grid Power", GRID_MARKERS_LABEL] },
     { label: "Solar Generation", color: SOLAR_BORDER, datasetLabels: ["Solar Generation"] },
     { label: TARIFF_LABEL, color: PRICE_BORDER, datasetLabels: [TARIFF_LABEL] },
     { label: "Current SOC", color: SOC_BORDER, datasetLabels: ["Current SOC"] },
-  ] as const;
+  ];
 
   const legendGroups: LegendGroup[] = legendConfig
     .map((entry) => {
       const indices = entry.datasetLabels.flatMap((datasetLabel) => labelToIndices.get(datasetLabel) ?? []);
-      return indices.length ? { label: entry.label, color: entry.color, datasetIndices: indices } : null;
+      if (!indices.length) {
+        return null;
+      }
+      return { label: entry.label, color: entry.color, datasetIndices: indices };
     })
     .filter((item): item is LegendGroup => item !== null);
 
@@ -892,12 +897,11 @@ const buildOptions = (config: {
   const groupedLegendEntries = legendGroups.filter((group) => group.datasetIndices.length > 0);
   const legendDefaults = Chart.defaults.plugins.legend;
   const legendLabelDefaults = legendDefaults.labels;
-  const legendClickDefault = legendDefaults.onClick
-    ? legendDefaults.onClick.bind(legendDefaults)
-    : undefined;
-
-  const generateDefaultLabels = (chart: Chart): LegendItem[] =>
-    legendLabelDefaults.generateLabels.call(legendLabelDefaults, chart);
+  const legendClickDefault = Chart.defaults.plugins.legend.onClick;
+  const generateDefaultLabels = (chart: Chart): LegendItem[] => {
+    const generator = legendLabelDefaults.generateLabels;
+    return generator.call(legendLabelDefaults, chart);
+  };
 
   const options: ChartOptions<"line"> = {
     responsive: true,
@@ -907,13 +911,13 @@ const buildOptions = (config: {
       intersect: false,
     },
     plugins: {
-      legend: {
-        position: "top",
-        labels: {
-          color: LEGEND_COLOR,
-          font: {
-            weight: "500",
-          },
+          legend: {
+            position: "top",
+            labels: {
+              color: LEGEND_COLOR,
+              font: {
+                weight: 500,
+              },
           boxWidth: 16,
           usePointStyle: true,
           generateLabels: (chart) => {
@@ -946,13 +950,12 @@ const buildOptions = (config: {
           const chart = legend.chart;
           const datasetIndices = (legendItem as LegendItem & { datasetIndices?: number[] }).datasetIndices;
           if (!datasetIndices || !datasetIndices.length || !groupedLegendEntries.length) {
-            legendClickDefault?.(event, legendItem, legend);
+            legendClickDefault?.call(legend, event, legendItem, legend);
             return;
           }
           datasetIndices.forEach((index) => {
-            const meta = chart.getDatasetMeta(index);
             const visible = chart.isDatasetVisible(index);
-            meta.hidden = visible ? true : null;
+            chart.setDatasetVisibility(index, !visible);
           });
           chart.update();
         },

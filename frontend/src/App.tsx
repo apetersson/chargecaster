@@ -8,8 +8,11 @@ import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart";
 import type {
   ForecastEra,
+  ForecastResponse,
   HistoryPoint,
+  HistoryResponse,
   OracleEntry,
+  OracleResponse,
   SnapshotSummary,
 } from "./types";
 
@@ -182,31 +185,40 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [summaryData, historyData, forecastData, oracleData] = await Promise.all([
-        trpcClient.dashboard.summary.query(),
-        trpcClient.dashboard.history.query(),
-        trpcClient.dashboard.forecast.query(),
-        trpcClient.dashboard.oracle.query(),
-      ]);
+  const fetchData = useCallback((): void => {
+    const execute = async () => {
+      try {
+        setLoading(true);
+        const client = trpcClient as unknown as {
+          dashboard: {
+            summary: { query: () => Promise<SnapshotSummary> };
+            history: { query: () => Promise<HistoryResponse> };
+            forecast: { query: () => Promise<ForecastResponse> };
+            oracle: { query: () => Promise<OracleResponse> };
+          };
+        };
 
-      setSummary(summaryData);
+        const summaryData = await client.dashboard.summary.query();
+        const historyData = await client.dashboard.history.query();
+        const forecastData = await client.dashboard.forecast.query();
+        const oracleData = await client.dashboard.oracle.query();
 
-      const normalizedHistory = (historyData.entries ?? []).map((entry) =>
-        normalizeHistoryEntry(entry),
-      );
-      setHistory(normalizedHistory);
+        setSummary(summaryData);
 
-      setForecast(Array.isArray(forecastData.eras) ? forecastData.eras : []);
-      setOracleEntries(Array.isArray(oracleData.entries) ? oracleData.entries : []);
-      setError(null);
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
+        const normalizedHistory = (historyData.entries ?? []).map((entry) => normalizeHistoryEntry(entry));
+        setHistory(normalizedHistory);
+
+        setForecast(Array.isArray(forecastData.eras) ? forecastData.eras : []);
+        setOracleEntries(Array.isArray(oracleData.entries) ? oracleData.entries : []);
+        setError(null);
+      } catch (err) {
+        setError(getErrorMessage(err));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void execute();
   }, []);
 
   useEffect(() => {
