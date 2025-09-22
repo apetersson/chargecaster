@@ -47,7 +47,9 @@ const toTimestamp = (value: unknown): string => {
 
 const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
   const record = (entry ?? {}) as Record<string, unknown>;
-  const priceCt = toNumber(record.price_ct_per_kwh);
+  const priceCt =
+    toNumber(record.price_with_fee_ct_per_kwh ?? record.total_price_ct_per_kwh) ??
+    toNumber(record.price_ct_per_kwh);
   const priceEur = toNumber(record.price_eur_per_kwh);
   const gridPowerKw = toNumber(record.grid_power_kw ?? record.gridPowerKw);
   const gridPower =

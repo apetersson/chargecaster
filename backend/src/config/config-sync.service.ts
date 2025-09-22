@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
@@ -71,12 +71,20 @@ type ForecastCostPayload = Record<string, unknown> & {
 };
 
 @Injectable()
-export class ConfigSyncService {
+export class ConfigSyncService implements OnModuleDestroy {
   private readonly logger = new Logger(ConfigSyncService.name);
+  private schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+  private runInProgress = false;
+  private intervalSeconds: number | null = null;
 
   constructor(@Inject(SimulationService) private readonly simulationService: SimulationService) {}
 
   async seedFromConfig(): Promise<void> {
+    if (this.runInProgress) {
+      this.logger.warn("Simulation already running; skipping new request.");
+      return;
+    }
+    this.runInProgress = true;
     const configPath = this.resolveConfigPath();
     try {
       const rawConfig = await this.loadConfigFile(configPath);
@@ -112,6 +120,16 @@ export class ConfigSyncService {
     } catch (error) {
       this.logger.error(`Config sync failed: ${this.describeError(error)}`);
       throw error;
+    } finally {
+      this.runInProgress = false;
+      this.scheduleNextRun();
+    }
+  }
+
+  onModuleDestroy(): void {
+    if (this.schedulerTimer) {
+      clearTimeout(this.schedulerTimer);
+      this.schedulerTimer = null;
     }
   }
 
@@ -239,9 +257,15 @@ export class ConfigSyncService {
     const networkTariff = this.resolveNumber(price.network_tariff_eur_per_kwh, null);
     const feedInTariff = this.resolveNumber(price.feed_in_tariff_eur_per_kwh, null);
 
-    const intervalSeconds = this.resolveNumber(logic.interval_seconds, 300);
+    const intervalSecondsRaw = this.resolveNumber(logic.interval_seconds, 300);
+    const normalizedIntervalSeconds =
+      typeof intervalSecondsRaw === "number" && Number.isFinite(intervalSecondsRaw) && intervalSecondsRaw > 0
+        ? intervalSecondsRaw
+        : null;
+    this.intervalSeconds = normalizedIntervalSeconds;
     const minHoldMinutes = this.resolveNumber(logic.min_hold_minutes, 0);
     const houseLoad = this.resolveNumber(logic.house_load_w, 1200);
+    const allowBatteryExport = this.resolveBoolean(logic.allow_battery_export, true);
     const directUseRatio = this.resolveNumber(solar.direct_use_ratio, null);
     const maxSolarChargePower = this.resolveNumber(
       solar.max_charge_power_solar_w ?? solar.max_charge_power_w,
@@ -260,9 +284,10 @@ export class ConfigSyncService {
         feed_in_tariff_eur_per_kwh: feedInTariff ?? undefined,
       },
       logic: {
-        interval_seconds: intervalSeconds ?? undefined,
+        interval_seconds: intervalSecondsRaw ?? undefined,
         min_hold_minutes: minHoldMinutes ?? undefined,
         house_load_w: houseLoad ?? undefined,
+        allow_battery_export: allowBatteryExport,
       },
       solar:
         directUseRatio === null && maxSolarChargePower === null
@@ -859,6 +884,47 @@ export class ConfigSyncService {
 
   private cloneRecord(entry: Record<string, unknown>): Record<string, unknown> {
     return JSON.parse(JSON.stringify(entry)) as Record<string, unknown>;
+  }
+
+  private scheduleNextRun(referenceDate: Date = new Date()): void {
+    if (this.schedulerTimer) {
+      clearTimeout(this.schedulerTimer);
+      this.schedulerTimer = null;
+    }
+
+    const intervalSeconds = this.intervalSeconds;
+    if (!(typeof intervalSeconds === "number" && Number.isFinite(intervalSeconds) && intervalSeconds > 0)) {
+      return;
+    }
+
+    const intervalMs = intervalSeconds * 1000;
+    const nowMs = referenceDate.getTime();
+    const anchor = new Date(referenceDate);
+    anchor.setMinutes(0, 0, 0);
+    const anchorMs = anchor.getTime();
+    const elapsedSinceAnchor = Math.max(0, nowMs - anchorMs);
+    const slotsElapsed = Math.floor(elapsedSinceAnchor / intervalMs);
+    let nextRunMs = anchorMs + (slotsElapsed + 1) * intervalMs;
+    if (nextRunMs <= nowMs + 100) {
+      nextRunMs += intervalMs;
+    }
+    const delayMs = Math.max(0, nextRunMs - nowMs);
+
+    this.schedulerTimer = setTimeout(() => {
+      this.schedulerTimer = null;
+      this.triggerScheduledRun();
+    }, delayMs);
+
+    const approxMinutes = delayMs / 60000;
+    this.logger.log(
+      `Next simulation scheduled for ${new Date(nextRunMs).toISOString()} (~${approxMinutes.toFixed(2)} minutes)`,
+    );
+  }
+
+  private triggerScheduledRun(): void {
+    void this.seedFromConfig().catch(() => {
+      // Errors are logged within seedFromConfig; scheduling resumes via finally block.
+    });
   }
 
   private trimForecastByPriceCoverage(

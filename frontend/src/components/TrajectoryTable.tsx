@@ -75,6 +75,10 @@ const resolveCost = (era: ForecastEra, provider: string) => {
     return null;
   }
   const payload = match.payload ?? {};
+  const centsWithFee = toNumeric((payload as { price_with_fee_ct_per_kwh?: unknown }).price_with_fee_ct_per_kwh);
+  if (centsWithFee !== null) {
+    return { priceCt: centsWithFee };
+  }
   const existingCents = toNumeric((payload as { price_ct_per_kwh?: unknown }).price_ct_per_kwh);
   if (existingCents !== null) {
     return { priceCt: existingCents };

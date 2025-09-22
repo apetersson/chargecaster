@@ -14,6 +14,7 @@ export interface LogicConfig {
   interval_seconds?: number;
   min_hold_minutes?: number;
   house_load_w?: number;
+  allow_battery_export?: boolean;
 }
 
 export interface SolarConfig {
