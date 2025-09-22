@@ -368,17 +368,15 @@ const resolveInitialSoc = (
   summary: SnapshotSummary | null,
   historyPoints: ProjectionPoint[],
 ): number => {
+  if (summary && isFiniteNumber(summary.current_soc_percent)) {
+    return summary.current_soc_percent;
+  }
   const lastHistory = historyPoints.length ? historyPoints[historyPoints.length - 1].y : null;
   if (typeof lastHistory === "number" && Number.isFinite(lastHistory)) {
     return lastHistory;
   }
-  if (summary) {
-    if (isFiniteNumber(summary.next_step_soc_percent)) {
-      return summary.next_step_soc_percent;
-    }
-    if (isFiniteNumber(summary.current_soc_percent)) {
-      return summary.current_soc_percent;
-    }
+  if (summary && isFiniteNumber(summary.next_step_soc_percent)) {
+    return summary.next_step_soc_percent;
   }
   return 0;
 };
@@ -391,6 +389,24 @@ const buildSocSeries = (
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.battery_soc_percent))
     .filter((point): point is ProjectionPoint => point !== null);
+
+  const summarySoc = summary && isFiniteNumber(summary.current_soc_percent)
+    ? summary.current_soc_percent
+    : null;
+  const summaryTimestamp = summary?.timestamp ? parseTimestamp(summary.timestamp) : null;
+  if (summarySoc !== null && summaryTimestamp !== null) {
+    const summaryPoint: ProjectionPoint = {
+      x: summaryTimestamp,
+      y: summarySoc,
+      source: "history",
+    };
+    const last = historyPoints[historyPoints.length - 1];
+    if (last && last.x === summaryPoint.x) {
+      historyPoints[historyPoints.length - 1] = summaryPoint;
+    } else {
+      historyPoints.push(summaryPoint);
+    }
+  }
 
   let currentSoc = resolveInitialSoc(summary, historyPoints);
   const futurePoints: ProjectionPoint[] = [];
@@ -405,7 +421,14 @@ const buildSocSeries = (
   const combined = buildCombinedSeries(historyPoints, futurePoints);
 
   let currentMarker: ProjectionPoint | null = null;
-  if (historyPoints.length) {
+  if (summarySoc !== null && summaryTimestamp !== null) {
+    currentMarker = {
+      x: summaryTimestamp,
+      y: summarySoc,
+      source: "history",
+      isCurrentMarker: true,
+    };
+  } else if (historyPoints.length) {
     const anchor = historyPoints[historyPoints.length - 1];
     currentMarker = { ...anchor, isCurrentMarker: true };
   } else if (summary && isFiniteNumber(summary.current_soc_percent)) {

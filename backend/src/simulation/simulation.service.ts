@@ -13,6 +13,8 @@ import type {
   SimulationConfig,
   SnapshotPayload,
   SnapshotSummary,
+  ForecastSlotInput,
+  SolarSlotInput,
 } from "./types.ts";
 import { normalizeHistoryList } from "./history.serializer.ts";
 import { StorageService } from "../storage/storage.service.ts";
@@ -220,7 +222,7 @@ export class SimulationService {
     this.storageRef.replaceSnapshot(snapshot as unknown as Record<string, unknown>);
     const historyEntry: Record<string, unknown> = {
       timestamp: result.timestamp,
-      battery_soc_percent: result.next_step_soc_percent,
+      battery_soc_percent: result.initial_soc_percent,
       price_eur_per_kwh: priceSnapshotEur,
       price_ct_per_kwh: priceSnapshotCt,
     };

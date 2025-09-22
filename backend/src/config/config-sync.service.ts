@@ -840,6 +840,9 @@ export class ConfigSyncService {
     };
 
     if (!unitStr) {
+      if (Math.abs(numeric) > 10) {
+        return numeric;
+      }
       return by(100);
     }
 
