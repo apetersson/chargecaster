@@ -220,7 +220,12 @@ export class ConfigSyncService implements OnModuleDestroy {
       this.logger.warn(message);
     }
 
-    const canonicalForecast = futureEvccForecast.length ? futureEvccForecast : forecast;
+    const useMarketForPrice = preferMarket && futureMarketForecast.length > 0;
+    const canonicalForecast = useMarketForPrice
+      ? futureMarketForecast
+      : futureEvccForecast.length
+        ? futureEvccForecast
+        : forecast;
 
     const gridFeeForDisplay =
       simulationConfig.price?.grid_fee_eur_per_kwh ??
