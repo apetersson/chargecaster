@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { SnapshotPayload, SnapshotSummary } from "./types.js";
+import type { SnapshotPayload, SnapshotSummary } from "./types.ts";
 
 @Injectable()
 export class SummaryService {

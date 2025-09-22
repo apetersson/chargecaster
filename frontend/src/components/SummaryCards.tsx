@@ -7,28 +7,10 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
   }
   const { label, className } = statusClass(data.errors, data.warnings);
 
-  const hasCommand = typeof data.recommended_soc_percent === "number";
-  const actionLabel = (() => {
-    if (!hasCommand) {
-      return "No action";
-    }
-    const current = data.current_soc_percent ?? 0;
-    const next = data.next_step_soc_percent ?? current;
-    const target = data.recommended_final_soc_percent ?? data.recommended_soc_percent ?? next;
-    if (target > current + 0.5) {
-      return `Charge towards ${formatPercent(target)}`;
-    }
-    if (target < current - 0.5) {
-      return `Discharge towards ${formatPercent(target)}`;
-    }
-    if (next > current + 0.5) {
-      return `Increase SOC towards ${formatPercent(next)}`;
-    }
-    if (next < current - 0.5) {
-      return `Lower SOC towards ${formatPercent(next)}`;
-    }
-    return `Hold around ${formatPercent(current)}`;
-  })();
+  const strategy = data.recommended_soc_percent === 100 ? "charge" : "auto";
+  const actionLabel = strategy === "charge" ? "Charge to 100%" : "Auto";
+  const nextTargetLabel = `${formatPercent(data.next_step_soc_percent)} (${strategy === "charge" ? "Charge" : "Auto"})`;
+  const finalTargetLabel = `${formatPercent(data.recommended_final_soc_percent)} (${strategy === "charge" ? "Charge" : "Auto"})`;
 
   return (
     <section className="card">
@@ -47,11 +29,11 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
         </div>
         <div className="metric">
           <span className="label">Next Target</span>
-          <span className="value">{formatPercent(data.next_step_soc_percent)}</span>
+          <span className="value">{nextTargetLabel}</span>
         </div>
         <div className="metric">
           <span className="label">Recommended Final</span>
-          <span className="value">{formatPercent(data.recommended_final_soc_percent)}</span>
+          <span className="value">{finalTargetLabel}</span>
         </div>
         <div className="metric">
           <span className="label">Baseline Cost</span>
