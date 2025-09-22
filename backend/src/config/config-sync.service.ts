@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import YAML from "yaml";
 
 import { SimulationService } from "../simulation/simulation.service.ts";
+import { FroniusService } from "../fronius/fronius.service.ts";
 import type { ForecastEra, SimulationConfig } from "../simulation/types.ts";
 import {
   extractForecastFromState,
@@ -77,7 +78,10 @@ export class ConfigSyncService implements OnModuleDestroy {
   private runInProgress = false;
   private intervalSeconds: number | null = null;
 
-  constructor(@Inject(SimulationService) private readonly simulationService: SimulationService) {}
+  constructor(
+    @Inject(SimulationService) private readonly simulationService: SimulationService,
+    @Inject(FroniusService) private readonly froniusService: FroniusService,
+  ) {}
 
   async seedFromConfig(): Promise<void> {
     if (this.runInProgress) {
@@ -106,7 +110,7 @@ export class ConfigSyncService implements OnModuleDestroy {
           prepared.liveState.battery_soc ?? "n/a"
         }`,
       );
-      this.simulationService.runSimulation({
+      const snapshot = this.simulationService.runSimulation({
         config: prepared.simulationConfig,
         liveState: prepared.liveState,
         forecast: prepared.forecast,
@@ -117,6 +121,7 @@ export class ConfigSyncService implements OnModuleDestroy {
         priceSnapshotEurPerKwh: prepared.priceSnapshot,
       });
       this.logger.log("Seeded snapshot using config data.");
+      await this.froniusService.applyOptimization(rawConfig, snapshot);
     } catch (error) {
       this.logger.error(`Config sync failed: ${this.describeError(error)}`);
       throw error;

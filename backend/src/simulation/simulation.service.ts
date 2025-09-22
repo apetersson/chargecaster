@@ -5,7 +5,6 @@ import { join } from "node:path";
 import type {
   ForecastEra,
   ForecastResponse,
-  HistoryPoint,
   HistoryResponse,
   OracleEntry,
   OracleResponse,
@@ -13,8 +12,6 @@ import type {
   SimulationConfig,
   SnapshotPayload,
   SnapshotSummary,
-  ForecastSlotInput,
-  SolarSlotInput,
 } from "./types.ts";
 import { normalizeHistoryList } from "./history.serializer.ts";
 import { StorageService } from "../storage/storage.service.ts";
