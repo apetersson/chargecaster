@@ -2,7 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 
-import type { SimulationConfig } from "../simulation/types.ts";
+import type { RawForecastEntry, SimulationConfig } from "../simulation/types.ts";
 import { SimulationService } from "../simulation/simulation.service.ts";
 import { ForecastService } from "../simulation/forecast.service.ts";
 import { HistoryService } from "../simulation/history.service.ts";
@@ -47,17 +47,21 @@ const configSchema: z.ZodType<SimulationConfig> = z.object({
   state: z.object({ path: z.string().optional() }).optional(),
 });
 
+const jsonScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const dateLike = z.union([z.string(), z.number(), z.date(), z.null()]);
+
 const forecastEntrySchema = z.object({
-  start: z.union([z.string(), z.number(), z.date()]).optional(),
-  end: z.union([z.string(), z.number(), z.date()]).optional(),
-  from: z.union([z.string(), z.number(), z.date()]).optional(),
-  to: z.union([z.string(), z.number(), z.date()]).optional(),
-  price: z.number().optional(),
-  value: z.number().optional(),
-  unit: z.string().optional(),
-  value_unit: z.string().optional(),
-  duration_hours: z.number().optional(),
-  duration_minutes: z.number().optional(),
+  start: dateLike.optional(),
+  end: dateLike.optional(),
+  from: dateLike.optional(),
+  to: dateLike.optional(),
+  price: jsonScalar.optional(),
+  value: jsonScalar.optional(),
+  unit: z.string().nullable().optional(),
+  price_unit: z.string().nullable().optional(),
+  value_unit: z.string().nullable().optional(),
+  duration_hours: jsonScalar.optional(),
+  duration_minutes: jsonScalar.optional(),
 });
 
 const runSimulationInputSchema = z.object({
@@ -107,7 +111,7 @@ export class TrpcRouter {
           return service.runSimulation({
             config: input.config,
             liveState: input.liveState,
-            forecast: input.forecast,
+            forecast: input.forecast as RawForecastEntry[],
           });
         }),
         loadFixture: t.procedure.mutation(({ ctx }) => {

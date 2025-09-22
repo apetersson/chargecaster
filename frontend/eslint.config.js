@@ -30,6 +30,16 @@ export default tseslint.config(
     rules: {
       "react/react-in-jsx-scope": "off",
       "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-restricted-types": [
+        "error",
+        {
+          types: {
+            "Record<string, unknown>": {
+              message: "Define a dedicated interface instead of using Record<string, unknown>.",
+            },
+          },
+        },
+      ],
     },
   }
 );

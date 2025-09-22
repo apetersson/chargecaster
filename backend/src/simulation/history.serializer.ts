@@ -1,4 +1,4 @@
-import type { HistoryPoint } from "./types.ts";
+import type { HistoryPoint, HistoryRawEntry } from "./types.ts";
 
 interface NumericSelector {
   key: string;
@@ -25,12 +25,12 @@ function toNullableNumber(value: unknown): number | null {
   return null;
 }
 
-function pickNumeric(entry: Record<string, unknown>, selectors: NumericSelector[]): number | null {
+function pickNumeric(entry: HistoryRawEntry, selectors: NumericSelector[]): number | null {
   for (const { key, factor = 1 } of selectors) {
     if (!(key in entry)) {
       continue;
     }
-    const raw = entry[key];
+    const raw = entry[key] as unknown;
     const numeric = toNullableNumber(raw);
     if (numeric === null) {
       continue;
@@ -40,7 +40,7 @@ function pickNumeric(entry: Record<string, unknown>, selectors: NumericSelector[
   return null;
 }
 
-function resolveTimestamp(entry: Record<string, unknown>): string {
+function resolveTimestamp(entry: HistoryRawEntry): string {
   const candidates = ["timestamp", "time", "ts", "created_at", "createdAt"] as const;
   for (const key of candidates) {
     const raw = entry[key];
@@ -58,7 +58,7 @@ function resolveTimestamp(entry: Record<string, unknown>): string {
   return TIMESTAMP_FALLBACK();
 }
 
-function resolvePriceValues(entry: Record<string, unknown>): {
+function resolvePriceValues(entry: HistoryRawEntry): {
   priceCt: number | null;
   priceEur: number | null;
 } {
@@ -89,7 +89,7 @@ function resolvePriceValues(entry: Record<string, unknown>): {
   return { priceCt: null, priceEur: null };
 }
 
-function resolveBatterySoc(entry: Record<string, unknown>): number | null {
+function resolveBatterySoc(entry: HistoryRawEntry): number | null {
   return pickNumeric(entry, [
     { key: "battery_soc_percent" },
     { key: "batterySocPercent" },
@@ -100,7 +100,7 @@ function resolveBatterySoc(entry: Record<string, unknown>): number | null {
   ]);
 }
 
-export function normalizeHistoryEntry(entry: Record<string, unknown>): HistoryPoint {
+export function normalizeHistoryEntry(entry: HistoryRawEntry): HistoryPoint {
   const timestamp = resolveTimestamp(entry);
   const batterySoc = resolveBatterySoc(entry);
   const { priceCt, priceEur } = resolvePriceValues(entry);
@@ -163,7 +163,7 @@ export function normalizeHistoryEntry(entry: Record<string, unknown>): HistoryPo
   };
 }
 
-export function normalizeHistoryList(entries: Record<string, unknown>[]): HistoryPoint[] {
+export function normalizeHistoryList(entries: HistoryRawEntry[]): HistoryPoint[] {
   return entries
     .map((entry) => normalizeHistoryEntry(entry))
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());

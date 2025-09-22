@@ -1,6 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 
+import type { JsonObject } from "../common/json.ts";
+import { isJsonObject } from "../common/json.ts";
 import type { SnapshotPayload } from "../simulation/types.ts";
 
 interface FroniusConfig {
@@ -19,7 +21,7 @@ export class FroniusService {
   private readonly logger = new Logger(FroniusService.name);
   private lastAppliedTarget: number | null = null;
 
-  async applyOptimization(config: Record<string, unknown>, snapshot: SnapshotPayload): Promise<void> {
+  async applyOptimization(config: JsonObject, snapshot: SnapshotPayload): Promise<void> {
     const froniusConfig = this.extractConfig(config);
     if (!froniusConfig) {
       return;
@@ -59,21 +61,21 @@ export class FroniusService {
     }
   }
 
-  private extractConfig(config: Record<string, unknown>): FroniusConfig | null {
-    const record = config?.fronius;
-    if (!record || typeof record !== "object") {
+  private extractConfig(config: JsonObject): FroniusConfig | null {
+    const record = config.fronius;
+    if (!isJsonObject(record)) {
       return null;
     }
-    const hostRaw = (record as Record<string, unknown>).host;
-    const userRaw = (record as Record<string, unknown>).user;
-    const passwordRaw = (record as Record<string, unknown>).password;
+    const hostRaw = record.host;
+    const userRaw = record.user;
+    const passwordRaw = record.password;
     if (typeof hostRaw !== "string" || typeof userRaw !== "string" || typeof passwordRaw !== "string") {
       return null;
     }
 
-    const batteriesPathRaw = (record as Record<string, unknown>).batteries_path;
-    const timeoutRaw = (record as Record<string, unknown>).timeout_s;
-    const verifyRaw = (record as Record<string, unknown>).verify_tls;
+    const batteriesPathRaw = record.batteries_path;
+    const timeoutRaw = record.timeout_s;
+    const verifyRaw = record.verify_tls;
 
     return {
       host: hostRaw.trim(),
@@ -100,17 +102,17 @@ export class FroniusService {
   }
 
   private extractCurrentTarget(payload: unknown): number | null {
-    if (!payload || typeof payload !== "object") {
+    if (!isJsonObject(payload)) {
       return null;
     }
-    const record = payload as Record<string, unknown>;
+    const record = payload;
     const direct = record.BAT_M0_SOC_MIN ?? record.bat_m0_soc_min;
     if (typeof direct === "number" && Number.isFinite(direct)) {
       return direct;
     }
     const primary = record.primary;
-    if (primary && typeof primary === "object") {
-      const nested = (primary as Record<string, unknown>).BAT_M0_SOC_MIN;
+    if (isJsonObject(primary)) {
+      const nested = primary.BAT_M0_SOC_MIN;
       if (typeof nested === "number" && Number.isFinite(nested)) {
         return nested;
       }
@@ -131,7 +133,7 @@ export class FroniusService {
     method: string,
     url: string,
     credentials: FroniusConfig,
-    payload: Record<string, unknown> | null = null,
+    payload: JsonObject | null = null,
   ): Promise<unknown> {
     const headers = new Headers({ Accept: "application/json, text/plain, */*" });
     let body: string | undefined;

@@ -15,6 +15,54 @@ import type {
 
 const REFRESH_INTERVAL_MS = 60_000;
 
+interface HistoryEntryLike {
+  [key: string]: unknown;
+  timestamp?: unknown;
+  battery_soc_percent?: unknown;
+  price_with_fee_ct_per_kwh?: unknown;
+  total_price_ct_per_kwh?: unknown;
+  price_ct_per_kwh?: unknown;
+  price_eur_per_kwh?: unknown;
+  grid_power_kw?: unknown;
+  gridPowerKw?: unknown;
+  grid_power_w?: unknown;
+  gridPowerW?: unknown;
+  grid_power?: unknown;
+  gridPower?: unknown;
+  grid_import_power?: unknown;
+  gridImportPower?: unknown;
+  grid_energy_kwh?: unknown;
+  gridEnergyKwh?: unknown;
+  grid_energy_w?: unknown;
+  gridEnergyW?: unknown;
+  grid_energy_wh?: unknown;
+  gridEnergyWh?: unknown;
+  solar_power_kw?: unknown;
+  solarPowerKw?: unknown;
+  pv_power_kw?: unknown;
+  pvPowerKw?: unknown;
+  solar_kw?: unknown;
+  solarKw?: unknown;
+  pv_kw?: unknown;
+  pvKw?: unknown;
+  solar_power_w?: unknown;
+  solarPowerW?: unknown;
+  solar_power?: unknown;
+  solarPower?: unknown;
+  pv_power_w?: unknown;
+  pvPowerW?: unknown;
+  pv_power?: unknown;
+  pvPower?: unknown;
+  solar_energy_kwh?: unknown;
+  solarEnergyKwh?: unknown;
+  pv_energy_kwh?: unknown;
+  pvEnergyKwh?: unknown;
+  solar_energy_wh?: unknown;
+  solarEnergyWh?: unknown;
+  pv_energy_wh?: unknown;
+  pvEnergyWh?: unknown;
+}
+
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
     return error.message;
@@ -62,7 +110,7 @@ const toTimestamp = (value: unknown): string => {
 };
 
 const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
-  const record = (entry ?? {}) as Record<string, unknown>;
+  const record = (entry ?? {}) as HistoryEntryLike;
   const priceCt =
     toNumber(record.price_with_fee_ct_per_kwh ?? record.total_price_ct_per_kwh) ??
     toNumber(record.price_ct_per_kwh);

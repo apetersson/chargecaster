@@ -12,6 +12,7 @@ import { AppModule } from "../../src/app.module.ts";
 import { SimulationService, extractForecastFromState } from "../../src/simulation/simulation.service.ts";
 import type { AppRouter } from "../../src/trpc/trpc.router.ts";
 import { TrpcRouter } from "../../src/trpc/trpc.router.ts";
+import type { JsonObject } from "../../src/common/json.ts";
 
 const config = {
   battery: {
@@ -31,7 +32,8 @@ const config = {
 
 describe("dashboard tRPC", () => {
   const sampleDataPath = join(process.cwd(), "fixtures", "sample_data.json");
-  const rawSample = JSON.parse(readFileSync(sampleDataPath, "utf-8")) as Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const rawSample = JSON.parse(readFileSync(sampleDataPath, "utf-8")) as JsonObject;
   const forecast = extractForecastFromState(rawSample);
 
   let app: NestFastifyApplication;
@@ -104,7 +106,7 @@ describe("dashboard tRPC", () => {
 
             const headerEntries: [string, string][] = [];
             if (response.headers && typeof response.headers === "object") {
-              const headerRecord = response.headers as Record<string, unknown>;
+              const headerRecord = response.headers as Record<string, string | string[]>;
               for (const key in headerRecord) {
                 if (!Object.hasOwn(headerRecord, key)) {
                   continue;
