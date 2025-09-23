@@ -1,7 +1,18 @@
+FROM node:20-bookworm-slim AS domain-builder
+
+WORKDIR /app/packages/domain
+
+COPY packages/domain/package.json packages/domain/tsconfig.json packages/domain/tsconfig.build.json ./
+COPY packages/domain/src ./src
+
+RUN yarn install && yarn build
+
+
 FROM node:20-bookworm-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
+COPY --from=domain-builder /app/packages/domain /app/packages/domain
 COPY frontend/package.json frontend/yarn.lock ./
 RUN yarn install --frozen-lockfile
 
@@ -21,6 +32,7 @@ RUN apt-get update \
 
 WORKDIR /app/backend
 
+COPY --from=domain-builder /app/packages/domain /app/packages/domain
 COPY backend/package.json backend/yarn.lock ./
 RUN yarn install --frozen-lockfile
 
