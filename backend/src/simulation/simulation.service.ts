@@ -17,7 +17,7 @@ import type {
 } from "./types";
 import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
-import { buildSolarForecastFromTimeseries } from "./solar";
+import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { parseEvccState } from "../config/schemas";
 
 const SOC_STEPS = 100;
@@ -517,22 +517,6 @@ function normalizePriceValue(value: unknown, unit: unknown): number | null {
     return numeric / 1000;
   }
   return numeric;
-}
-
-function parseTimestamp(value: unknown): Date | null {
-  if (value instanceof Date) {
-    return value;
-  }
-  if (typeof value === "number") {
-    return new Date(value);
-  }
-  if (typeof value === "string") {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
-  return null;
 }
 
 interface SimulationOptions {

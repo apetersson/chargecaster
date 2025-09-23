@@ -15,6 +15,7 @@ import type {
   OracleResponse,
   SnapshotSummary,
 } from "./types";
+import { toNumber } from "./utils/number";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -81,23 +82,6 @@ const getErrorMessage = (error: unknown): string => {
     }
   }
   return "Unknown error";
-};
-
-const toNumber = (value: unknown): number | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === "string" && value.length > 0) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-  if (value instanceof Date) {
-    return Number.isFinite(value.getTime()) ? value.getTime() : null;
-  }
-  return null;
 };
 
 const toTimestamp = (value: unknown): string => {
