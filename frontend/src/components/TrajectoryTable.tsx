@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { ForecastEra, OracleEntry } from "../types";
 import { formatDate, formatNumber, formatPercent, timeFormatter } from "../utils/format";
 import { toNumeric } from "../utils/number";
+import { EnergyPrice, TimeSlot } from "@batteryctl/domain";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
@@ -18,36 +19,27 @@ const parseTime = (value: string | null | undefined): number | null => {
   return Number.isFinite(time) ? time : null;
 };
 
-const convertToCents = (value: number | null, unit: unknown): number | null => {
+const parseEnergyPrice = (value: number | null, unit: unknown): EnergyPrice | null => {
   if (value === null || !Number.isFinite(value)) {
     return null;
   }
-  const unitStr = typeof unit === "string" ? unit.trim().toLowerCase() : "";
-  if (!unitStr) {
-    return value * 100;
+  const unitStrRaw = typeof unit === "string" ? unit.trim() : "";
+  const unitStr = unitStrRaw.toLowerCase();
+  if (unitStr.length) {
+    const parsed = EnergyPrice.tryFromValue(value, unitStr);
+    if (parsed) {
+      return parsed;
+    }
   }
-  if (unitStr.includes("ct") && unitStr.includes("/wh")) {
-    return value * 1000;
+  if (Math.abs(value) > 10) {
+    return EnergyPrice.fromCentsPerKwh(value);
   }
-  if (unitStr.includes("ct") && unitStr.includes("kwh")) {
-    return value;
-  }
-  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("mwh")) {
-    return value / 10;
-  }
-  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("wh")) {
-    return value * 100000;
-  }
-  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("kwh")) {
-    return value * 100;
-  }
-  if (unitStr.includes("ct")) {
-    return value;
-  }
-  if (unitStr.includes("eur")) {
-    return value * 100;
-  }
-  return value * 100;
+  return EnergyPrice.fromEurPerKwh(value);
+};
+
+const convertToCents = (value: number | null, unit: unknown): number | null => {
+  const price = parseEnergyPrice(value, unit);
+  return price ? price.ctPerKwh : null;
 };
 
 const resolveCost = (era: ForecastEra, provider: string) => {
@@ -80,7 +72,7 @@ const resolveCost = (era: ForecastEra, provider: string) => {
   return {priceCt};
 };
 
-const resolveSolar = (era: ForecastEra) => {
+const resolveSolar = (era: ForecastEra, slot: TimeSlot | null) => {
   const match = era.sources.find((source) => source.type === "solar");
   if (!match) {
     return {energyKwh: null, averageW: null};
@@ -95,10 +87,10 @@ const resolveSolar = (era: ForecastEra) => {
   }
   let averageW: number | null = null;
   if (energyKwh !== null) {
-    const duration =
-      typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
+    const duration = slot ? slot.duration.hours :
+      (typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
         ? era.duration_hours
-        : null;
+        : null);
     if (duration && duration > 0) {
       averageW = (energyKwh / duration) * 1000;
     }
@@ -167,8 +159,17 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
           </thead>
           <tbody>
           {rows.map((era) => {
+            let slot: TimeSlot | null = null;
+            if (era.start && era.end) {
+              try {
+                slot = TimeSlot.fromDates(new Date(era.start), new Date(era.end));
+              } catch (error) {
+                void error;
+                slot = null;
+              }
+            }
             const marketCost = resolveCost(era, "awattar");
-            const solar = resolveSolar(era);
+            const solar = resolveSolar(era, slot);
             const oracle = oracleMap.get(era.era_id);
             const solarLabel =
               solar.averageW !== null
@@ -179,10 +180,27 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
             const strategy = oracle?.strategy ?? "auto";
             const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);
             const targetLabel = oracle ? `${endSocValue} (${strategy.toUpperCase()})` : "n/a";
-            const gridPowerValue = oracle?.grid_power_w;
-            const gridPower = typeof gridPowerValue === "number" && Number.isFinite(gridPowerValue)
-              ? formatNumber(gridPowerValue, " W")
-              : "n/a";
+            const gridEnergyWh = oracle?.grid_energy_w;
+            let gridPower = "n/a";
+            if (typeof gridEnergyWh === "number" && Number.isFinite(gridEnergyWh)) {
+              const durationHours = slot ? slot.duration.hours :
+                (typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
+                  ? era.duration_hours
+                  : (() => {
+                    const start = era.start ? new Date(era.start).getTime() : NaN;
+                    const end = era.end ? new Date(era.end).getTime() : NaN;
+                    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                      return (end - start) / 3_600_000;
+                    }
+                    return null;
+                  })());
+              if (durationHours && durationHours > 0) {
+                const powerW = gridEnergyWh / durationHours;
+                if (Number.isFinite(powerW)) {
+                  gridPower = formatNumber(powerW, " W");
+                }
+              }
+            }
             return (
               <tr key={era.era_id}>
                 <td>{formatDate(era.start)}</td>

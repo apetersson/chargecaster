@@ -2,6 +2,9 @@
 # yarn lockfile v1
 
 
+"@batteryctl/domain@file:../packages/domain":
+  version "0.1.0"
+
 "@borewit/text-codec@^0.1.0":
   version "0.1.1"
   resolved "https://registry.npmjs.org/@borewit/text-codec/-/text-codec-0.1.1.tgz#7e7f27092473d5eabcffef693a849f2cc48431da"

@@ -12,7 +12,9 @@ describe("ConfigSyncService price normalization", () => {
       throw new Error("not needed for test");
     },
   } as unknown as SimulationService;
-  const fronius = { applyOptimization: async () => Promise.resolve() } as unknown as FroniusService;
+  const fronius = {
+    applyOptimization: async () => Promise.resolve({errorMessage: null}),
+  } as unknown as FroniusService;
   const service = new ConfigSyncService(simulation, fronius);
 
   it("converts cost sources to EUR per kWh for simulation", () => {

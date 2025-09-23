@@ -15,6 +15,12 @@ interface FroniusConfig {
 
 const DIGEST_PREFIX = "digest";
 
+const AUTH_ERROR_SUMMARY_MESSAGE = "Unable to control battery because of authentication problem.";
+
+export interface FroniusApplyResult {
+  errorMessage: string | null;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -24,10 +30,10 @@ export class FroniusService {
   private lastAppliedTarget: number | null = null;
   private lastAppliedMode: "charge" | "auto" | null = null;
 
-  async applyOptimization(config: ConfigDocument, snapshot: SnapshotPayload): Promise<void> {
+  async applyOptimization(config: ConfigDocument, snapshot: SnapshotPayload): Promise<FroniusApplyResult> {
     const froniusConfig = this.extractConfig(config);
     if (!froniusConfig) {
-      return;
+      return {errorMessage: null};
     }
 
     const desiredMode = this.resolveDesiredMode(snapshot);
@@ -39,13 +45,13 @@ export class FroniusService {
       // const currentMode = this.extractCurrentMode(currentConfig);
       if (this.lastAppliedMode === desiredMode) {
         this.logger.log(`Fronius already in ${desiredMode} mode; skipping update.`);
-        return;
+        return {errorMessage: null};
       }
 
       const payload = this.buildPayload(config, snapshot, desiredMode);
       if (!payload) {
         this.logger.warn("Unable to construct Fronius payload; skipping update.");
-        return;
+        return {errorMessage: null};
       }
 
       this.logger.log(
@@ -57,9 +63,26 @@ export class FroniusService {
         this.lastAppliedTarget = payload.BAT_M0_SOC_MIN;
       }
       this.logger.log("Fronius command applied successfully.");
+      await this.logoutFroniusSession(froniusConfig);
+      return {errorMessage: null};
     } catch (error: unknown) {
       this.logger.warn(`Fronius update failed: ${this.describeError(error)}`);
+      return {errorMessage: this.normaliseSummaryError(error)};
     }
+  }
+
+  private normaliseSummaryError(error: unknown): string | null {
+    if (!error) {
+      return null;
+    }
+    const message = this.describeError(error).toLowerCase();
+    if (!message) {
+      return null;
+    }
+    if (message.includes("401") || message.includes("unauthorized") || message.includes("unauthorised")) {
+      return AUTH_ERROR_SUMMARY_MESSAGE;
+    }
+    return null;
   }
 
   private extractConfig(config: ConfigDocument): FroniusConfig | null {
@@ -338,6 +361,16 @@ export class FroniusService {
     }
 
     return `Digest ${parts.join(", ")}`;
+  }
+
+  private async logoutFroniusSession(config: FroniusConfig): Promise<void> {
+    const logoutUrl = this.buildUrl(config.host, "/commands/Logout");
+    try {
+      await this.requestJson("GET", logoutUrl, config);
+      this.logger.debug("Fronius session logged out.");
+    } catch (error) {
+      this.logger.debug(`Fronius logout skipped: ${this.describeError(error)}`);
+    }
   }
 
   private describeError(error: unknown): string {

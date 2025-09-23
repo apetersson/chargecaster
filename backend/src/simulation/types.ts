@@ -8,6 +8,7 @@ import {
   requiredTimestampSchema,
   unknownRecordSchema,
 } from "../common/parsing";
+import type { TariffSlot } from "@batteryctl/domain";
 
 export const rawForecastEntrySchema = z
   .object({
@@ -59,7 +60,6 @@ export const historyPointSchema = z
     price_eur_per_kwh: nullableNumberSchema,
     grid_power_w: nullableNumberSchema.optional().default(null),
     grid_energy_w: nullableNumberSchema.optional().default(null),
-    grid_energy_wh: nullableNumberSchema.optional(),
     solar_power_w: nullableNumberSchema.optional().default(null),
     solar_energy_wh: nullableNumberSchema.optional().default(null),
   })
@@ -90,9 +90,7 @@ const oracleEntrySchema = z.object({
   start_soc_percent: nullableNumberSchema,
   end_soc_percent: nullableNumberSchema,
   target_soc_percent: nullableNumberSchema.optional(),
-  grid_power_w: nullableNumberSchema,
-  grid_energy_kwh: nullableNumberSchema,
-  grid_energy_w: nullableNumberSchema.optional(),
+  grid_energy_w: nullableNumberSchema,
   strategy: z.union([z.literal("charge"), z.literal("auto")]),
 });
 
@@ -234,12 +232,6 @@ export const simulationConfigSchema = z.object({
 
 export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
 
-export interface PriceSlot {
-  start: Date;
-  end: Date;
-  durationHours: number;
-  price: number;
-  eraId?: string;
-}
+export type PriceSlot = TariffSlot;
 
 export type ForecastSourceType = "cost" | "solar" | (string & {});

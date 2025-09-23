@@ -27,6 +27,7 @@ import "chartjs-adapter-date-fns";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeFormatter, numberFormatter, percentFormatter, timeFormatter, } from "../utils/format";
 import { toNumeric } from "../utils/number";
+import { EnergyPrice, TimeSlot } from "@batteryctl/domain";
 
 Chart.register(
   BarController,
@@ -120,37 +121,24 @@ const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
   target.push(point);
 };
 
-const convertPriceToCents = (value: unknown, unit: unknown): number | null => {
-  const numeric = toNumeric(value);
-  if (numeric === null) {
+const derivePowerFromEnergy = (
+  energyWh: number | null | undefined,
+  durationHours?: number | null,
+): number | null => {
+  if (!isFiniteNumber(energyWh)) {
     return null;
   }
-  const unitStr = typeof unit === "string" ? unit.trim().toLowerCase() : "";
-  if (!unitStr) {
-    return numeric * 100;
+  const hours = typeof durationHours === "number" && durationHours > 0 ? durationHours : 1;
+  if (hours <= 0) {
+    return null;
   }
-  if (unitStr.includes("ct") && unitStr.includes("/wh")) {
-    return numeric * 1000;
-  }
-  if (unitStr.includes("ct") && unitStr.includes("kwh")) {
-    return numeric;
-  }
-  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("mwh")) {
-    return numeric / 10;
-  }
-  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("/wh")) {
-    return numeric * 100000;
-  }
-  if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("kwh")) {
-    return numeric * 100;
-  }
-  if (unitStr.includes("ct")) {
-    return numeric;
-  }
-  if (unitStr.includes("eur")) {
-    return numeric * 100;
-  }
-  return numeric * 100;
+  const power = energyWh / hours;
+  return Number.isFinite(power) ? power : null;
+};
+
+const convertPriceToCents = (value: unknown, unit: unknown): number | null => {
+  const parsed = EnergyPrice.tryFromValue(value, unit);
+  return parsed ? parsed.ctPerKwh : null;
 };
 
 const extractCostPrice = (era: ForecastEra): number | null => {
@@ -182,7 +170,7 @@ const extractCostPrice = (era: ForecastEra): number | null => {
   return null;
 };
 
-const extractSolarAverageWatts = (era: ForecastEra, durationHours: number | null): number | null => {
+const extractSolarAverageWatts = (era: ForecastEra, slot: TimeSlot | null): number | null => {
   const solarSource = era.sources.find((source) => source.type === "solar");
   if (!solarSource) {
     return null;
@@ -199,6 +187,7 @@ const extractSolarAverageWatts = (era: ForecastEra, durationHours: number | null
       energyKwh = energyWh / 1000;
     }
   }
+  const durationHours = slot?.duration.hours;
   if (energyKwh !== null && durationHours && durationHours > 0) {
     return (energyKwh / durationHours) * 1000;
   }
@@ -210,9 +199,9 @@ const extractSolarAverageWatts = (era: ForecastEra, durationHours: number | null
 interface DerivedEra {
   era: ForecastEra;
   oracle?: OracleEntry;
+  slot: TimeSlot;
   startMs: number;
   endMs: number;
-  durationHours: number;
   priceCtPerKwh: number | null;
   solarAverageW: number | null;
 }
@@ -243,19 +232,22 @@ const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEntry[]):
     if (endMs <= startMs) {
       continue;
     }
-    const durationHours =
-      typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
-        ? era.duration_hours
-        : (endMs - startMs) / 3_600_000;
+    let slot: TimeSlot;
+    try {
+      slot = TimeSlot.fromDates(new Date(startMs), new Date(endMs));
+    } catch (error) {
+      void error;
+      continue;
+    }
     const price = extractCostPrice(era);
-    const solarAverage = extractSolarAverageWatts(era, durationHours);
+    const solarAverage = extractSolarAverageWatts(era, slot);
 
     derived.push({
       era,
       oracle: era.era_id ? oracleMap.get(era.era_id) : undefined,
+      slot,
       startMs,
       endMs,
-      durationHours,
       priceCtPerKwh: price,
       solarAverageW: solarAverage,
     });
@@ -443,16 +435,24 @@ const buildGridSeries = (
   futureEras: DerivedEra[],
 ): ProjectionPoint[] => {
   const historyPoints = history
-    .map((entry) => toHistoryPoint(entry.timestamp, entry.grid_power_w ?? entry.grid_energy_w))
+    .map((entry) => {
+      const power = isFiniteNumber(entry.grid_power_w)
+        ? entry.grid_power_w
+        : derivePowerFromEnergy(entry.grid_energy_w, 1);
+      return toHistoryPoint(entry.timestamp, power);
+    })
     .filter((point): point is ProjectionPoint => point !== null);
 
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    const power = era.oracle?.grid_power_w ?? era.oracle?.grid_energy_w ?? null;
+    const power = derivePowerFromEnergy(
+      era.oracle?.grid_energy_w ?? null,
+      era.slot.duration.hours,
+    );
     if (!isFiniteNumber(power)) {
       continue;
     }
-    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
+    const midpoint = era.slot.midpoint().getTime();
     futurePoints.push({x: midpoint, y: power, source: "forecast"});
   }
 

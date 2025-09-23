@@ -10,6 +10,7 @@
     "lint": "eslint \"src/**/*.{ts,tsx}\" --max-warnings=0"
   },
   "dependencies": {
+    "@batteryctl/domain": "file:../packages/domain",
     "@trpc/client": "^11.0.0",
     "chart.js": "^4.4.6",
     "chartjs-adapter-date-fns": "^3.0.0",
