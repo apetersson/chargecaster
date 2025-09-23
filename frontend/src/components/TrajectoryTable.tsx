@@ -18,6 +18,50 @@ const parseTime = (value: string | null | undefined): number | null => {
   return Number.isFinite(time) ? time : null;
 };
 
+const buildOracleLookup = (entries: OracleEntry[]): Map<string, OracleEntry> => {
+  const map = new Map<string, OracleEntry>();
+  entries.forEach((entry) => {
+    if (!entry || typeof entry.era_id !== "string" || entry.era_id.length === 0) {
+      return;
+    }
+    map.set(entry.era_id, entry);
+    const timestamp = parseTime(entry.era_id);
+    if (timestamp !== null) {
+      map.set(String(timestamp), entry);
+    }
+  });
+  return map;
+};
+
+const findOracleForEra = (
+  era: ForecastEra,
+  lookup: Map<string, OracleEntry>,
+): OracleEntry | undefined => {
+  if (typeof era.era_id === "string" && era.era_id.length > 0) {
+    const direct = lookup.get(era.era_id);
+    if (direct) {
+      return direct;
+    }
+    const normalized = parseTime(era.era_id);
+    if (normalized !== null) {
+      const normalizedMatch = lookup.get(String(normalized));
+      if (normalizedMatch) {
+        return normalizedMatch;
+      }
+    }
+  }
+
+  const startKey = parseTime(era.start);
+  if (startKey !== null) {
+    const startMatch = lookup.get(String(startKey));
+    if (startMatch) {
+      return startMatch;
+    }
+  }
+
+  return undefined;
+};
+
 const resolveCost = (era: ForecastEra, provider: string) => {
   const match = era.sources.find((source) => source.type === "cost" && source.provider.toLowerCase() === provider);
   if (!match || match.type !== "cost") {
@@ -47,15 +91,7 @@ const resolveSolar = (era: ForecastEra, slot: TimeSlot | null) => {
 
 const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
   const now = Date.now();
-  const oracleMap = useMemo(() => {
-    const map = new Map<string, OracleEntry>();
-    oracleEntries.forEach((entry) => {
-      if (entry) {
-        map.set(entry.era_id, entry);
-      }
-    });
-    return map;
-  }, [oracleEntries]);
+  const oracleLookup = useMemo(() => buildOracleLookup(oracleEntries), [oracleEntries]);
 
   const rows = [...forecast]
     .filter((era) => {
@@ -67,7 +103,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
       if (startTime === null) {
         return false;
       }
-      return startTime > now;
+      return true;
     })
     .sort((a, b) => {
       const startA = parseTime(a.start) ?? 0;
@@ -111,7 +147,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
             }
             const marketCost = resolveCost(era, "awattar");
             const solar = resolveSolar(era, slot);
-            const oracle = oracleMap.get(era.era_id);
+            const oracle = findOracleForEra(era, oracleLookup);
             const solarLabel =
               solar.averageW !== null
                 ? formatNumber(solar.averageW, " W")

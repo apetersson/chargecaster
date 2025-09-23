@@ -26,7 +26,6 @@ import "chartjs-adapter-date-fns";
 
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeFormatter, numberFormatter, percentFormatter, timeFormatter, } from "../utils/format";
-import { toNumeric } from "../utils/number";
 import { TimeSlot } from "@batteryctl/domain";
 
 Chart.register(
@@ -77,6 +76,7 @@ const TARIFF_LABEL = "Tariff";
 const PRICE_HISTORY_BAR_BG = "rgba(148, 163, 184, 0.3)";
 const PRICE_HISTORY_BAR_BORDER = "rgba(100, 116, 139, 1)";
 const DEFAULT_SLOT_DURATION_MS = 3_600_000;
+const GAP_THRESHOLD_MS = DEFAULT_SLOT_DURATION_MS * 1.5;
 
 const DEFAULT_SOC_BOUNDS = {min: 0, max: 100};
 const DEFAULT_POWER_BOUNDS = {min: -5000, max: 15000};
@@ -119,6 +119,61 @@ const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
     return;
   }
   target.push(point);
+};
+
+const pushGapPoint = (target: ProjectionPoint[], time: number | null | undefined) => {
+  if (typeof time !== "number" || !Number.isFinite(time)) {
+    return;
+  }
+  const last = target[target.length - 1];
+  if (last && Number.isNaN(last.y) && last.x === time) {
+    return;
+  }
+  target.push({x: time, y: Number.NaN, source: "gap"});
+};
+
+const buildOracleLookup = (entries: OracleEntry[]): Map<string, OracleEntry> => {
+  const lookup = new Map<string, OracleEntry>();
+  for (const entry of entries) {
+    if (!entry || typeof entry.era_id !== "string" || entry.era_id.length === 0) {
+      continue;
+    }
+    lookup.set(entry.era_id, entry);
+    const timestamp = parseTimestamp(entry.era_id);
+    if (timestamp !== null) {
+      lookup.set(String(timestamp), entry);
+    }
+  }
+  return lookup;
+};
+
+const resolveOracleEntry = (
+  era: ForecastEra,
+  lookup: Map<string, OracleEntry>,
+): OracleEntry | undefined => {
+  if (typeof era.era_id === "string" && era.era_id.length > 0) {
+    const direct = lookup.get(era.era_id);
+    if (direct) {
+      return direct;
+    }
+    const normalizedEraId = parseTimestamp(era.era_id);
+    if (normalizedEraId !== null) {
+      const byEraIdTimestamp = lookup.get(String(normalizedEraId));
+      if (byEraIdTimestamp) {
+        return byEraIdTimestamp;
+      }
+    }
+  }
+
+  const startTimestamp = parseTimestamp(era.start);
+  if (startTimestamp !== null) {
+    const byStart = lookup.get(String(startTimestamp));
+    if (byStart) {
+      return byStart;
+    }
+  }
+
+  return undefined;
 };
 
 const derivePowerFromEnergy = (
@@ -174,23 +229,18 @@ interface LegendGroup {
 }
 
 const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEntry[]): DerivedEra[] => {
-  const oracleMap = new Map<string, OracleEntry>();
-  for (const entry of oracleEntries) {
-    if (entry) {
-      oracleMap.set(entry.era_id, entry);
-    }
-  }
+  const oracleLookup = buildOracleLookup(oracleEntries);
 
   const now = Date.now();
   const derived: DerivedEra[] = [];
   for (const era of forecast) {
     const startMs = parseTimestamp(era.start);
-    if (startMs === null || startMs <= now) {
+    if (startMs === null) {
       continue;
     }
     const rawEndMs = parseTimestamp(era.end);
     const endMs = rawEndMs ?? startMs + DEFAULT_SLOT_DURATION_MS;
-    if (endMs <= startMs) {
+    if (endMs <= Math.max(startMs, now)) {
       continue;
     }
     let slot: TimeSlot;
@@ -202,10 +252,11 @@ const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEntry[]):
     }
     const price = extractCostPrice(era);
     const solarAverage = extractSolarAverageWatts(era, slot);
+    const oracle = resolveOracleEntry(era, oracleLookup);
 
     derived.push({
       era,
-      oracle: era.era_id ? oracleMap.get(era.era_id) : undefined,
+      oracle,
       slot,
       startMs,
       endMs,
@@ -436,15 +487,40 @@ const buildSolarSeries = (
     .filter((point): point is ProjectionPoint => point !== null);
 
   const futurePoints: ProjectionPoint[] = [];
+  let hadActiveSegment = false;
+  let lastDataEraEnd: number | null = null;
+
   for (const era of futureEras) {
-    if (!isFiniteNumber(era.solarAverageW)) {
+    const hasSolar = isFiniteNumber(era.solarAverageW);
+
+    if (!hasSolar) {
+      if (hadActiveSegment) {
+        pushGapPoint(futurePoints, era.startMs);
+        hadActiveSegment = false;
+      }
       continue;
     }
+
+    if (lastDataEraEnd !== null) {
+      const gapDuration = era.startMs - lastDataEraEnd;
+      if (gapDuration > GAP_THRESHOLD_MS) {
+        pushGapPoint(futurePoints, era.startMs);
+        hadActiveSegment = false;
+      }
+    }
+
+    if (!hadActiveSegment && futurePoints.length) {
+      pushGapPoint(futurePoints, era.startMs);
+    }
+
     const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
-    futurePoints.push({x: midpoint, y: era.solarAverageW, source: "forecast"});
+    const solarAverage = era.solarAverageW as number;
+    futurePoints.push({x: midpoint, y: solarAverage, source: "forecast"});
+    hadActiveSegment = true;
+    lastDataEraEnd = era.endMs;
   }
 
-  return [...historyPoints, ...futurePoints];
+  return buildCombinedSeries(historyPoints, futurePoints);
 };
 
 const buildPriceSeries = (
