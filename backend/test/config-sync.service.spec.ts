@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { SimulationPreparationService } from "../src/config/simulation-preparation.service";
+import { ForecastAssemblyService } from "../src/config/forecast-assembly.service";
 import { normalizePriceSlots } from "../src/simulation/simulation.service";
-import type { RawForecastEntry, RawSolarEntry } from "../src/simulation/types";
+import type { RawForecastEntry } from "../src/simulation/types";
 
-describe("SimulationPreparationService price normalization", () => {
-  const service = new SimulationPreparationService();
+describe("ForecastAssemblyService price normalization", () => {
+  const service = new ForecastAssemblyService();
 
   it("converts cost sources to EUR per kWh for simulation", () => {
     const start = new Date(Date.UTC(2025, 0, 1, 12, 0, 0)).toISOString();
@@ -28,15 +28,7 @@ describe("SimulationPreparationService price normalization", () => {
       },
     ];
 
-    const { forecastEntries } = (service as unknown as {
-      buildForecastEras(
-        canonicalForecast: RawForecastEntry[],
-        evccForecast: RawForecastEntry[],
-        marketForecast: RawForecastEntry[],
-        solarForecast: RawSolarEntry[],
-        gridFeeEurPerKwh: number,
-      ): { forecastEntries: RawForecastEntry[] };
-    }).buildForecastEras(canonicalForecast, [], marketForecast, [], 0);
+    const {forecastEntries} = service.buildForecastEras(canonicalForecast, [], marketForecast, [], 0);
 
     expect(forecastEntries).toHaveLength(1);
     const [entry] = forecastEntries;

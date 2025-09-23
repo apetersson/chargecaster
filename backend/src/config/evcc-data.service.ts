@@ -1,0 +1,120 @@
+import { Injectable, Logger } from "@nestjs/common";
+
+import type { RawForecastEntry, RawSolarEntry } from "../simulation/types";
+import { buildSolarForecastFromTimeseries } from "../simulation/solar";
+import { parseEvccState } from "./schemas";
+import type { ConfigDocument } from "./schemas";
+
+const REQUEST_TIMEOUT_MS = 15000;
+
+@Injectable()
+export class EvccDataService {
+  private readonly logger = new Logger(EvccDataService.name);
+
+  async collect(
+    config: ConfigDocument["evcc"],
+    warnings: string[],
+  ): Promise<{
+    forecast: RawForecastEntry[];
+    solarForecast: RawSolarEntry[];
+    priceSnapshot: number | null;
+    batterySoc: number | null;
+    gridPowerW: number | null;
+    solarPowerW: number | null;
+  }> {
+    const enabled = config?.enabled ?? true;
+    if (!enabled) {
+      warnings.push("EVCC data fetch disabled in config.");
+      this.logger.warn("EVCC data fetch disabled in config.");
+      return this.emptyResult();
+    }
+
+    const baseUrl = config?.base_url;
+    if (!baseUrl) {
+      const message = "EVCC base_url not configured; skipping EVCC forecast.";
+      warnings.push(message);
+      this.logger.warn(message);
+      return this.emptyResult();
+    }
+
+    let endpoint: string;
+    try {
+      endpoint = new URL("/api/state", baseUrl).toString();
+    } catch (error) {
+      const message = `Invalid EVCC base_url (${baseUrl}): ${this.describeError(error)}`;
+      warnings.push(message);
+      this.logger.warn(message);
+      return this.emptyResult();
+    }
+
+    const timeoutMs = config?.timeout_ms ?? REQUEST_TIMEOUT_MS;
+    const token = config?.token ?? null;
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    try {
+      this.logger.log(`Fetching EVCC state from ${endpoint}`);
+      const payload = await this.fetchJson(endpoint, timeoutMs, {
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+
+      const parsed = parseEvccState(payload);
+      const solarForecast = buildSolarForecastFromTimeseries(parsed.solarTimeseries);
+
+      return {
+        forecast: parsed.forecast,
+        solarForecast,
+        priceSnapshot: parsed.priceSnapshot,
+        batterySoc: parsed.batterySoc,
+        gridPowerW: parsed.gridPowerW,
+        solarPowerW: parsed.solarPowerW,
+      };
+    } catch (error) {
+      const message = `EVCC data fetch failed: ${this.describeError(error)}`;
+      warnings.push(message);
+      this.logger.warn(message);
+      return this.emptyResult();
+    }
+  }
+
+  private emptyResult(): {
+    forecast: RawForecastEntry[];
+    solarForecast: RawSolarEntry[];
+    priceSnapshot: number | null;
+    batterySoc: number | null;
+    gridPowerW: number | null;
+    solarPowerW: number | null;
+  } {
+    return {
+      forecast: [],
+      solarForecast: [],
+      priceSnapshot: null,
+      batterySoc: null,
+      gridPowerW: null,
+      solarPowerW: null,
+    };
+  }
+
+  private async fetchJson(url: string, timeoutMs: number, init?: RequestInit): Promise<unknown> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {...(init ?? {}), signal: controller.signal});
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+      return (await response.json()) as unknown;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private describeError(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  }
+}
