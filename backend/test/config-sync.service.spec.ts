@@ -1,21 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { ConfigSyncService } from "../src/config/config-sync.service";
-import type { SimulationService } from "../src/simulation/simulation.service";
+import { SimulationPreparationService } from "../src/config/simulation-preparation.service";
 import { normalizePriceSlots } from "../src/simulation/simulation.service";
-import type { FroniusService } from "../src/fronius/fronius.service";
 import type { RawForecastEntry, RawSolarEntry } from "../src/simulation/types";
 
-describe("ConfigSyncService price normalization", () => {
-  const simulation = {
-    runSimulation: () => {
-      throw new Error("not needed for test");
-    },
-  } as unknown as SimulationService;
-  const fronius = {
-    applyOptimization: async () => Promise.resolve({errorMessage: null}),
-  } as unknown as FroniusService;
-  const service = new ConfigSyncService(simulation, fronius);
+describe("SimulationPreparationService price normalization", () => {
+  const service = new SimulationPreparationService();
 
   it("converts cost sources to EUR per kWh for simulation", () => {
     const start = new Date(Date.UTC(2025, 0, 1, 12, 0, 0)).toISOString();
@@ -44,8 +34,9 @@ describe("ConfigSyncService price normalization", () => {
         evccForecast: RawForecastEntry[],
         marketForecast: RawForecastEntry[],
         solarForecast: RawSolarEntry[],
+        gridFeeEurPerKwh: number,
       ): { forecastEntries: RawForecastEntry[] };
-    }).buildForecastEras(canonicalForecast, [], marketForecast, []);
+    }).buildForecastEras(canonicalForecast, [], marketForecast, [], 0);
 
     expect(forecastEntries).toHaveLength(1);
     const [entry] = forecastEntries;

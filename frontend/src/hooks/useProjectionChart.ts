@@ -27,7 +27,7 @@ import "chartjs-adapter-date-fns";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeFormatter, numberFormatter, percentFormatter, timeFormatter, } from "../utils/format";
 import { toNumeric } from "../utils/number";
-import { EnergyPrice, TimeSlot } from "@batteryctl/domain";
+import { TimeSlot } from "@batteryctl/domain";
 
 Chart.register(
   BarController,
@@ -136,64 +136,25 @@ const derivePowerFromEnergy = (
   return Number.isFinite(power) ? power : null;
 };
 
-const convertPriceToCents = (value: unknown, unit: unknown): number | null => {
-  const parsed = EnergyPrice.tryFromValue(value, unit);
-  return parsed ? parsed.ctPerKwh : null;
-};
-
 const extractCostPrice = (era: ForecastEra): number | null => {
-  for (const source of era.sources) {
-    if (source.type !== "cost") {
-      continue;
-    }
-    const payload = source.payload;
-    if (!payload || typeof payload !== "object") {
-      continue;
-    }
-    const record = payload;
-    const centsWithFee =
-      toNumeric(record.price_with_fee_ct_per_kwh) ?? toNumeric(record.total_price_ct_per_kwh);
-    if (centsWithFee !== null) {
-      return centsWithFee;
-    }
-    const cents = toNumeric(record.price_ct_per_kwh) ?? toNumeric(record.value_ct_per_kwh);
-    if (cents !== null) {
-      return cents;
-    }
-    const rawPrice = record.price ?? record.value;
-    const rawUnit = record.unit ?? record.price_unit ?? record.value_unit;
-    const price = convertPriceToCents(rawPrice, rawUnit);
-    if (price !== null) {
-      return price;
-    }
+  const costSource = era.sources.find((source) => source.type === "cost");
+  if (!costSource || costSource.type !== "cost") {
+    return null;
   }
-  return null;
+  return costSource.payload.price_with_fee_ct_per_kwh ?? costSource.payload.price_ct_per_kwh ?? null;
 };
 
 const extractSolarAverageWatts = (era: ForecastEra, slot: TimeSlot | null): number | null => {
   const solarSource = era.sources.find((source) => source.type === "solar");
-  if (!solarSource) {
+  if (!solarSource || solarSource.type !== "solar") {
     return null;
   }
-  const payload = solarSource.payload;
-  if (!payload || typeof payload !== "object") {
-    return null;
+  const energyWh = solarSource.payload.energy_wh;
+  const durationHours = slot?.duration.hours ?? null;
+  if (durationHours && durationHours > 0) {
+    return solarSource.payload.average_power_w ?? energyWh / durationHours;
   }
-  const record = payload;
-  let energyKwh = toNumeric(record.energy_kwh);
-  if (energyKwh === null) {
-    const energyWh = toNumeric(record.energy_wh);
-    if (energyWh !== null) {
-      energyKwh = energyWh / 1000;
-    }
-  }
-  const durationHours = slot?.duration.hours;
-  if (energyKwh !== null && durationHours && durationHours > 0) {
-    return (energyKwh / durationHours) * 1000;
-  }
-  return toNumeric(record.power_w) ??
-    toNumeric(record.value) ??
-    toNumeric(record.power);
+  return solarSource.payload.average_power_w ?? null;
 };
 
 interface DerivedEra {
@@ -452,7 +413,7 @@ const buildGridSeries = (
     if (!isFiniteNumber(power)) {
       continue;
     }
-    const midpoint = era.slot.midpoint().getTime();
+    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
     futurePoints.push({x: midpoint, y: power, source: "forecast"});
   }
 

@@ -67,20 +67,37 @@ export const historyPointSchema = z
 
 export type HistoryPoint = z.infer<typeof historyPointSchema>;
 
-const forecastSourcePayloadSchema = z.object({
+const costForecastSourceSchema = z.object({
   provider: z.string(),
-  type: z.string(),
-  payload: unknownRecordSchema.optional().default({}),
+  type: z.literal("cost"),
+  payload: z.object({
+    price_ct_per_kwh: z.number(),
+    price_eur_per_kwh: z.number(),
+    price_with_fee_ct_per_kwh: z.number(),
+    price_with_fee_eur_per_kwh: z.number(),
+    unit: z.string(),
+  }),
 });
 
-export type ForecastSourcePayload = z.infer<typeof forecastSourcePayloadSchema>;
+const solarForecastSourceSchema = z.object({
+  provider: z.string(),
+  type: z.literal("solar"),
+  payload: z.object({
+    energy_wh: z.number(),
+    average_power_w: z.number().optional(),
+  }),
+});
+
+const forecastSourceSchema = z.union([costForecastSourceSchema, solarForecastSourceSchema]);
+
+export type ForecastSourcePayload = z.infer<typeof forecastSourceSchema>;
 
 export const forecastEraSchema = z.object({
   era_id: z.string(),
   start: optionalTimestampSchema.optional(),
   end: optionalTimestampSchema.optional(),
   duration_hours: nullableNumberSchema,
-  sources: z.array(forecastSourcePayloadSchema),
+  sources: z.array(forecastSourceSchema),
 });
 
 export type ForecastEra = z.infer<typeof forecastEraSchema>;

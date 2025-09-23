@@ -40,8 +40,6 @@ interface HistoryEntryLike {
   gridEnergyKwh?: unknown;
   grid_energy_w?: unknown;
   gridEnergyW?: unknown;
-  grid_energy_wh?: unknown;
-  gridEnergyWh?: unknown;
   solar_power_kw?: unknown;
   solarPowerKw?: unknown;
   pv_power_kw?: unknown;
@@ -112,7 +110,7 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
 
   const gridEnergyKwh = toNumber(record.grid_energy_kwh ?? record.gridEnergyKwh);
   const rawGridEnergyWh =
-    toNumber(record.grid_energy_w ?? record.gridEnergyW ?? record.grid_energy_wh ?? record.gridEnergyWh) ??
+    toNumber(record.grid_energy_w ?? record.gridEnergyW) ??
     (gridEnergyKwh !== null ? gridEnergyKwh * 1000 : null);
 
   const gridEnergy = rawGridEnergyWh !== null && Number.isFinite(rawGridEnergyWh)

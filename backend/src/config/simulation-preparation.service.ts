@@ -1,19 +1,13 @@
-import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { access, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import YAML from "yaml";
 
-import { normalizePriceSlots, SimulationService } from "../simulation/simulation.service";
-import { FroniusService } from "../fronius/fronius.service";
+import { normalizePriceSlots } from "../simulation/simulation.service";
 import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "../simulation/types";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "../simulation/solar";
 import type { ConfigDocument } from "./schemas";
-import { parseConfigDocument, parseEvccState, parseMarketForecast } from "./schemas";
+import { parseEvccState, parseMarketForecast } from "./schemas";
 import { EnergyPrice, TimeSlot } from "@batteryctl/domain";
 
-const DEFAULT_CONFIG_FILE = "../config.local.yaml";
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
 const REQUEST_TIMEOUT_MS = 15000;
 const SLOT_DURATION_MS = 3_600_000;
@@ -22,8 +16,7 @@ type MutableRecord = Record<string, unknown>;
 
 type EvccConfig = ConfigDocument["evcc"];
 type MarketConfig = ConfigDocument["market_data"];
-
-interface PreparedSimulation {
+	export interface PreparedSimulation {
   simulationConfig: SimulationConfig;
   liveState: { battery_soc?: number | null };
   forecast: RawForecastEntry[];
@@ -34,6 +27,7 @@ interface PreparedSimulation {
   forecastEras: ForecastEra[];
   liveGridPowerW: number | null;
   liveSolarPowerW: number | null;
+  intervalSeconds: number | null;
 }
 
 interface NormalizedSlot {
@@ -46,120 +40,11 @@ interface NormalizedSlot {
   timeSlot: TimeSlot | null;
 }
 
-type ForecastCostPayload = MutableRecord & {
-  price?: unknown;
-  value?: unknown;
-  unit?: unknown;
-  price_unit?: unknown;
-  value_unit?: unknown;
-  price_ct_per_kwh?: number | null;
-};
-
 @Injectable()
-export class ConfigSyncService implements OnModuleDestroy {
-  private readonly logger = new Logger(ConfigSyncService.name);
-  private schedulerTimer: ReturnType<typeof setTimeout> | null = null;
-  private runInProgress = false;
-  private intervalSeconds: number | null = null;
+export class SimulationPreparationService {
+  private readonly logger = new Logger(SimulationPreparationService.name);
 
-  constructor(
-    @Inject(SimulationService) private readonly simulationService: SimulationService,
-    @Inject(FroniusService) private readonly froniusService: FroniusService,
-  ) {
-  }
-
-  async seedFromConfig(): Promise<void> {
-    if (this.runInProgress) {
-      this.logger.warn("Simulation already running; skipping new request.");
-      return;
-    }
-    this.runInProgress = true;
-    const configPath = this.resolveConfigPath();
-    try {
-      const rawConfig = await this.loadConfigFile(configPath);
-
-      this.logger.log(`Loaded configuration from ${configPath}`);
-
-      this.logger.log("Preparing simulation inputs from configured data sources...");
-      const dryRun = rawConfig.dry_run ?? false;
-      const prepared = await this.prepareSimulation(rawConfig);
-
-      if (!prepared.forecast.length) {
-        const message = "No forecast data could be obtained from configured sources.";
-        prepared.errors.push(message);
-        this.logger.error(message);
-        throw new Error(message);
-      }
-
-      this.logger.log(
-        `Running simulation with ${prepared.forecast.length} forecast slots; live SOC: ${
-          prepared.liveState.battery_soc ?? "n/a"
-        }`,
-      );
-      const snapshot = this.simulationService.runSimulation({
-        config: prepared.simulationConfig,
-        liveState: prepared.liveState,
-        forecast: prepared.forecast,
-        solarForecast: prepared.solarForecast,
-        forecastEras: prepared.forecastEras,
-        warnings: prepared.warnings,
-        errors: prepared.errors,
-        priceSnapshotEurPerKwh: prepared.priceSnapshot,
-        observations: {
-          gridPowerW: prepared.liveGridPowerW,
-          solarPowerW: prepared.liveSolarPowerW,
-        },
-      });
-      this.logger.log("Seeded snapshot using config data.");
-      if (dryRun) {
-        this.logger.log("Dry run enabled; skipping Fronius optimization apply.");
-      } else {
-        const froniusResult = await this.froniusService.applyOptimization(rawConfig, snapshot);
-        if (froniusResult?.errorMessage) {
-          this.logger.warn(`Snapshot flagged with error: ${froniusResult.errorMessage}`);
-          this.simulationService.appendErrorsToLatestSnapshot([froniusResult.errorMessage]);
-        }
-      }
-    } catch (error) {
-      this.logger.error(`Config sync failed: ${this.describeError(error)}`);
-      throw error;
-    } finally {
-      this.runInProgress = false;
-      this.scheduleNextRun();
-    }
-  }
-
-  onModuleDestroy(): void {
-    if (this.schedulerTimer) {
-      clearTimeout(this.schedulerTimer);
-      this.schedulerTimer = null;
-    }
-  }
-
-  private resolveConfigPath(): string {
-    const override = process.env.BATTERYCTL_CONFIG;
-    if (override && override.trim().length > 0) {
-      return resolve(process.cwd(), override.trim());
-    }
-    return resolve(process.cwd(), DEFAULT_CONFIG_FILE);
-  }
-
-  private async loadConfigFile(path: string): Promise<ConfigDocument> {
-    try {
-      await access(path, fsConstants.R_OK);
-    } catch (error) {
-      throw new Error(`Config file not accessible at ${path}: ${this.describeError(error)}`);
-    }
-
-    const rawContent = await readFile(path, "utf-8");
-    const parsed: unknown = YAML.parse(rawContent);
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Config file is empty or invalid");
-    }
-    return parseConfigDocument(parsed);
-  }
-
-  private async prepareSimulation(configFile: ConfigDocument): Promise<PreparedSimulation> {
+  async prepare(configFile: ConfigDocument): Promise<PreparedSimulation> {
     const simulationConfig = this.buildSimulationConfig(configFile);
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -227,44 +112,39 @@ export class ConfigSyncService implements OnModuleDestroy {
     const useMarketForPrice = preferMarket && futureMarketForecast.length > 0;
     const canonicalForecast = useMarketForPrice
       ? futureMarketForecast
-      : futureEvccForecast.length
-        ? futureEvccForecast
-        : forecast;
+      : forecast;
 
-    this.logger.log(
-      `Canonical forecast selection: prefer_market=${preferMarket}, using=${
-        useMarketForPrice ? "market" : futureEvccForecast.length ? "evcc" : "fallback"
-      }, canonical_slots=${canonicalForecast.length}`,
-    );
-
-    const gridFeeForDisplay = simulationConfig.price?.grid_fee_eur_per_kwh ?? 0;
-
-    const {forecastEntries, eras} = this.buildForecastEras(
+    const forecastErasResult = this.buildForecastEras(
       canonicalForecast,
       futureEvccForecast,
       futureMarketForecast,
-      solarForecast,
-      gridFeeForDisplay,
+      futureSolarForecast,
+      simulationConfig.price.grid_fee_eur_per_kwh ?? 0,
     );
 
-    forecast = forecastEntries;
-    priceSnapshot = priceSnapshot ?? this.derivePriceSnapshot(forecast, simulationConfig);
-    this.logger.log(
-      `Prepared simulation summary: slots=${forecast.length}, price_snapshot=${priceSnapshot ?? "n/a"}`,
-    );
+    const priceSnapshotValue = priceSnapshot ?? this.derivePriceSnapshot(forecast, simulationConfig);
 
     return {
       simulationConfig,
       liveState,
       forecast,
-      solarForecast,
-      forecastEras: eras,
       warnings,
       errors,
-      priceSnapshot: priceSnapshot ?? null,
+      priceSnapshot: priceSnapshotValue,
+      solarForecast,
+      forecastEras: forecastErasResult.eras,
       liveGridPowerW: evccResult.gridPowerW,
       liveSolarPowerW: evccResult.solarPowerW,
+      intervalSeconds: this.extractIntervalSeconds(simulationConfig),
     };
+  }
+
+  private extractIntervalSeconds(config: SimulationConfig): number | null {
+    const value = config.logic?.interval_seconds;
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+    return null;
   }
 
   private buildSimulationConfig(configFile: ConfigDocument): SimulationConfig {
@@ -273,20 +153,13 @@ export class ConfigSyncService implements OnModuleDestroy {
     const logic = configFile.logic ?? {};
     const solar = configFile.solar ?? {};
 
-    const capacity = battery.capacity_kwh;
-    const chargePower = battery.max_charge_power_w;
-    const floorSoc = battery.auto_mode_floor_soc ?? null;
-
-    const gridFee = price.grid_fee_eur_per_kwh ?? null;
+    const capacity = battery.capacity_kwh ?? 0;
+    const chargePower = battery.max_charge_power_w ?? 0;
+    const floorSoc = battery.auto_mode_floor_soc;
+    const gridFee = price.grid_fee_eur_per_kwh ?? 0;
     const feedInTariff = price.feed_in_tariff_eur_per_kwh ?? null;
 
     const intervalSecondsRaw = logic.interval_seconds ?? 300;
-    const normalizedIntervalSeconds =
-      Number.isFinite(intervalSecondsRaw) && intervalSecondsRaw > 0
-        ? intervalSecondsRaw
-        : null;
-    this.intervalSeconds = normalizedIntervalSeconds;
-
     const minHoldMinutes = logic.min_hold_minutes ?? 0;
     const houseLoad = logic.house_load_w ?? 1200;
     const allowBatteryExport = logic.allow_battery_export ?? true;
@@ -302,6 +175,10 @@ export class ConfigSyncService implements OnModuleDestroy {
     const normalizedFeedInTariff =
       typeof feedInTariff === "number" && Number.isFinite(feedInTariff) ? feedInTariff : null;
 
+    const normalizedIntervalSeconds =
+      Number.isFinite(intervalSecondsRaw) && intervalSecondsRaw > 0
+        ? intervalSecondsRaw
+        : null;
     const normalizedMinHold = Number.isFinite(minHoldMinutes) ? minHoldMinutes : undefined;
     const normalizedHouseLoad = Number.isFinite(houseLoad) ? houseLoad : undefined;
 
@@ -473,72 +350,10 @@ export class ConfigSyncService implements OnModuleDestroy {
     return {forecast, priceSnapshot, solar: []};
   }
 
-  private normalizeMarketEntries(entries: RawForecastEntry[], maxHours = 72): RawForecastEntry[] {
-    const records: RawForecastEntry[] = [];
-    if (!entries.length) {
-      return records;
-    }
-
-    const now = Date.now();
-    const horizonEnd = now + maxHours * 3600_000;
-
-    for (const entry of entries) {
-      const startValue = (entry.start ?? entry.from) ?? null;
-      const endValue = (entry.end ?? entry.to) ?? null;
-
-      const startDate = parseTimestamp(startValue);
-      if (!startDate) {
-        continue;
-      }
-
-      let endDate = parseTimestamp(endValue);
-      if (!endDate) {
-        const durationHours = entry.duration_hours ?? entry.durationHours ?? 1;
-        const normalizedDuration =
-          Number.isFinite(durationHours) && durationHours > 0
-            ? durationHours
-            : 1;
-        endDate = new Date(startDate.getTime() + normalizedDuration * 3600_000);
-      }
-
-      if (endDate.getTime() <= now) {
-        continue;
-      }
-      if (startDate.getTime() >= horizonEnd) {
-        continue;
-      }
-
-      const priceCandidate = entry.price ?? entry.value ?? entry.price_ct_per_kwh ?? entry.value_ct_per_kwh;
-      const price = typeof priceCandidate === "number" && Number.isFinite(priceCandidate)
-        ? priceCandidate
-        : null;
-      if (price === null) {
-        continue;
-      }
-
-      const normalized = structuredClone(entry);
-      normalized.start = startDate.toISOString();
-      normalized.end = endDate.toISOString();
-      normalized.price = price;
-      if (!normalized.unit && (normalized.price_unit || normalized.value_unit)) {
-        normalized.unit = (normalized.price_unit ?? normalized.value_unit) ?? undefined;
-      }
-
-      records.push(normalized);
-    }
-
-    return records;
-  }
-
   private filterFutureEntries(entries: RawForecastEntry[]): RawForecastEntry[] {
     const now = Date.now();
     return entries.filter((entry) => {
-      const start = parseTimestamp((entry.start ?? entry.from) ?? null);
-      const end = parseTimestamp((entry.end ?? entry.to) ?? null);
-
-      if (end && end.getTime() <= now) {
-        return false;
-      }
+      const start = parseTimestamp(entry.start ?? entry.from ?? null);
       if (!start) {
         return false;
       }
@@ -581,7 +396,7 @@ export class ConfigSyncService implements OnModuleDestroy {
       const startIso = startDate.toISOString();
       const direct = solarSlots.find((slot) => slot.startIso === startIso);
       if (direct) {
-        return this.cloneRecord(direct.payload);
+        return structuredClone(direct.payload) as MutableRecord;
       }
       const startTime = startDate.getTime();
       const endTime = endDate?.getTime() ?? startTime + SLOT_DURATION_MS;
@@ -592,11 +407,14 @@ export class ConfigSyncService implements OnModuleDestroy {
         }
         const slotEnd = slot.endDate?.getTime() ?? slotStart + SLOT_DURATION_MS;
         if (slotStart < endTime && slotEnd > startTime) {
-          return this.cloneRecord(slot.payload);
+          return structuredClone(slot.payload) as MutableRecord;
         }
       }
       return undefined;
     };
+
+    type CostSource = Extract<ForecastEra["sources"][number], { type: "cost" }>;
+    type SolarSource = Extract<ForecastEra["sources"][number], { type: "solar" }>;
 
     interface EraEntry {
       slot: NormalizedSlot;
@@ -606,50 +424,86 @@ export class ConfigSyncService implements OnModuleDestroy {
 
     const eraMap = new Map<string, EraEntry>();
 
-    const addSource = (
-      entry: EraEntry,
-      provider: string,
-      type: ForecastEra["sources"][number]["type"],
-      payload: MutableRecord,
-    ): void => {
-      const exists = entry.sources.some((source) => source.provider === provider && source.type === type);
+    const addSource = (entry: EraEntry, source: ForecastEra["sources"][number]): void => {
+      const exists = entry.sources.some((item) => item.provider === source.provider && item.type === source.type);
       if (!exists) {
-        entry.sources.push({provider, type, payload: structuredClone(payload)});
+        if (source.type === "cost") {
+          const cloned: CostSource = {
+            provider: source.provider,
+            type: "cost",
+            payload: structuredClone(source.payload),
+          };
+          entry.sources.push(cloned);
+        } else {
+          const cloned: SolarSource = {
+            provider: source.provider,
+            type: "solar",
+            payload: structuredClone(source.payload),
+          };
+          entry.sources.push(cloned);
+        }
       }
     };
 
-    const sanitizedGridFeeEur = Number.isFinite(gridFeeEurPerKwh) ? Math.max(0, gridFeeEurPerKwh) : 0;
+    const buildSolarSource = (
+      provider: string,
+      slotInfo: NormalizedSlot,
+      raw: MutableRecord | undefined,
+    ): SolarSource | null => {
+      if (!raw) {
+        return null;
+      }
+      let energyWh = this.toNumber(raw.energy_wh);
+      if (energyWh === null) {
+        const energyKwh = this.toNumber(raw.energy_kwh);
+        if (energyKwh !== null) {
+          energyWh = energyKwh * 1000;
+        }
+      }
+      if (energyWh === null || energyWh <= 0) {
+        return null;
+      }
+      const durationHours = slotInfo.timeSlot?.duration.hours ?? slotInfo.durationHours ?? null;
+      const averagePower = durationHours && durationHours > 0 ? energyWh / durationHours : undefined;
+      return {
+        provider,
+        type: "solar",
+        payload: averagePower !== undefined ? {energy_wh: energyWh, average_power_w: averagePower} : {energy_wh: energyWh},
+      };
+    };
 
     const applySlotPrice = (
       entry: EraEntry,
       rawPrice: unknown,
       rawUnit: unknown,
-    ): { priceCt: number; priceEur: number; totalCt: number; totalEur: number } | null => {
+    ): CostSource["payload"] | null => {
       const energyPrice = this.parseEnergyPrice(rawPrice, rawUnit);
       if (!energyPrice) {
         return null;
       }
-      const totalPrice = energyPrice.withAdditionalFee(sanitizedGridFeeEur);
-      const priceCt = energyPrice.ctPerKwh;
-      const priceEur = energyPrice.eurPerKwh;
-      const totalCt = totalPrice.ctPerKwh;
-      const totalEur = totalPrice.eurPerKwh;
-      entry.slot.payload.price = priceEur;
+      const totalPrice = energyPrice.withAdditionalFee(gridFeeEurPerKwh);
+      const payload = {
+        price_ct_per_kwh: energyPrice.ctPerKwh,
+        price_eur_per_kwh: energyPrice.eurPerKwh,
+        price_with_fee_ct_per_kwh: totalPrice.ctPerKwh,
+        price_with_fee_eur_per_kwh: totalPrice.eurPerKwh,
+        unit: "ct/kWh",
+      } satisfies CostSource["payload"];
+
+      entry.slot.payload.price = payload.price_eur_per_kwh;
       entry.slot.payload.unit = "EUR/kWh";
-      entry.slot.payload.price_ct_per_kwh = priceCt;
-      entry.slot.payload.price_with_fee_ct_per_kwh = totalCt;
-      entry.slot.payload.price_with_fee_eur_per_kwh = totalEur;
-      entry.payload.price = priceEur;
+      entry.slot.payload.price_ct_per_kwh = payload.price_ct_per_kwh;
+      entry.slot.payload.price_eur_per_kwh = payload.price_eur_per_kwh;
+      entry.slot.payload.price_with_fee_ct_per_kwh = payload.price_with_fee_ct_per_kwh;
+      entry.slot.payload.price_with_fee_eur_per_kwh = payload.price_with_fee_eur_per_kwh;
+
+      entry.payload.price = payload.price_eur_per_kwh;
       entry.payload.unit = "EUR/kWh";
-      entry.payload.price_ct_per_kwh = priceCt;
-      entry.payload.price_with_fee_ct_per_kwh = totalCt;
-      entry.payload.price_with_fee_eur_per_kwh = totalEur;
-      return {
-        priceCt,
-        priceEur,
-        totalCt,
-        totalEur,
-      };
+      entry.payload.price_ct_per_kwh = payload.price_ct_per_kwh;
+      entry.payload.price_with_fee_ct_per_kwh = payload.price_with_fee_ct_per_kwh;
+      entry.payload.price_with_fee_eur_per_kwh = payload.price_with_fee_eur_per_kwh;
+
+      return payload;
     };
 
     for (const slot of canonicalSlots) {
@@ -679,52 +533,61 @@ export class ConfigSyncService implements OnModuleDestroy {
         slot.payload.price_unit ??
         slot.payload.value_unit ??
         (slot.payload.price_ct_per_kwh != null ? "ct/kWh" : undefined);
-      const priceInfo = applySlotPrice(entry, rawPrice, rawUnit);
+      const baseCost = applySlotPrice(entry, rawPrice, rawUnit);
+      if (baseCost) {
+        const costSource: CostSource = {
+          provider: "canonical",
+          type: "cost",
+          payload: baseCost,
+        };
+        addSource(entry, costSource);
+      }
 
       const marketPayload = marketIndex.get(slot.startIso);
       if (marketPayload) {
-        const cloned = this.cloneRecord(marketPayload);
-        const record: ForecastCostPayload = {...cloned};
-        const rawMarketPrice = record.price ?? record.value;
-        const rawMarketUnit = record.unit ?? record.price_unit ?? record.value_unit;
-        const priceCt = this.convertPriceToCents(rawMarketPrice, rawMarketUnit);
-        if (priceCt !== null) {
-          record.price_ct_per_kwh = priceCt;
-          record.unit = "ct/kWh";
-          const marketInfo = applySlotPrice(entry, priceCt / 100, "EUR/kWh");
-          if (marketInfo) {
-            record.price_with_fee_ct_per_kwh = marketInfo.totalCt;
-            record.price_with_fee_eur_per_kwh = marketInfo.totalEur;
-          }
-        } else if (priceInfo) {
-          record.price_with_fee_ct_per_kwh = priceInfo.totalCt;
-          record.price_with_fee_eur_per_kwh = priceInfo.totalEur;
+        const rawMarketPrice = (marketPayload as { price?: unknown; value?: unknown }).price ??
+          (marketPayload as { value?: unknown }).value;
+        const rawMarketUnit = (marketPayload as { unit?: unknown }).unit ??
+          (marketPayload as { price_unit?: unknown }).price_unit ??
+          (marketPayload as { value_unit?: unknown }).value_unit;
+        const marketCost = applySlotPrice(entry, rawMarketPrice, rawMarketUnit);
+        if (marketCost) {
+          const marketSource: CostSource = {
+            provider: "awattar",
+            type: "cost",
+            payload: marketCost,
+          };
+          addSource(entry, marketSource);
         }
-        addSource(entry, "awattar", "cost", record);
       }
 
       const solarPayload = findSolarPayload(slot.startDate, slot.endDate);
-      if (solarPayload) {
-        addSource(entry, "solar", "solar", this.cloneRecord(solarPayload));
+      const solarSource = buildSolarSource("evcc", entry.slot, solarPayload);
+      if (solarSource) {
+        addSource(entry, solarSource);
       }
     }
 
-    const sortedEntries = [...eraMap.values()].sort((a, b) => {
-      const aTime = a.slot.startDate?.getTime() ?? 0;
-      const bTime = b.slot.startDate?.getTime() ?? 0;
-      return aTime - bTime;
+    const sorted = [...eraMap.entries()].sort((a, b) => {
+      const aStart = parseTimestamp(a[0])?.getTime() ?? 0;
+      const bStart = parseTimestamp(b[0])?.getTime() ?? 0;
+      return aStart - bStart;
     });
 
-    const forecastEntries = sortedEntries.map((entry) => structuredClone(entry.payload) as RawForecastEntry);
-    const eras = sortedEntries.map((entry) => ({
-      era_id: entry.payload.era_id,
-      start: entry.slot.startIso ?? undefined,
-      end: entry.slot.endIso ?? undefined,
-      duration_hours: entry.slot.durationHours,
-      sources: entry.sources,
-    }));
-    const deduped = this.dedupeErasAndEntries(forecastEntries, eras);
-    return this.trimForecastByPriceCoverage(deduped.forecastEntries, deduped.eras);
+    const dedupedEntries: RawForecastEntry[] = [];
+    const dedupedEras: ForecastEra[] = [];
+    for (const [, value] of sorted) {
+      dedupedEntries.push(structuredClone(value.slot.payload) as RawForecastEntry);
+      dedupedEras.push(structuredClone({
+        era_id: value.payload.era_id,
+        start: value.slot.startIso ?? undefined,
+        end: value.slot.endIso ?? undefined,
+        duration_hours: value.slot.durationHours,
+        sources: value.sources,
+      }) as ForecastEra);
+    }
+
+    return {forecastEntries: dedupedEntries, eras: dedupedEras};
   }
 
   private buildStartIndex(entries: RawForecastEntry[]): Map<string, MutableRecord> {
@@ -737,6 +600,47 @@ export class ConfigSyncService implements OnModuleDestroy {
       index.set(slot.startIso, slot.payload);
     }
     return index;
+  }
+
+  private normalizeMarketEntries(entries: RawForecastEntry[], maxHours = 72): RawForecastEntry[] {
+    const records: RawForecastEntry[] = [];
+    if (!entries.length) {
+      return records;
+    }
+
+    const now = Date.now();
+    for (const entry of entries) {
+      if (!entry) continue;
+      const startTimestamp = parseTimestamp(entry.start ?? entry.from ?? null);
+      const endTimestamp = parseTimestamp(entry.end ?? entry.to ?? null);
+      if (!startTimestamp || !endTimestamp) {
+        continue;
+      }
+      if (startTimestamp.getTime() < now - SLOT_DURATION_MS) {
+        continue;
+      }
+      const durationHours = (endTimestamp.getTime() - startTimestamp.getTime()) / 3_600_000;
+      if (!Number.isFinite(durationHours) || durationHours <= 0 || durationHours > maxHours) {
+        continue;
+      }
+      records.push(entry);
+    }
+    return records;
+  }
+
+  private dedupeSlots(slots: NormalizedSlot[]): NormalizedSlot[] {
+    const map = new Map<string, NormalizedSlot>();
+    for (const slot of slots) {
+      const key = slot.startIso ?? "";
+      if (!map.has(key)) {
+        map.set(key, slot);
+      }
+    }
+    return [...map.values()].sort((a, b) => {
+      const aTime = a.startDate?.getTime() ?? 0;
+      const bTime = b.startDate?.getTime() ?? 0;
+      return aTime - bTime;
+    });
   }
 
   private normalizeForecastSlot(entry: RawForecastEntry): NormalizedSlot {
@@ -779,151 +683,33 @@ export class ConfigSyncService implements OnModuleDestroy {
     };
   }
 
-  private dedupeSlots(slots: NormalizedSlot[]): NormalizedSlot[] {
-    const map = new Map<string, NormalizedSlot>();
-    for (const slot of slots) {
-      const key = slot.startIso ?? "";
-      if (!map.has(key)) {
-        map.set(key, slot);
-      }
+  private derivePriceSnapshot(
+    forecast: RawForecastEntry[],
+    simulationConfig: SimulationConfig,
+  ): number | null {
+    if (!forecast.length) {
+      return null;
     }
-    return [...map.values()].sort((a, b) => {
-      const aTime = a.startDate?.getTime() ?? 0;
-      const bTime = b.startDate?.getTime() ?? 0;
-      return aTime - bTime;
-    });
+    const slots = normalizePriceSlots(forecast);
+    if (!slots.length) {
+      return null;
+    }
+    const basePrice = slots[0]?.price;
+    if (typeof basePrice !== "number" || Number.isNaN(basePrice)) {
+      return null;
+    }
+    return basePrice + (simulationConfig.price?.grid_fee_eur_per_kwh ?? 0);
   }
 
-  private dedupeErasAndEntries(
-    entries: RawForecastEntry[],
-    eras: ForecastEra[],
-  ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
-    const map = new Map<string, { entry: MutableRecord; era: ForecastEra }>();
-
-    for (let index = 0; index < eras.length; index += 1) {
-      const era = eras[index];
-      const entry = (entries[index] as MutableRecord | undefined) ?? {};
-      const start = typeof era.start === "string" ? era.start : null;
-      if (!start) {
-        const key = `__unknown_${index}`;
-        map.set(key, {entry, era});
-        continue;
-      }
-
-      const existing = map.get(start);
-      if (!existing) {
-        map.set(start, {
-          entry,
-          era: {
-            ...era,
-            sources: [...era.sources],
-          },
-        });
-        continue;
-      }
-
-      this.mergeSources(existing.era.sources, era.sources);
+  private toNumber(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
     }
-
-    const sorted = [...map.entries()].sort((a, b) => {
-      const aStart = parseTimestamp(a[0])?.getTime() ?? 0;
-      const bStart = parseTimestamp(b[0])?.getTime() ?? 0;
-      return aStart - bStart;
-    });
-
-    const dedupedEntries: RawForecastEntry[] = [];
-    const dedupedEras: ForecastEra[] = [];
-    for (const [, value] of sorted) {
-      dedupedEntries.push(structuredClone(value.entry) as RawForecastEntry);
-      dedupedEras.push(structuredClone(value.era));
+    if (typeof value === "string" && value.trim().length > 0) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
     }
-
-    return {forecastEntries: dedupedEntries, eras: dedupedEras};
-  }
-
-  private mergeSources(target: ForecastEra["sources"], incoming: ForecastEra["sources"]): void {
-    for (const source of incoming) {
-      const exists = target.find((item) => item.provider === source.provider && item.type === source.type);
-      if (!exists) {
-        target.push({provider: source.provider, type: source.type, payload: structuredClone(source.payload)});
-        continue;
-      }
-      if (!exists.payload || Object.keys(exists.payload).length === 0) {
-        exists.payload = structuredClone(source.payload);
-      }
-    }
-  }
-
-  private cloneRecord<T extends Record<string, unknown>>(entry: T): T {
-    return structuredClone(entry);
-  }
-
-  private scheduleNextRun(referenceDate: Date = new Date()): void {
-    if (this.schedulerTimer) {
-      clearTimeout(this.schedulerTimer);
-      this.schedulerTimer = null;
-    }
-
-    const intervalSeconds = this.intervalSeconds;
-    if (!(typeof intervalSeconds === "number" && Number.isFinite(intervalSeconds) && intervalSeconds > 0)) {
-      return;
-    }
-
-    const intervalMs = intervalSeconds * 1000;
-    const nowMs = referenceDate.getTime();
-    const anchor = new Date(referenceDate);
-    anchor.setMinutes(0, 0, 0);
-    const anchorMs = anchor.getTime();
-    const elapsedSinceAnchor = Math.max(0, nowMs - anchorMs);
-    const slotsElapsed = Math.floor(elapsedSinceAnchor / intervalMs);
-    let nextRunMs = anchorMs + (slotsElapsed + 1) * intervalMs;
-    if (nextRunMs <= nowMs + 100) {
-      nextRunMs += intervalMs;
-    }
-    const delayMs = Math.max(0, nextRunMs - nowMs);
-
-    this.schedulerTimer = setTimeout(() => {
-      this.schedulerTimer = null;
-      this.triggerScheduledRun();
-    }, delayMs);
-
-    const approxMinutes = delayMs / 60000;
-    this.logger.log(
-      `Next simulation scheduled for ${new Date(nextRunMs).toISOString()} (~${approxMinutes.toFixed(2)} minutes)`,
-    );
-  }
-
-  private triggerScheduledRun(): void {
-    void this.seedFromConfig().catch(() => {
-      // Errors are logged within seedFromConfig; scheduling resumes via finally block.
-    });
-  }
-
-  private trimForecastByPriceCoverage(
-    entries: RawForecastEntry[],
-    eras: ForecastEra[],
-  ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
-    if (!entries.length || !eras.length) {
-      return {forecastEntries: [], eras: []};
-    }
-
-    const trimmedEntries: RawForecastEntry[] = [];
-    const trimmedEras: ForecastEra[] = [];
-
-    const total = Math.min(entries.length, eras.length);
-    for (let index = 0; index < total; index += 1) {
-      const entry = (entries[index] as MutableRecord | undefined) ?? {};
-      const sanitizedEntry = structuredClone(entry) as RawForecastEntry;
-      const rawPrice = (sanitizedEntry as { price_ct_per_kwh?: unknown }).price_ct_per_kwh;
-      const priceCt = this.toNumber(rawPrice);
-      if (priceCt === null) {
-        break;
-      }
-      trimmedEntries.push(sanitizedEntry);
-      trimmedEras.push(eras[index]);
-    }
-
-    return {forecastEntries: trimmedEntries, eras: trimmedEras};
+    return null;
   }
 
   private parseEnergyPrice(value: unknown, unit: unknown): EnergyPrice | null {
@@ -945,29 +731,6 @@ export class ConfigSyncService implements OnModuleDestroy {
     return EnergyPrice.fromEurPerKwh(numeric);
   }
 
-  private convertPriceToCents(value: unknown, unit: unknown): number | null {
-    const price = this.parseEnergyPrice(value, unit);
-    return price ? price.ctPerKwh : null;
-  }
-
-  private derivePriceSnapshot(
-    forecast: RawForecastEntry[],
-    simulationConfig: SimulationConfig,
-  ): number | null {
-    if (!forecast.length) {
-      return null;
-    }
-    const slots = normalizePriceSlots(forecast);
-    if (!slots.length) {
-      return null;
-    }
-    const basePrice = slots[0]?.price;
-    if (typeof basePrice !== "number" || Number.isNaN(basePrice)) {
-      return null;
-    }
-    return this.applyGridFee(basePrice, simulationConfig);
-  }
-
   private async fetchJson(url: string, timeoutMs: number, init?: RequestInit): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -980,27 +743,6 @@ export class ConfigSyncService implements OnModuleDestroy {
     } finally {
       clearTimeout(timer);
     }
-  }
-
-  private applyGridFee(price: number, simulationConfig: SimulationConfig): number {
-    const feeCandidate = simulationConfig.price?.grid_fee_eur_per_kwh ?? 0;
-    const fee = Number.isFinite(feeCandidate) ? feeCandidate : 0;
-    return price + fee;
-  }
-
-  private toNumber(value: unknown): number | null {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (!trimmed) {
-        return null;
-      }
-      const numeric = Number(trimmed);
-      return Number.isFinite(numeric) ? numeric : null;
-    }
-    return null;
   }
 
   private describeError(error: unknown): string {

@@ -2,8 +2,7 @@ import { useMemo } from "react";
 
 import type { ForecastEra, OracleEntry } from "../types";
 import { formatDate, formatNumber, formatPercent, timeFormatter } from "../utils/format";
-import { toNumeric } from "../utils/number";
-import { EnergyPrice, TimeSlot } from "@batteryctl/domain";
+import { TimeSlot } from "@batteryctl/domain";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
@@ -19,88 +18,30 @@ const parseTime = (value: string | null | undefined): number | null => {
   return Number.isFinite(time) ? time : null;
 };
 
-const parseEnergyPrice = (value: number | null, unit: unknown): EnergyPrice | null => {
-  if (value === null || !Number.isFinite(value)) {
-    return null;
-  }
-  const unitStrRaw = typeof unit === "string" ? unit.trim() : "";
-  const unitStr = unitStrRaw.toLowerCase();
-  if (unitStr.length) {
-    const parsed = EnergyPrice.tryFromValue(value, unitStr);
-    if (parsed) {
-      return parsed;
-    }
-  }
-  if (Math.abs(value) > 10) {
-    return EnergyPrice.fromCentsPerKwh(value);
-  }
-  return EnergyPrice.fromEurPerKwh(value);
-};
-
-const convertToCents = (value: number | null, unit: unknown): number | null => {
-  const price = parseEnergyPrice(value, unit);
-  return price ? price.ctPerKwh : null;
-};
-
 const resolveCost = (era: ForecastEra, provider: string) => {
-  const match = era.sources.find(
-    (source) =>
-      source &&
-      source.type === "cost" &&
-      source.provider.toLowerCase() === provider,
-  );
-  if (!match) {
+  const match = era.sources.find((source) => source.type === "cost" && source.provider.toLowerCase() === provider);
+  if (!match || match.type !== "cost") {
     return null;
   }
-  const payload = match.payload ?? {};
-  const centsWithFee = toNumeric((payload as { price_with_fee_ct_per_kwh?: unknown }).price_with_fee_ct_per_kwh);
-  if (centsWithFee !== null) {
-    return {priceCt: centsWithFee};
-  }
-  const existingCents = toNumeric((payload as { price_ct_per_kwh?: unknown }).price_ct_per_kwh);
-  if (existingCents !== null) {
-    return {priceCt: existingCents};
-  }
-  const raw =
-    toNumeric((payload as { price?: unknown }).price) ??
-    toNumeric((payload as { value?: unknown }).value);
-  const unit =
-    (payload as { unit?: unknown }).unit ??
-    (payload as { price_unit?: unknown }).price_unit ??
-    (payload as { value_unit?: unknown }).value_unit;
-  const priceCt = convertToCents(raw, unit);
+  const payload = match.payload;
+  const priceCt = payload.price_with_fee_ct_per_kwh ?? payload.price_ct_per_kwh;
   return {priceCt};
 };
 
 const resolveSolar = (era: ForecastEra, slot: TimeSlot | null) => {
   const match = era.sources.find((source) => source.type === "solar");
-  if (!match) {
+  if (!match || match.type !== "solar") {
     return {energyKwh: null, averageW: null};
   }
-  const payload = match.payload ?? {};
-  let energyKwh = toNumeric((payload as { energy_kwh?: unknown }).energy_kwh);
-  if (energyKwh === null) {
-    const energyWh = toNumeric((payload as { energy_wh?: unknown }).energy_wh);
-    if (energyWh !== null) {
-      energyKwh = energyWh / 1000;
-    }
-  }
-  let averageW: number | null = null;
-  if (energyKwh !== null) {
-    const duration = slot ? slot.duration.hours :
-      (typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
-        ? era.duration_hours
-        : null);
-    if (duration && duration > 0) {
-      averageW = (energyKwh / duration) * 1000;
-    }
-  }
-  if (averageW === null) {
-    averageW =
-      toNumeric((payload as { power_w?: unknown }).power_w) ??
-      toNumeric((payload as { value?: unknown }).value) ??
-      toNumeric((payload as { power?: unknown }).power);
-  }
+  const energyWh = match.payload.energy_wh;
+  const energyKwh = energyWh / 1000;
+  const durationHours = slot ? slot.duration.hours :
+    (typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
+      ? era.duration_hours
+      : null);
+  const averageW = match.payload.average_power_w ?? (
+    durationHours && durationHours > 0 ? energyWh / durationHours : null
+  );
   return {energyKwh, averageW};
 };
 

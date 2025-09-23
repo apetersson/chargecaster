@@ -208,7 +208,7 @@ export class SimulationService {
       const strategyLog = result.oracle_entries
         .map((entry) => `${(entry.strategy ?? "auto").toUpperCase()}@${entry.era_id}`)
         .join("\n");
-      this.logger.log(`Era strategies: \n ${strategyLog}`);
+      this.logger.log(`Era strategies: \n${strategyLog}`);
     }
     const fallbackPriceEur = slots.length
       ? slots[0].price + gridFee(input.config)
@@ -508,14 +508,14 @@ function computeSlotCost(gridEnergyKwh: number, importPrice: number, feedInTarif
 function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
   return slots.map((slot, index) => {
     const eraId = `${slot.start.getTime()}`;
-    const priceCt = Number.isFinite(slot.price) ? slot.price * 100 : null;
-    const payload: Record<string, unknown> = {};
-    if (priceCt !== null) {
-      payload.price_ct_per_kwh = priceCt;
-      payload.unit = "ct/kWh";
-    } else {
-      payload.price = slot.price;
-    }
+    const energyPrice = EnergyPrice.fromEurPerKwh(slot.price);
+    const costPayload = {
+      price_ct_per_kwh: energyPrice.ctPerKwh,
+      price_eur_per_kwh: energyPrice.eurPerKwh,
+      price_with_fee_ct_per_kwh: energyPrice.ctPerKwh,
+      price_with_fee_eur_per_kwh: energyPrice.eurPerKwh,
+      unit: "ct/kWh",
+    };
     const updatedSlot = slot.withEraId(eraId);
     slots[index] = updatedSlot;
     return {
@@ -527,7 +527,7 @@ function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
         {
           provider: "awattar",
           type: "cost",
-          payload,
+          payload: costPayload,
         },
       ],
     } satisfies ForecastEra;
