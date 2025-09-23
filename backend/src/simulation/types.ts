@@ -6,7 +6,6 @@ import {
   optionalStringSchema,
   optionalTimestampSchema,
   requiredTimestampSchema,
-  unknownRecordSchema,
 } from "../common/parsing";
 import type { TariffSlot } from "@batteryctl/domain";
 

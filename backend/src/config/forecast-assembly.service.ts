@@ -237,7 +237,7 @@ export class ForecastAssemblyService {
     const startIso = startDate.toISOString();
     const direct = slots.find((slot) => slot.startIso === startIso);
     if (direct) {
-      return structuredClone(direct.payload) as MutableRecord;
+      return {...direct.payload};
     }
     const startTime = startDate.getTime();
     const endTime = endDate?.getTime() ?? startTime + SLOT_DURATION_MS;
@@ -248,7 +248,7 @@ export class ForecastAssemblyService {
       }
       const slotEnd = slot.endDate?.getTime() ?? slotStart + SLOT_DURATION_MS;
       if (slotStart < endTime && slotEnd > startTime) {
-        return structuredClone(slot.payload) as MutableRecord;
+        return {...slot.payload};
       }
     }
     return undefined;
