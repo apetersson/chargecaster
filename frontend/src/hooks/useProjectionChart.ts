@@ -26,6 +26,7 @@ import "chartjs-adapter-date-fns";
 
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeFormatter, numberFormatter, percentFormatter, timeFormatter, } from "../utils/format";
+import { toNumeric } from "../utils/number";
 
 Chart.register(
   BarController,
@@ -119,20 +120,6 @@ const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
   target.push(point);
 };
 
-const toNumeric = (value: unknown): number | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === "string" && value.length > 0) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-  return null;
-};
-
 const convertPriceToCents = (value: unknown, unit: unknown): number | null => {
   const numeric = toNumeric(value);
   if (numeric === null) {
@@ -215,11 +202,9 @@ const extractSolarAverageWatts = (era: ForecastEra, durationHours: number | null
   if (energyKwh !== null && durationHours && durationHours > 0) {
     return (energyKwh / durationHours) * 1000;
   }
-  const explicitPower =
-    toNumeric(record.power_w) ??
+  return toNumeric(record.power_w) ??
     toNumeric(record.value) ??
     toNumeric(record.power);
-  return explicitPower;
 };
 
 interface DerivedEra {
@@ -241,7 +226,7 @@ interface LegendGroup {
 const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEntry[]): DerivedEra[] => {
   const oracleMap = new Map<string, OracleEntry>();
   for (const entry of oracleEntries) {
-    if (entry && typeof entry.era_id === "string") {
+    if (entry) {
       oracleMap.set(entry.era_id, entry);
     }
   }

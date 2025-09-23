@@ -8,7 +8,7 @@ import YAML from "yaml";
 import { normalizePriceSlots, SimulationService } from "../simulation/simulation.service";
 import { FroniusService } from "../fronius/fronius.service";
 import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "../simulation/types";
-import { buildSolarForecastFromTimeseries } from "../simulation/solar";
+import { buildSolarForecastFromTimeseries, parseTimestamp } from "../simulation/solar";
 import type { ConfigDocument } from "./schemas";
 import { parseConfigDocument, parseEvccState, parseMarketForecast } from "./schemas";
 
@@ -480,12 +480,12 @@ export class ConfigSyncService implements OnModuleDestroy {
       const startValue = (entry.start ?? entry.from) ?? null;
       const endValue = (entry.end ?? entry.to) ?? null;
 
-      const startDate = this.parseDate(startValue);
+      const startDate = parseTimestamp(startValue);
       if (!startDate) {
         continue;
       }
 
-      let endDate = this.parseDate(endValue);
+      let endDate = parseTimestamp(endValue);
       if (!endDate) {
         const durationHours = entry.duration_hours ?? entry.durationHours ?? 1;
         const normalizedDuration =
@@ -527,8 +527,8 @@ export class ConfigSyncService implements OnModuleDestroy {
   private filterFutureEntries(entries: RawForecastEntry[]): RawForecastEntry[] {
     const now = Date.now();
     return entries.filter((entry) => {
-      const start = this.parseDate((entry.start ?? entry.from) ?? null);
-      const end = this.parseDate((entry.end ?? entry.to) ?? null);
+      const start = parseTimestamp((entry.start ?? entry.from) ?? null);
+      const end = parseTimestamp((entry.end ?? entry.to) ?? null);
 
       if (end && end.getTime() <= now) {
         return false;
@@ -734,8 +734,8 @@ export class ConfigSyncService implements OnModuleDestroy {
 
   private normalizeForecastSlot(entry: RawForecastEntry): NormalizedSlot {
     const payload = structuredClone(entry) as MutableRecord;
-    const startDate = this.parseDate(payload.start ?? payload.from);
-    const endDateCandidate = this.parseDate(payload.end ?? payload.to);
+    const startDate = parseTimestamp(payload.start ?? payload.from);
+    const endDateCandidate = parseTimestamp(payload.end ?? payload.to);
     const endDate =
       endDateCandidate ?? (startDate ? new Date(startDate.getTime() + SLOT_DURATION_MS) : null);
     const startIso = startDate ? startDate.toISOString() : null;
@@ -806,8 +806,8 @@ export class ConfigSyncService implements OnModuleDestroy {
     }
 
     const sorted = [...map.entries()].sort((a, b) => {
-      const aStart = this.parseDate(a[0])?.getTime() ?? 0;
-      const bStart = this.parseDate(b[0])?.getTime() ?? 0;
+      const aStart = parseTimestamp(a[0])?.getTime() ?? 0;
+      const bStart = parseTimestamp(b[0])?.getTime() ?? 0;
       return aStart - bStart;
     });
 
@@ -995,23 +995,6 @@ export class ConfigSyncService implements OnModuleDestroy {
     const feeCandidate = simulationConfig.price?.grid_fee_eur_per_kwh ?? 0;
     const fee = Number.isFinite(feeCandidate) ? feeCandidate : 0;
     return price + fee;
-  }
-
-  private parseDate(value: unknown): Date | null {
-    if (value instanceof Date) {
-      return new Date(value.getTime());
-    }
-    if (typeof value === "number" && Number.isFinite(value)) {
-      const timestamp = value > 1e12 ? value : value * 1000;
-      return new Date(timestamp);
-    }
-    if (typeof value === "string" && value.length > 0) {
-      const parsed = new Date(value);
-      if (!Number.isNaN(parsed.getTime())) {
-        return parsed;
-      }
-    }
-    return null;
   }
 
   private toNumber(value: unknown): number | null {

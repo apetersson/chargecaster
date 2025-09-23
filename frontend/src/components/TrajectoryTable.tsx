@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import type { ForecastEra, OracleEntry } from "../types";
 import { formatDate, formatNumber, formatPercent, timeFormatter } from "../utils/format";
+import { toNumeric } from "../utils/number";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
@@ -15,20 +16,6 @@ const parseTime = (value: string | null | undefined): number | null => {
   const parsed = new Date(value);
   const time = parsed.getTime();
   return Number.isFinite(time) ? time : null;
-};
-
-const toNumeric = (value: unknown): number | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === "string" && value.length > 0) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-  return null;
 };
 
 const convertToCents = (value: number | null, unit: unknown): number | null => {
