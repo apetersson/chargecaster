@@ -19,6 +19,7 @@ import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { parseEvccState } from "../config/schemas";
+import { EnergyPrice, TariffSlot } from "@batteryctl/domain";
 
 const SOC_STEPS = 100;
 const SLOT_DURATION_MS = 3_600_000;
@@ -206,8 +207,8 @@ export class SimulationService {
     if (result.oracle_entries.length) {
       const strategyLog = result.oracle_entries
         .map((entry) => `${(entry.strategy ?? "auto").toUpperCase()}@${entry.era_id}`)
-        .join(", ");
-      this.logger.log(`Era strategies: ${strategyLog}`);
+        .join("\n");
+      this.logger.log(`Era strategies: \n ${strategyLog}`);
     }
     const fallbackPriceEur = slots.length
       ? slots[0].price + gridFee(input.config)
@@ -273,11 +274,19 @@ export class SimulationService {
 
     const firstOracle = result.oracle_entries[0];
     if (firstOracle) {
-      if (typeof firstOracle.grid_power_w === "number" && Number.isFinite(firstOracle.grid_power_w)) {
-        historyEntry.grid_power_w ??= firstOracle.grid_power_w;
-      }
-      if (typeof firstOracle.grid_energy_kwh === "number" && Number.isFinite(firstOracle.grid_energy_kwh)) {
-        historyEntry.grid_energy_wh = firstOracle.grid_energy_kwh * 1000;
+      const firstSlot = slots[0];
+      if (
+        typeof firstOracle.grid_energy_w === "number" &&
+        Number.isFinite(firstOracle.grid_energy_w)
+      ) {
+        const durationHours = firstSlot?.durationHours ?? null;
+        if (durationHours && durationHours > 0) {
+          const derivedPower = firstOracle.grid_energy_w / durationHours;
+          if (Number.isFinite(derivedPower)) {
+            historyEntry.grid_power_w ??= derivedPower;
+          }
+        }
+        historyEntry.grid_energy_w = firstOracle.grid_energy_w;
       }
     }
 
@@ -315,6 +324,34 @@ export class SimulationService {
       ...snapshot,
       history: normalizeHistoryList(historyRecords.map((item) => item.payload)),
     };
+  }
+
+  appendErrorsToLatestSnapshot(messages: string[]): void {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return;
+    }
+    const latest = this.storageRef.getLatestSnapshot();
+    if (!latest) {
+      return;
+    }
+    const updatedPayload: SnapshotPayload = structuredClone(latest.payload);
+    const existing = Array.isArray(updatedPayload.errors) ? [...updatedPayload.errors] : [];
+    let changed = false;
+    for (const rawMessage of messages) {
+      const message = typeof rawMessage === "string" ? rawMessage.trim() : "";
+      if (!message) {
+        continue;
+      }
+      if (!existing.includes(message)) {
+        existing.push(message);
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return;
+    }
+    updatedPayload.errors = existing;
+    this.storageRef.replaceSnapshot(updatedPayload);
   }
 
   private resolveLiveSoc(rawSoc: unknown): number | null {
@@ -370,46 +407,45 @@ function gridFee(cfg: SimulationConfig): number {
 }
 
 function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
-  const slotsByStart = new Map<number, PriceSlot>();
+  const slotsByStart = new Map<number, TariffSlot>();
   for (const entry of raw) {
     if (!entry) continue;
     const startValue = entry.start ?? entry.from;
-    const endValue = entry.end ?? entry.to;
-    const priceValue =
-      normalizePriceValue(entry.price, entry.unit) ?? normalizePriceValue(entry.value, entry.value_unit);
-    if (!startValue || priceValue == null) {
+    if (!startValue) {
       continue;
     }
     const start = parseTimestamp(startValue);
     if (!start) {
       continue;
     }
-    let end = endValue ? parseTimestamp(endValue) : null;
+
+    let end = parseTimestamp(entry.end ?? entry.to);
     if (!end) {
       const durationHours = Number(entry.duration_hours ?? entry.durationHours ?? 1);
       const durationMinutes = Number(entry.duration_minutes ?? entry.durationMinutes ?? 0);
       if (!Number.isNaN(durationHours) && durationHours > 0) {
-        end = new Date(start.getTime() + durationHours * 3600_000);
+        end = new Date(start.getTime() + durationHours * 3_600_000);
       } else if (!Number.isNaN(durationMinutes) && durationMinutes > 0) {
         end = new Date(start.getTime() + durationMinutes * 60_000);
       } else {
-        end = new Date(start.getTime() + 3600_000);
+        end = new Date(start.getTime() + 3_600_000);
       }
     }
     if (end.getTime() <= start.getTime()) {
       continue;
     }
-    const durationHours = (end.getTime() - start.getTime()) / 3600_000;
+
+    const energyPrice =
+      EnergyPrice.tryFromValue(entry.price, entry.unit) ??
+      EnergyPrice.tryFromValue(entry.value, entry.value_unit);
+    if (!energyPrice) {
+      continue;
+    }
+
     const rawEraId = entry.era_id ?? entry.eraId;
     const eraId = typeof rawEraId === "string" && rawEraId.length > 0 ? rawEraId : undefined;
-    const slot: PriceSlot = {
-      start,
-      end,
-      durationHours,
-      price: priceValue,
-      eraId,
-    };
-    const key = start.getTime();
+    const slot = TariffSlot.fromDates(start, end, energyPrice, eraId);
+    const key = slot.start.getTime();
     const existing = slotsByStart.get(key);
     if (!existing || slot.price < existing.price) {
       slotsByStart.set(key, slot);
@@ -470,9 +506,8 @@ function computeSlotCost(gridEnergyKwh: number, importPrice: number, feedInTarif
 }
 
 function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
-  return slots.map((slot) => {
+  return slots.map((slot, index) => {
     const eraId = `${slot.start.getTime()}`;
-    const durationHours = slot.durationHours;
     const priceCt = Number.isFinite(slot.price) ? slot.price * 100 : null;
     const payload: Record<string, unknown> = {};
     if (priceCt !== null) {
@@ -481,12 +516,13 @@ function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
     } else {
       payload.price = slot.price;
     }
-    slot.eraId = eraId;
+    const updatedSlot = slot.withEraId(eraId);
+    slots[index] = updatedSlot;
     return {
       era_id: eraId,
-      start: slot.start.toISOString(),
-      end: slot.end.toISOString(),
-      duration_hours: durationHours,
+      start: updatedSlot.start.toISOString(),
+      end: updatedSlot.end.toISOString(),
+      duration_hours: updatedSlot.durationHours,
       sources: [
         {
           provider: "awattar",
@@ -496,27 +532,6 @@ function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
       ],
     } satisfies ForecastEra;
   });
-}
-
-function normalizePriceValue(value: unknown, unit: unknown): number | null {
-  if (value == null) {
-    return null;
-  }
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return null;
-  }
-  const unitStr = typeof unit === "string" ? unit.toLowerCase() : "";
-  if (!unitStr || unitStr === "eur/kwh" || unitStr === "€/kwh") {
-    return numeric;
-  }
-  if (unitStr === "ct/kwh" || unitStr === "ct/wh" || unitStr === "cent/kwh") {
-    return numeric / 100;
-  }
-  if (unitStr === "eur/mwh" || unitStr === "€/mwh") {
-    return numeric / 1000;
-  }
-  return numeric;
 }
 
 interface SimulationOptions {
@@ -736,8 +751,6 @@ function simulateOptimalSchedule(
       remainingSolar -= solarToBattery;
     }
 
-    const durationForPower = slotDurationHours > 0 ? slotDurationHours : 1;
-    const gridPowerW = durationForPower > 0 ? (gridEnergy / durationForPower) * 1000 : 0;
     const eraId =
       typeof slot.eraId === "string" && slot.eraId.length > 0
         ? slot.eraId
@@ -745,16 +758,13 @@ function simulateOptimalSchedule(
     const strategy: OracleEntry["strategy"] = additionalGridCharge > 0.001 ? "charge" : "auto";
     const startSocPercent = stateIter * percentStep;
     const endSocPercent = nextState * percentStep;
-    const normalizedGridPower = Number.isFinite(gridPowerW) ? gridPowerW : null;
-    const normalizedGridEnergy = Number.isFinite(gridEnergy) ? gridEnergy : null;
+    const normalizedGridEnergyWh = Number.isFinite(gridEnergy) ? gridEnergy * 1000 : null;
     oracleEntries.push({
       era_id: eraId,
       start_soc_percent: Number.isFinite(startSocPercent) ? startSocPercent : null,
       end_soc_percent: Number.isFinite(endSocPercent) ? endSocPercent : null,
       target_soc_percent: Number.isFinite(endSocPercent) ? endSocPercent : null,
-      grid_power_w: normalizedGridPower,
-      grid_energy_kwh: normalizedGridEnergy,
-      grid_energy_w: normalizedGridPower,
+      grid_energy_w: normalizedGridEnergyWh,
       strategy,
     });
 

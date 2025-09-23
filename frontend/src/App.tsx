@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { Duration, Energy, Power } from "@batteryctl/domain";
+
 import HistoryTable from "./components/HistoryTable";
 import MessageList from "./components/MessageList";
 import SummaryCards from "./components/SummaryCards";
@@ -104,14 +106,27 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
     toNumber(record.price_ct_per_kwh);
   const priceEur = toNumber(record.price_eur_per_kwh);
   const gridPowerKw = toNumber(record.grid_power_kw ?? record.gridPowerKw);
-  const gridPower =
+  const rawGridPower =
     toNumber(record.grid_power_w ?? record.gridPowerW ?? record.grid_power ?? record.gridPower ?? record.grid_import_power ?? record.gridImportPower) ??
     (gridPowerKw !== null ? gridPowerKw * 1000 : null);
 
   const gridEnergyKwh = toNumber(record.grid_energy_kwh ?? record.gridEnergyKwh);
-  const gridEnergy =
+  const rawGridEnergyWh =
     toNumber(record.grid_energy_w ?? record.gridEnergyW ?? record.grid_energy_wh ?? record.gridEnergyWh) ??
     (gridEnergyKwh !== null ? gridEnergyKwh * 1000 : null);
+
+  const gridEnergy = rawGridEnergyWh !== null && Number.isFinite(rawGridEnergyWh)
+    ? Energy.fromWattHours(rawGridEnergyWh)
+    : null;
+
+  let gridPower: number | null = null;
+  if (rawGridPower !== null && Number.isFinite(rawGridPower)) {
+    gridPower = Power.fromWatts(rawGridPower).watts;
+  } else if (gridEnergy) {
+    gridPower = gridEnergy.divideByDuration(Duration.fromHours(1)).watts;
+  }
+
+  const gridEnergyWh = gridEnergy ? gridEnergy.wattHours : null;
 
   const solarPowerKw = toNumber(
     record.solar_power_kw ??
@@ -123,7 +138,7 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
     record.pv_kw ??
     record.pvKw,
   );
-  const solarPower =
+  const rawSolarPower =
     toNumber(
       record.solar_power_w ??
       record.solarPowerW ??
@@ -141,7 +156,7 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
     record.pv_energy_kwh ??
     record.pvEnergyKwh,
   );
-  const solarEnergy =
+  const rawSolarEnergyWh =
     toNumber(
       record.solar_energy_wh ??
       record.solarEnergyWh ??
@@ -149,15 +164,28 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
       record.pvEnergyWh,
     ) ?? (solarEnergyKwh !== null ? solarEnergyKwh * 1000 : null);
 
+  const solarEnergy = rawSolarEnergyWh !== null && Number.isFinite(rawSolarEnergyWh)
+    ? Energy.fromWattHours(rawSolarEnergyWh)
+    : null;
+
+  let solarPower: number | null = null;
+  if (rawSolarPower !== null && Number.isFinite(rawSolarPower)) {
+    solarPower = Power.fromWatts(rawSolarPower).watts;
+  } else if (solarEnergy) {
+    solarPower = solarEnergy.divideByDuration(Duration.fromHours(1)).watts;
+  }
+
+  const solarEnergyWh = solarEnergy ? solarEnergy.wattHours : null;
+
   return {
     timestamp: toTimestamp(record.timestamp),
     battery_soc_percent: toNumber(record.battery_soc_percent),
     price_ct_per_kwh: priceCt ?? (priceEur !== null ? priceEur * 100 : null),
     price_eur_per_kwh: priceEur,
     grid_power_w: gridPower,
-    grid_energy_w: gridEnergy,
+    grid_energy_w: gridEnergyWh,
     solar_power_w: solarPower,
-    solar_energy_wh: solarEnergy,
+    solar_energy_wh: solarEnergyWh,
   };
 };
 

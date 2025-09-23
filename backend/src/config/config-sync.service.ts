@@ -11,6 +11,7 @@ import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } f
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "../simulation/solar";
 import type { ConfigDocument } from "./schemas";
 import { parseConfigDocument, parseEvccState, parseMarketForecast } from "./schemas";
+import { EnergyPrice, TimeSlot } from "@batteryctl/domain";
 
 const DEFAULT_CONFIG_FILE = "../config.local.yaml";
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
@@ -42,6 +43,7 @@ interface NormalizedSlot {
   startIso: string | null;
   endIso: string | null;
   durationHours: number | null;
+  timeSlot: TimeSlot | null;
 }
 
 type ForecastCostPayload = MutableRecord & {
@@ -112,7 +114,11 @@ export class ConfigSyncService implements OnModuleDestroy {
       if (dryRun) {
         this.logger.log("Dry run enabled; skipping Fronius optimization apply.");
       } else {
-        await this.froniusService.applyOptimization(rawConfig, snapshot);
+        const froniusResult = await this.froniusService.applyOptimization(rawConfig, snapshot);
+        if (froniusResult?.errorMessage) {
+          this.logger.warn(`Snapshot flagged with error: ${froniusResult.errorMessage}`);
+          this.simulationService.appendErrorsToLatestSnapshot([froniusResult.errorMessage]);
+        }
       }
     } catch (error) {
       this.logger.error(`Config sync failed: ${this.describeError(error)}`);
@@ -613,20 +619,21 @@ export class ConfigSyncService implements OnModuleDestroy {
     };
 
     const sanitizedGridFeeEur = Number.isFinite(gridFeeEurPerKwh) ? Math.max(0, gridFeeEurPerKwh) : 0;
-    const gridFeeCt = sanitizedGridFeeEur * 100;
 
     const applySlotPrice = (
       entry: EraEntry,
       rawPrice: unknown,
       rawUnit: unknown,
     ): { priceCt: number; priceEur: number; totalCt: number; totalEur: number } | null => {
-      const priceCt = this.convertPriceToCents(rawPrice, rawUnit);
-      if (priceCt === null) {
+      const energyPrice = this.parseEnergyPrice(rawPrice, rawUnit);
+      if (!energyPrice) {
         return null;
       }
-      const priceEur = priceCt / 100;
-      const totalCt = priceCt + gridFeeCt;
-      const totalEur = totalCt / 100;
+      const totalPrice = energyPrice.withAdditionalFee(sanitizedGridFeeEur);
+      const priceCt = energyPrice.ctPerKwh;
+      const priceEur = energyPrice.eurPerKwh;
+      const totalCt = totalPrice.ctPerKwh;
+      const totalEur = totalPrice.eurPerKwh;
       entry.slot.payload.price = priceEur;
       entry.slot.payload.unit = "EUR/kWh";
       entry.slot.payload.price_ct_per_kwh = priceCt;
@@ -735,9 +742,13 @@ export class ConfigSyncService implements OnModuleDestroy {
   private normalizeForecastSlot(entry: RawForecastEntry): NormalizedSlot {
     const payload = structuredClone(entry) as MutableRecord;
     const startDate = parseTimestamp(payload.start ?? payload.from);
-    const endDateCandidate = parseTimestamp(payload.end ?? payload.to);
-    const endDate =
-      endDateCandidate ?? (startDate ? new Date(startDate.getTime() + SLOT_DURATION_MS) : null);
+    let endDate = parseTimestamp(payload.end ?? payload.to);
+    if (!endDate && startDate) {
+      endDate = new Date(startDate.getTime() + SLOT_DURATION_MS);
+    }
+    if (startDate && endDate && endDate.getTime() <= startDate.getTime()) {
+      endDate = new Date(startDate.getTime() + SLOT_DURATION_MS);
+    }
     const startIso = startDate ? startDate.toISOString() : null;
     const endIso = endDate ? endDate.toISOString() : null;
     if (startIso) {
@@ -746,8 +757,16 @@ export class ConfigSyncService implements OnModuleDestroy {
     if (endIso) {
       payload.end = endIso;
     }
-    const durationHours =
-      startDate && endDate ? (endDate.getTime() - startDate.getTime()) / 3600_000 : null;
+    let timeSlot: TimeSlot | null = null;
+    if (startDate && endDate) {
+      try {
+        timeSlot = TimeSlot.fromDates(startDate, endDate);
+      } catch (error) {
+        void error;
+        timeSlot = null;
+      }
+    }
+    const durationHours = timeSlot ? timeSlot.duration.hours : null;
 
     return {
       payload,
@@ -756,6 +775,7 @@ export class ConfigSyncService implements OnModuleDestroy {
       startIso,
       endIso,
       durationHours,
+      timeSlot,
     };
   }
 
@@ -906,57 +926,28 @@ export class ConfigSyncService implements OnModuleDestroy {
     return {forecastEntries: trimmedEntries, eras: trimmedEras};
   }
 
-  private convertPriceToCents(value: unknown, unit: unknown): number | null {
+  private parseEnergyPrice(value: unknown, unit: unknown): EnergyPrice | null {
     const numeric = this.toNumber(value);
     if (numeric === null) {
       return null;
     }
-    const unitStr = typeof unit === "string" ? unit.trim().toLowerCase() : "";
-    const by = (factor: number) => {
-      const result = numeric * factor;
-      return Number.isFinite(result) ? result : null;
-    };
-
-    if (!unitStr) {
-      if (Math.abs(numeric) > 10) {
-        return numeric;
+    const unitStrRaw = typeof unit === "string" ? unit.trim() : "";
+    const unitStr = unitStrRaw.toLowerCase();
+    if (unitStr.length) {
+      const parsed = EnergyPrice.tryFromValue(numeric, unitStr);
+      if (parsed) {
+        return parsed;
       }
-      return by(100);
     }
-
-    if (unitStr.includes("ct") && unitStr.includes("/wh")) {
-      return by(1000);
+    if (Math.abs(numeric) > 10) {
+      return EnergyPrice.fromCentsPerKwh(numeric);
     }
+    return EnergyPrice.fromEurPerKwh(numeric);
+  }
 
-    if (unitStr.includes("ct") && unitStr.includes("kwh")) {
-      return numeric;
-    }
-
-    if (unitStr.includes("eur") && unitStr.includes("/mwh")) {
-      return by(0.1);
-    }
-
-    if (unitStr.includes("€/") && unitStr.includes("mwh")) {
-      return by(0.1);
-    }
-
-    if (unitStr.includes("eur") && unitStr.includes("/wh")) {
-      return by(100000);
-    }
-
-    if ((unitStr.includes("eur") || unitStr.includes("€/")) && unitStr.includes("kwh")) {
-      return by(100);
-    }
-
-    if (unitStr.includes("ct")) {
-      return numeric;
-    }
-
-    if (unitStr.includes("eur")) {
-      return by(100);
-    }
-
-    return by(100);
+  private convertPriceToCents(value: unknown, unit: unknown): number | null {
+    const price = this.parseEnergyPrice(value, unit);
+    return price ? price.ctPerKwh : null;
   }
 
   private derivePriceSnapshot(

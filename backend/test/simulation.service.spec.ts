@@ -1,18 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { EnergyPrice, TariffSlot } from "@batteryctl/domain";
+
 import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
 import type { PriceSlot, SimulationConfig } from "../src/simulation/types";
 
 function createSlot(hour: number, price: number): PriceSlot {
   const start = new Date(Date.UTC(2025, 0, 1, hour, 0, 0));
   const end = new Date(Date.UTC(2025, 0, 1, hour + 1, 0, 0));
-  return {
-    start,
-    end,
-    durationHours: 1,
-    price,
-    eraId: `era-${hour}`,
-  };
+  return TariffSlot.fromDates(start, end, EnergyPrice.fromEurPerKwh(price), `era-${hour}`);
 }
 
 const baseConfig: SimulationConfig = {
@@ -62,14 +58,12 @@ describe("simulateOptimalSchedule oracle output", () => {
       expect(first.end_soc_percent).toBeGreaterThan(first.start_soc_percent);
     }
 
-    expect(first.grid_power_w).not.toBeNull();
-    if (first.grid_power_w !== null) {
-      expect(first.grid_power_w).toBeGreaterThan(0);
-    }
-
-    if (first.grid_power_w !== null && first.grid_energy_kwh !== null) {
-      const expectedEnergy = (first.grid_power_w / 1000) * slots[0].durationHours;
-      expect(first.grid_energy_kwh).toBeCloseTo(expectedEnergy, 6);
+    expect(first.grid_energy_w).not.toBeNull();
+    if (first.grid_energy_w !== null) {
+      expect(first.grid_energy_w).toBeGreaterThan(0);
+      const durationHours = slots[0].durationHours;
+      const derivedPower = first.grid_energy_w / durationHours;
+      expect(derivedPower).toBeGreaterThan(0);
     }
 
     if (result.next_step_soc_percent !== null && first.end_soc_percent !== null) {
@@ -109,9 +103,11 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(result.oracle_entries).toHaveLength(2);
     const first = result.oracle_entries[0];
     expect(first.strategy).toBe("auto");
-    expect(first.grid_power_w).not.toBeNull();
-    if (first.grid_power_w !== null) {
-      expect(first.grid_power_w).toBeLessThanOrEqual(0);
+    expect(first.grid_energy_w).not.toBeNull();
+    if (first.grid_energy_w !== null) {
+      const durationHours = slots[0].durationHours;
+      const derivedPower = first.grid_energy_w / durationHours;
+      expect(derivedPower).toBeLessThanOrEqual(0);
     }
 
     if (result.next_step_soc_percent !== null && first.end_soc_percent !== null) {

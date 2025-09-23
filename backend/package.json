@@ -12,6 +12,7 @@
     "test:e2e": "vitest run test/e2e"
   },
   "dependencies": {
+    "@batteryctl/domain": "file:../packages/domain",
     "@fastify/cors": "^10.0.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
