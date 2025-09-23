@@ -5,7 +5,7 @@ type HistoryTableProps = {
   history: HistoryPoint[];
 };
 
-const HistoryTable = ({ history }: HistoryTableProps) => {
+const HistoryTable = ({history}: HistoryTableProps) => {
   if (!history.length) {
     return null;
   }
@@ -20,34 +20,34 @@ const HistoryTable = ({ history }: HistoryTableProps) => {
       <div className="table-wrapper">
         <table>
           <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Battery SOC %</th>
-              <th>Price (ct/kWh)</th>
-              <th>Solar Production</th>
-            </tr>
+          <tr>
+            <th>Timestamp</th>
+            <th>Battery SOC %</th>
+            <th>Price (ct/kWh)</th>
+            <th>Solar Production</th>
+          </tr>
           </thead>
           <tbody>
-            {rows.map((item, idx) => (
-              <tr key={`${item.timestamp}-${idx}`}>
-                <td>{formatDate(item.timestamp)}</td>
-                <td>{formatPercent(item.battery_soc_percent ?? null)}</td>
-                <td>{
-                  typeof item.price_ct_per_kwh === "number"
-                    ? formatNumber(item.price_ct_per_kwh, " ct/kWh")
-                    : typeof item.price_eur_per_kwh === "number"
-                      ? formatNumber(item.price_eur_per_kwh * 100, " ct/kWh")
-                      : "n/a"
-                }</td>
-                <td>{
-                  typeof item.solar_power_w === "number"
-                    ? formatNumber(item.solar_power_w, " W")
-                    : typeof item.solar_energy_wh === "number"
-                      ? formatNumber(item.solar_energy_wh, " Wh")
-                      : "n/a"
-                }</td>
-              </tr>
-            ))}
+          {rows.map((item, idx) => (
+            <tr key={`${item.timestamp}-${idx}`}>
+              <td>{formatDate(item.timestamp)}</td>
+              <td>{formatPercent(item.battery_soc_percent ?? null)}</td>
+              <td>{
+                typeof item.price_ct_per_kwh === "number"
+                  ? formatNumber(item.price_ct_per_kwh, " ct/kWh")
+                  : typeof item.price_eur_per_kwh === "number"
+                    ? formatNumber(item.price_eur_per_kwh * 100, " ct/kWh")
+                    : "n/a"
+              }</td>
+              <td>{
+                typeof item.solar_power_w === "number"
+                  ? formatNumber(item.solar_power_w, " W")
+                  : typeof item.solar_energy_wh === "number"
+                    ? formatNumber(item.solar_energy_wh, " Wh")
+                    : "n/a"
+              }</td>
+            </tr>
+          ))}
           </tbody>
         </table>
       </div>

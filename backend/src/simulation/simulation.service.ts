@@ -1,11 +1,10 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-
-import type { JsonObject } from "../common/json.ts";
 import type {
   ForecastEra,
   ForecastResponse,
+  HistoryPoint,
   HistoryResponse,
   OracleEntry,
   OracleResponse,
@@ -15,9 +14,11 @@ import type {
   SimulationConfig,
   SnapshotPayload,
   SnapshotSummary,
-} from "./types.ts";
-import { normalizeHistoryList } from "./history.serializer.ts";
-import { StorageService } from "../storage/storage.service.ts";
+} from "./types";
+import { normalizeHistoryList } from "./history.serializer";
+import { StorageService } from "../storage/storage.service";
+import { buildSolarForecastFromTimeseries } from "./solar";
+import { parseEvccState } from "../config/schemas";
 
 const SOC_STEPS = 100;
 const SLOT_DURATION_MS = 3_600_000;
@@ -49,60 +50,13 @@ export class SimulationService {
     if (!record) {
       return null;
     }
-    const payload = record.payload as unknown as SnapshotPayload;
-    const oracleEntries = Array.isArray(payload.oracle_entries) ? payload.oracle_entries : [];
-    payload.oracle_entries = oracleEntries;
+    const payload = record.payload;
     const historyRecords = this.storageRef.listHistory();
     const history = normalizeHistoryList(historyRecords.map((item) => item.payload));
     return {
       ...payload,
       history,
     };
-  }
-
-  private resolveLiveSoc(rawSoc: unknown): number | null {
-    const numeric = this.normalizeSoc(rawSoc);
-    if (numeric !== null) {
-      return numeric;
-    }
-    const previous = this.storageRef.getLatestSnapshot();
-    if (!previous) {
-      return null;
-    }
-    const payload = previous.payload as Partial<SnapshotPayload> | undefined;
-    if (!payload) {
-      return null;
-    }
-    const candidates = [
-      payload.current_soc_percent,
-      payload.next_step_soc_percent,
-      payload.recommended_soc_percent,
-      payload.recommended_final_soc_percent,
-    ];
-    for (const candidate of candidates) {
-      const value = this.normalizeSoc(candidate);
-      if (value !== null) {
-        this.logger.warn(`Live SOC missing from inputs; falling back to last snapshot (${value}%)`);
-        return value;
-      }
-    }
-    return null;
-  }
-
-  private normalizeSoc(value: unknown): number | null {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      if (value >= 0 && value <= 100) {
-        return value;
-      }
-      return Math.min(100, Math.max(0, value));
-    }
-    if (typeof value === "string" && value.trim().length > 0) {
-      const numeric = Number(value);
-      if (Number.isFinite(numeric)) {
-        return Math.min(100, Math.max(0, numeric));
-      }
-    }
-    return null;
   }
 
   ensureSeedFromFixture(): SnapshotPayload {
@@ -115,8 +69,15 @@ export class SimulationService {
     }
 
     const fixturePath = join(process.cwd(), "fixtures", "sample_data.json");
-    const raw = JSON.parse(readFileSync(fixturePath, "utf-8")) as JsonObject;
-    const tariffGrid = Number((raw as { tariffGrid?: unknown }).tariffGrid ?? 0.02);
+    const raw = JSON.parse(readFileSync(fixturePath, "utf-8")) as unknown;
+    let parsedState: ReturnType<typeof parseEvccState> | null = null;
+    try {
+      parsedState = parseEvccState(raw);
+    } catch (error) {
+      this.logger.warn(`Failed to parse fixture state: ${String(error)}`);
+    }
+
+    const tariffGrid = parsedState?.priceSnapshot ?? 0.02;
 
     const config: SimulationConfig = {
       battery: {
@@ -137,15 +98,12 @@ export class SimulationService {
       solar: {
         direct_use_ratio: 0.6,
       },
-      state: {
-        path: "./state/state.csv",
-      },
     };
 
-    const forecast = extractForecastFromState(raw);
-    const solarForecast = extractSolarForecastFromState(raw);
+    const forecast = parsedState?.forecast ?? [];
+    const solarForecast = buildSolarForecastFromTimeseries(parsedState?.solarTimeseries ?? []);
     const liveState = {
-      battery_soc: Number((raw as { batterySoc?: unknown }).batterySoc ?? 40),
+      battery_soc: parsedState?.batterySoc ?? 40,
     };
     return this.runSimulation({config, liveState, forecast, solarForecast});
   }
@@ -209,7 +167,7 @@ export class SimulationService {
       throw new Error("Storage service not initialised");
     }
     const resolvedSoc = this.resolveLiveSoc(input.liveState?.battery_soc);
-    const liveState = { battery_soc: resolvedSoc };
+    const liveState = {battery_soc: resolvedSoc};
     const slots = normalizePriceSlots(input.forecast);
     const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
     const solarMap = new Map<number, number>();
@@ -280,8 +238,8 @@ export class SimulationService {
       price_snapshot_ct_per_kwh: priceSnapshotCt,
       price_snapshot_eur_per_kwh: priceSnapshotEur,
       projected_cost_eur: result.projected_cost_eur,
-     baseline_cost_eur: result.baseline_cost_eur,
-     basic_battery_cost_eur: autoResult.projected_cost_eur,
+      baseline_cost_eur: result.baseline_cost_eur,
+      basic_battery_cost_eur: autoResult.projected_cost_eur,
       projected_savings_eur: result.projected_savings_eur,
       active_control_savings_eur: autoResult.projected_cost_eur !== null && result.projected_cost_eur !== null
         ? autoResult.projected_cost_eur - result.projected_cost_eur
@@ -296,12 +254,16 @@ export class SimulationService {
       errors,
     };
 
-    this.storageRef.replaceSnapshot(JSON.parse(JSON.stringify(snapshot)) as JsonObject);
-    const historyEntry: JsonObject = {
+    this.storageRef.replaceSnapshot(structuredClone(snapshot));
+    const historyEntry: HistoryPoint = {
       timestamp: result.timestamp,
       battery_soc_percent: result.initial_soc_percent,
       price_eur_per_kwh: priceSnapshotEur,
       price_ct_per_kwh: priceSnapshotCt,
+      grid_power_w: null,
+      grid_energy_w: null,
+      solar_power_w: null,
+      solar_energy_wh: null,
     };
 
     const observedGridPower = input.observations?.gridPowerW;
@@ -312,9 +274,7 @@ export class SimulationService {
     const firstOracle = result.oracle_entries[0];
     if (firstOracle) {
       if (typeof firstOracle.grid_power_w === "number" && Number.isFinite(firstOracle.grid_power_w)) {
-        if (!("grid_power_w" in historyEntry)) {
-          historyEntry.grid_power_w = firstOracle.grid_power_w;
-        }
+        historyEntry.grid_power_w ??= firstOracle.grid_power_w;
       }
       if (typeof firstOracle.grid_energy_kwh === "number" && Number.isFinite(firstOracle.grid_energy_kwh)) {
         historyEntry.grid_energy_wh = firstOracle.grid_energy_kwh * 1000;
@@ -332,17 +292,18 @@ export class SimulationService {
           historyEntry.solar_power_w = (firstSolarKwh / durationHours) * 1000;
         }
       } else if (firstSolarKwh === 0) {
-        if (!("solar_energy_wh" in historyEntry)) {
-          historyEntry.solar_energy_wh = 0;
-        }
-        if (!("solar_power_w" in historyEntry)) {
-          historyEntry.solar_power_w = 0;
-        }
+        historyEntry.solar_energy_wh = historyEntry.solar_energy_wh ?? 0;
+        historyEntry.solar_power_w = historyEntry.solar_power_w ?? 0;
       }
     }
     if (typeof observedSolarPower === "number" && Number.isFinite(observedSolarPower)) {
       historyEntry.solar_power_w = observedSolarPower;
-      if (!("solar_energy_wh" in historyEntry) && typeof firstSolarKwh === "number" && Number.isFinite(firstSolarKwh) && firstSolarKwh === 0) {
+      if (
+        historyEntry.solar_energy_wh === null &&
+        typeof firstSolarKwh === "number" &&
+        Number.isFinite(firstSolarKwh) &&
+        firstSolarKwh === 0
+      ) {
         historyEntry.solar_energy_wh = 0;
       }
     }
@@ -355,11 +316,56 @@ export class SimulationService {
       history: normalizeHistoryList(historyRecords.map((item) => item.payload)),
     };
   }
+
+  private resolveLiveSoc(rawSoc: unknown): number | null {
+    const numeric = this.normalizeSoc(rawSoc);
+    if (numeric !== null) {
+      return numeric;
+    }
+    const previous = this.storageRef.getLatestSnapshot();
+    if (!previous) {
+      return null;
+    }
+    const payload = previous.payload as Partial<SnapshotPayload> | undefined;
+    if (!payload) {
+      return null;
+    }
+    const candidates = [
+      payload.current_soc_percent,
+      payload.next_step_soc_percent,
+      payload.recommended_soc_percent,
+      payload.recommended_final_soc_percent,
+    ];
+    for (const candidate of candidates) {
+      const value = this.normalizeSoc(candidate);
+      if (value !== null) {
+        this.logger.warn(`Live SOC missing from inputs; falling back to last snapshot (${value}%)`);
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private normalizeSoc(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value >= 0 && value <= 100) {
+        return value;
+      }
+      return Math.min(100, Math.max(0, value));
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        return Math.min(100, Math.max(0, numeric));
+      }
+    }
+    return null;
+  }
 }
 
 function gridFee(cfg: SimulationConfig): number {
   const priceCfg = cfg.price ?? {};
-  const value = priceCfg.grid_fee_eur_per_kwh ?? priceCfg.network_tariff_eur_per_kwh ?? 0;
+  const value = priceCfg.grid_fee_eur_per_kwh ?? 0;
   return Number(value) || 0;
 }
 
@@ -468,7 +474,7 @@ function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
     const eraId = `${slot.start.getTime()}`;
     const durationHours = slot.durationHours;
     const priceCt = Number.isFinite(slot.price) ? slot.price * 100 : null;
-    const payload: JsonObject = {};
+    const payload: Record<string, unknown> = {};
     if (priceCt !== null) {
       payload.price_ct_per_kwh = priceCt;
       payload.unit = "ct/kWh";
@@ -569,8 +575,8 @@ function simulateOptimalSchedule(
     throw new Error("battery.capacity_kwh must be > 0");
   }
   const maxChargePowerW = Number(cfg.battery?.max_charge_power_w ?? 0);
-  const maxSolarChargePowerW = cfg.solar?.max_charge_power_w != null
-    ? Math.max(0, Number(cfg.solar.max_charge_power_w))
+  const maxSolarChargePowerW = cfg.battery?.max_charge_power_solar_w != null
+    ? Math.max(0, Number(cfg.battery.max_charge_power_solar_w))
     : null;
   const networkTariff = gridFee(cfg);
   const solarGenerationPerSlot = options.solarGenerationKwhPerSlot ?? [];
@@ -804,121 +810,24 @@ function simulateOptimalSchedule(
   };
 }
 
-function extractForecastFromState(state: JsonObject): RawForecastEntry[] {
-  const forecast = (state as { forecast?: unknown }).forecast;
-  if (!forecast) return [];
-  const sequences: unknown[] = [];
-  if (Array.isArray(forecast)) {
-    sequences.push(forecast);
-  } else if (typeof forecast === "object" && forecast !== null) {
-    for (const value of Object.values(forecast)) {
-      if (Array.isArray(value)) {
-        sequences.push(value);
-      }
-    }
-  }
-  const entries: RawForecastEntry[] = [];
-  for (const seq of sequences) {
-    if (!Array.isArray(seq)) continue;
-    for (const entry of seq) {
-      if (typeof entry !== "object" || entry === null) continue;
-      const record = entry as RawForecastEntry;
-      const start = record.start ?? record.from;
-      const end = record.end ?? record.to;
-      const price = record.value ?? record.price;
-      if (start && price != null) {
-        entries.push({ start, end, price } as RawForecastEntry);
-      }
-    }
-  }
-  return entries;
-}
-
-function extractSolarForecastFromState(state: JsonObject): RawSolarEntry[] {
-  const asRecord = (value: unknown): JsonObject | null =>
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as JsonObject)
-      : null;
-
-  const forecastRecord = asRecord((state as { forecast?: unknown }).forecast);
-  if (!forecastRecord) {
+function extractForecastFromState(state: unknown): RawForecastEntry[] {
+  try {
+    const parsed = parseEvccState(state);
+    return parsed.forecast;
+  } catch (error) {
+    void error;
     return [];
   }
-
-  const solarRecord = asRecord(forecastRecord.solar);
-  const timeseries = Array.isArray(solarRecord?.timeseries)
-    ? (solarRecord?.timeseries as unknown[])
-    : [];
-
-  const entries: RawSolarEntry[] = [];
-  for (let index = 0; index < timeseries.length; index += 1) {
-    const item = asRecord(timeseries[index]);
-    if (!item) {
-      continue;
-    }
-
-    const start = parseTimestamp((item.ts ?? item.start ?? item.from) ?? null);
-    if (!start) {
-      continue;
-    }
-
-    const next = index + 1 < timeseries.length ? asRecord(timeseries[index + 1]) : null;
-    const end =
-      parseTimestamp((next?.ts ?? next?.end ?? next?.to) ?? null) ??
-      new Date(start.getTime() + SLOT_DURATION_MS);
-
-    const durationMs = end.getTime() - start.getTime();
-    if (!(durationMs > 0)) {
-      continue;
-    }
-
-    let energyKwh = resolveNumeric(item.energy_kwh);
-    if (energyKwh === null) {
-      const energyWh = resolveNumeric(item.energy_wh);
-      if (energyWh !== null) {
-        energyKwh = energyWh / 1000;
-      }
-    }
-
-    if (energyKwh === null) {
-      const rawPower = resolveNumeric(item.value ?? item.val);
-      if (rawPower !== null) {
-        let powerKw = rawPower / 1000;
-        if (!Number.isFinite(powerKw)) {
-          powerKw = 0;
-        }
-        const durationHours = durationMs / SLOT_DURATION_MS;
-        energyKwh = powerKw * durationHours;
-      }
-    }
-
-    if (energyKwh === null || !Number.isFinite(energyKwh) || energyKwh <= 0) {
-      continue;
-    }
-
-    entries.push({
-      start: start.toISOString(),
-      end: end.toISOString(),
-      energy_kwh: energyKwh,
-    } as RawSolarEntry);
-  }
-
-  return entries;
 }
 
-function resolveNumeric(value: unknown): number | null {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
+function extractSolarForecastFromState(state: unknown): RawSolarEntry[] {
+  try {
+    const parsed = parseEvccState(state);
+    return buildSolarForecastFromTimeseries(parsed.solarTimeseries);
+  } catch (error) {
+    void error;
+    return [];
   }
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return null;
-    }
-    const numeric = Number(trimmed);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-  return null;
 }
 
 export {

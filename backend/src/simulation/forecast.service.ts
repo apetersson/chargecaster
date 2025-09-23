@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import type { ForecastEra, ForecastResponse, PriceSlot, RawForecastEntry } from "./types.ts";
-import { normalizePriceSlots } from "./simulation.service.ts";
+import type { ForecastEra, ForecastResponse, PriceSlot, RawForecastEntry } from "./types";
+import { normalizePriceSlots } from "./simulation.service";
 
 @Injectable()
 export class ForecastService {
@@ -9,6 +9,6 @@ export class ForecastService {
   }
 
   buildResponse(timestamp: string, eras: ForecastEra[] | undefined | null): ForecastResponse {
-    return { generated_at: timestamp, eras: Array.isArray(eras) ? eras : [] };
+    return {generated_at: timestamp, eras: Array.isArray(eras) ? eras : []};
   }
 }

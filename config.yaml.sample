@@ -1,3 +1,5 @@
+dry_run: true
+
 fronius:
   host: "http://192.168.0.15"
   user: "technician"
@@ -22,9 +24,6 @@ logic:
   min_hold_minutes: 20     # debounce between flips
   interval_seconds: 300    # controller loop sleep
   house_load_w: 1200       # assumed constant load for simulation
-
-state:
-  path: "/data/state.csv"
 
 logging:
   level: "INFO"            # DEBUG, INFO, WARNING

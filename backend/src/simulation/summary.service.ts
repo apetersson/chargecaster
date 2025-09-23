@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { SnapshotPayload, SnapshotSummary } from "./types.ts";
+import type { SnapshotPayload, SnapshotSummary } from "./types";
 
 @Injectable()
 export class SummaryService {
@@ -12,7 +12,7 @@ export class SummaryService {
       next_step_soc_percent: snapshot.next_step_soc_percent,
       recommended_soc_percent: snapshot.recommended_soc_percent,
       recommended_final_soc_percent: snapshot.recommended_final_soc_percent,
-      current_mode: snapshot.current_mode ?? null,
+      current_mode: snapshot.current_mode ?? undefined,
       price_snapshot_ct_per_kwh: snapshot.price_snapshot_ct_per_kwh ??
         (typeof snapshot.price_snapshot_eur_per_kwh === "number"
           ? snapshot.price_snapshot_eur_per_kwh * 100

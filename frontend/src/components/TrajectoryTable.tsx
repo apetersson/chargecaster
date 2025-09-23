@@ -68,7 +68,6 @@ const resolveCost = (era: ForecastEra, provider: string) => {
     (source) =>
       source &&
       source.type === "cost" &&
-      typeof source.provider === "string" &&
       source.provider.toLowerCase() === provider,
   );
   if (!match) {
@@ -77,11 +76,11 @@ const resolveCost = (era: ForecastEra, provider: string) => {
   const payload = match.payload ?? {};
   const centsWithFee = toNumeric((payload as { price_with_fee_ct_per_kwh?: unknown }).price_with_fee_ct_per_kwh);
   if (centsWithFee !== null) {
-    return { priceCt: centsWithFee };
+    return {priceCt: centsWithFee};
   }
   const existingCents = toNumeric((payload as { price_ct_per_kwh?: unknown }).price_ct_per_kwh);
   if (existingCents !== null) {
-    return { priceCt: existingCents };
+    return {priceCt: existingCents};
   }
   const raw =
     toNumeric((payload as { price?: unknown }).price) ??
@@ -91,13 +90,13 @@ const resolveCost = (era: ForecastEra, provider: string) => {
     (payload as { price_unit?: unknown }).price_unit ??
     (payload as { value_unit?: unknown }).value_unit;
   const priceCt = convertToCents(raw, unit);
-  return { priceCt };
+  return {priceCt};
 };
 
 const resolveSolar = (era: ForecastEra) => {
   const match = era.sources.find((source) => source.type === "solar");
   if (!match) {
-    return { energyKwh: null, averageW: null };
+    return {energyKwh: null, averageW: null};
   }
   const payload = match.payload ?? {};
   let energyKwh = toNumeric((payload as { energy_kwh?: unknown }).energy_kwh);
@@ -123,15 +122,15 @@ const resolveSolar = (era: ForecastEra) => {
       toNumeric((payload as { value?: unknown }).value) ??
       toNumeric((payload as { power?: unknown }).power);
   }
-  return { energyKwh, averageW };
+  return {energyKwh, averageW};
 };
 
-const TrajectoryTable = ({ forecast, oracleEntries }: TrajectoryTableProps) => {
+const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
   const now = Date.now();
   const oracleMap = useMemo(() => {
     const map = new Map<string, OracleEntry>();
     oracleEntries.forEach((entry) => {
-      if (entry && typeof entry.era_id === "string") {
+      if (entry) {
         map.set(entry.era_id, entry);
       }
     });
@@ -170,44 +169,44 @@ const TrajectoryTable = ({ forecast, oracleEntries }: TrajectoryTableProps) => {
       <div className="table-wrapper">
         <table>
           <thead>
-            <tr>
-              <th>Start</th>
-              <th>End</th>
-              <th>Market Price</th>
-              <th>Solar (W)</th>
-              <th>End SOC %</th>
-              <th>Grid Power (W)</th>
-            </tr>
+          <tr>
+            <th>Start</th>
+            <th>End</th>
+            <th>Market Price</th>
+            <th>Solar (W)</th>
+            <th>End SOC %</th>
+            <th>Grid Power (W)</th>
+          </tr>
           </thead>
           <tbody>
-            {rows.map((era) => {
-              const marketCost = resolveCost(era, "awattar");
-              const solar = resolveSolar(era);
-              const oracle = oracleMap.get(era.era_id);
-              const solarLabel =
-                solar.averageW !== null
-                  ? formatNumber(solar.averageW, " W")
-                  : solar.energyKwh !== null
-                    ? formatNumber(solar.energyKwh, " kWh")
-                    : "n/a";
-              const strategy = oracle?.strategy ?? "auto";
-              const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);
-              const targetLabel = oracle ? `${endSocValue} (${strategy.toUpperCase()})` : "n/a";
-              const gridPowerValue = oracle?.grid_power_w;
-              const gridPower = typeof gridPowerValue === "number" && Number.isFinite(gridPowerValue)
-                ? formatNumber(gridPowerValue, " W")
-                : "n/a";
-              return (
-                <tr key={era.era_id}>
-                  <td>{formatDate(era.start)}</td>
-                  <td>{era.end ? timeFormatter.format(new Date(era.end)) : "n/a"}</td>
-                  <td>{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
-                  <td>{solarLabel}</td>
-                  <td>{targetLabel}</td>
-                  <td>{gridPower}</td>
-                </tr>
-              );
-            })}
+          {rows.map((era) => {
+            const marketCost = resolveCost(era, "awattar");
+            const solar = resolveSolar(era);
+            const oracle = oracleMap.get(era.era_id);
+            const solarLabel =
+              solar.averageW !== null
+                ? formatNumber(solar.averageW, " W")
+                : solar.energyKwh !== null
+                  ? formatNumber(solar.energyKwh, " kWh")
+                  : "n/a";
+            const strategy = oracle?.strategy ?? "auto";
+            const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);
+            const targetLabel = oracle ? `${endSocValue} (${strategy.toUpperCase()})` : "n/a";
+            const gridPowerValue = oracle?.grid_power_w;
+            const gridPower = typeof gridPowerValue === "number" && Number.isFinite(gridPowerValue)
+              ? formatNumber(gridPowerValue, " W")
+              : "n/a";
+            return (
+              <tr key={era.era_id}>
+                <td>{formatDate(era.start)}</td>
+                <td>{era.end ? timeFormatter.format(new Date(era.end)) : "n/a"}</td>
+                <td>{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
+                <td>{solarLabel}</td>
+                <td>{targetLabel}</td>
+                <td>{gridPower}</td>
+              </tr>
+            );
+          })}
           </tbody>
         </table>
       </div>

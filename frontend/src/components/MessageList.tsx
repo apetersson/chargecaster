@@ -3,7 +3,7 @@ type MessageListProps = {
   tone: "error" | "warning";
 };
 
-const MessageList = ({ items, tone }: MessageListProps) => {
+const MessageList = ({items, tone}: MessageListProps) => {
   if (!items || items.length === 0) {
     return null;
   }

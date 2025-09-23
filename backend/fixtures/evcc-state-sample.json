@@ -1,0 +1,46 @@
+{
+  "site": {
+    "batterySoc": 84.5,
+    "gridPower": -320.1,
+    "pvPower": 450.0,
+    "solarPower": 460.5,
+    "tariffGrid": 0.32,
+    "tariffPriceLoadpoints": 0.31,
+    "tariffPriceHome": 0.30,
+    "gridPrice": 0.29
+  },
+  "battery": [
+    {
+      "soc": 84.5,
+      "power": -504.37,
+      "capacity": 0,
+      "controllable": false
+    }
+  ],
+  "forecast": {
+    "grid": [
+      {
+        "start": "2025-09-23T00:00:00Z",
+        "end": "2025-09-23T00:15:00Z",
+        "price": 0.25
+      },
+      {
+        "start": "2025-09-23T00:15:00Z",
+        "end": "2025-09-23T00:30:00Z",
+        "price": 0.27
+      }
+    ],
+    "solar": {
+      "timeseries": [
+        {
+          "ts": "2025-09-23T00:00:00Z",
+          "energy_kwh": 0.12
+        },
+        {
+          "ts": "2025-09-23T00:15:00Z",
+          "energy_kwh": 0.15
+        }
+      ]
+    }
+  }
+}

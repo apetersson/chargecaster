@@ -5,32 +5,27 @@ import {
   BarController,
   BarElement,
   Chart,
-  Filler,
-  Legend,
-  LineController,
-  LineElement,
-  LinearScale,
-  PointElement,
-  ScatterController,
-  TimeScale,
-  Tooltip,
   type ChartDataset,
   type ChartOptions,
+  Filler,
+  Legend,
   type LegendItem,
+  LinearScale,
+  LineController,
+  LineElement,
   type Plugin,
+  PointElement,
+  ScatterController,
   type ScatterDataPoint,
   type ScriptableContext,
   type ScriptableLineSegmentContext,
+  TimeScale,
+  Tooltip,
 } from "chart.js";
 import "chartjs-adapter-date-fns";
 
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../types";
-import {
-  dateTimeFormatter,
-  numberFormatter,
-  percentFormatter,
-  timeFormatter,
-} from "../utils/format";
+import { dateTimeFormatter, numberFormatter, percentFormatter, timeFormatter, } from "../utils/format";
 
 Chart.register(
   BarController,
@@ -81,9 +76,9 @@ const PRICE_HISTORY_BAR_BG = "rgba(148, 163, 184, 0.3)";
 const PRICE_HISTORY_BAR_BORDER = "rgba(100, 116, 139, 1)";
 const DEFAULT_SLOT_DURATION_MS = 3_600_000;
 
-const DEFAULT_SOC_BOUNDS = { min: 0, max: 100 };
-const DEFAULT_POWER_BOUNDS = { min: -5000, max: 15000 };
-const DEFAULT_PRICE_BOUNDS = { min: 0, max: 50 };
+const DEFAULT_SOC_BOUNDS = {min: 0, max: 100};
+const DEFAULT_POWER_BOUNDS = {min: -5000, max: 15000};
+const DEFAULT_PRICE_BOUNDS = {min: 0, max: 50};
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -110,7 +105,7 @@ const toHistoryPoint = (
     return null;
   }
 
-  return { x: time, y: value, source: "history" };
+  return {x: time, y: value, source: "history"};
 };
 
 const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
@@ -303,7 +298,7 @@ const buildCombinedSeries = (
 
   const combined: ProjectionPoint[] = [...past];
   const gapTime = future[0].x;
-  combined.push({ x: gapTime, y: Number.NaN, source: "gap" });
+  combined.push({x: gapTime, y: Number.NaN, source: "gap"});
   combined.push(...future);
   return combined;
 };
@@ -323,7 +318,7 @@ const findTimeRange = (
       max = max === null ? value : Math.max(max, value);
     }
   }
-  return { min, max };
+  return {min, max};
 };
 
 const computeBounds = (
@@ -343,7 +338,7 @@ const computeBounds = (
   }
 
   if (dataMin === null || dataMax === null) {
-    return { ...fallback, dataMin: null, dataMax: null };
+    return {...fallback, dataMin: null, dataMax: null};
   }
 
   let min = dataMin;
@@ -366,7 +361,7 @@ const computeBounds = (
     max = dataMax;
   }
 
-  return { min, max, dataMin, dataMax };
+  return {min, max, dataMin, dataMax};
 };
 
 const includeZeroInBounds = (bounds: AxisBounds): AxisBounds => {
@@ -375,7 +370,7 @@ const includeZeroInBounds = (bounds: AxisBounds): AxisBounds => {
   if (min === bounds.min && max === bounds.max) {
     return bounds;
   }
-  return { ...bounds, min, max };
+  return {...bounds, min, max};
 };
 
 const resolveInitialSoc = (
@@ -425,10 +420,10 @@ const buildSocSeries = (
   let currentSoc = resolveInitialSoc(summary, historyPoints);
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    addPoint(futurePoints, { x: era.startMs, y: currentSoc, source: "forecast" });
+    addPoint(futurePoints, {x: era.startMs, y: currentSoc, source: "forecast"});
     const targetSoc = era.oracle?.end_soc_percent ?? era.oracle?.target_soc_percent ?? null;
     const endSoc = isFiniteNumber(targetSoc) ? targetSoc : currentSoc;
-    addPoint(futurePoints, { x: era.endMs, y: endSoc, source: "forecast" });
+    addPoint(futurePoints, {x: era.endMs, y: endSoc, source: "forecast"});
     currentSoc = endSoc;
   }
 
@@ -444,7 +439,7 @@ const buildSocSeries = (
     };
   } else if (historyPoints.length) {
     const anchor = historyPoints[historyPoints.length - 1];
-    currentMarker = { ...anchor, isCurrentMarker: true };
+    currentMarker = {...anchor, isCurrentMarker: true};
   } else if (summary && isFiniteNumber(summary.current_soc_percent)) {
     const timestamp = parseTimestamp(summary.timestamp) ?? Date.now();
     currentMarker = {
@@ -455,7 +450,7 @@ const buildSocSeries = (
     };
   }
 
-  return { series: combined, currentMarker };
+  return {series: combined, currentMarker};
 };
 
 const buildGridSeries = (
@@ -473,7 +468,7 @@ const buildGridSeries = (
       continue;
     }
     const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
-    futurePoints.push({ x: midpoint, y: power, source: "forecast" });
+    futurePoints.push({x: midpoint, y: power, source: "forecast"});
   }
 
   return [...historyPoints, ...futurePoints];
@@ -500,7 +495,7 @@ const buildSolarSeries = (
       continue;
     }
     const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
-    futurePoints.push({ x: midpoint, y: era.solarAverageW, source: "forecast" });
+    futurePoints.push({x: midpoint, y: era.solarAverageW, source: "forecast"});
   }
 
   return [...historyPoints, ...futurePoints];
@@ -635,9 +630,9 @@ const resolveSegmentBackground = (
 const isProjectionPoint = (value: unknown): value is ProjectionPoint =>
   Boolean(
     value &&
-      typeof value === "object" &&
-      "x" in value &&
-      "source" in value,
+    typeof value === "object" &&
+    "x" in value &&
+    "source" in value,
   );
 
 const resolveBarColors = (
@@ -725,7 +720,7 @@ const buildDatasets = (
   legendGroups: LegendGroup[];
 } => {
   const futureEras = buildFutureEras(forecast, oracleEntries);
-  const { series: socSeries, currentMarker } = buildSocSeries(history, futureEras, summary);
+  const {series: socSeries, currentMarker} = buildSocSeries(history, futureEras, summary);
   const gridSeries = buildGridSeries(history, futureEras);
   const solarSeries = buildSolarSeries(history, futureEras);
   const priceSeries = buildPriceSeries(history, futureEras);
@@ -792,13 +787,13 @@ const buildDatasets = (
     {
       type: "line",
       label: GRID_MARKERS_LABEL,
-      data: gridSeries.map((point) => ({ ...point })),
+      data: gridSeries.map((point) => ({...point})),
       yAxisID: "power",
       showLine: false,
-      pointRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 5 : 3),
-      pointHoverRadius: ({ raw }) => (isProjectionPoint(raw) && raw.source === "forecast" ? 7 : 5),
-      pointBackgroundColor: ({ raw }) => resolveBarColors(raw, GRID_BORDER, HISTORY_POINT),
-      pointBorderColor: ({ raw }) => resolveBarColors(raw, GRID_BORDER, HISTORY_BORDER),
+      pointRadius: ({raw}) => (isProjectionPoint(raw) && raw.source === "forecast" ? 5 : 3),
+      pointHoverRadius: ({raw}) => (isProjectionPoint(raw) && raw.source === "forecast" ? 7 : 5),
+      pointBackgroundColor: ({raw}) => resolveBarColors(raw, GRID_BORDER, HISTORY_POINT),
+      pointBorderColor: ({raw}) => resolveBarColors(raw, GRID_BORDER, HISTORY_BORDER),
     },
     {
       type: "line",
@@ -819,9 +814,9 @@ const buildDatasets = (
         backgroundColor: (ctx) => resolveSegmentBackground(ctx, PRICE_FILL),
       },
       borderColor: PRICE_BORDER,
-      pointHoverBackgroundColor: ({ raw }) =>
+      pointHoverBackgroundColor: ({raw}) =>
         resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
-      pointHoverBorderColor: ({ raw }) =>
+      pointHoverBorderColor: ({raw}) =>
         resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
     },
   ];
@@ -830,7 +825,7 @@ const buildDatasets = (
     datasets.push({
       type: "line",
       label: "Current SOC",
-      data: [{ ...currentMarker }],
+      data: [{...currentMarker}],
       yAxisID: "soc",
       showLine: false,
       pointRadius: 9,
@@ -857,11 +852,11 @@ const buildDatasets = (
   });
 
   const legendConfig: Array<{ label: string; color: string; datasetLabels: string[] }> = [
-    { label: "State of Charge", color: SOC_BORDER, datasetLabels: ["State of Charge"] },
-    { label: "Grid Power", color: GRID_BORDER, datasetLabels: ["Grid Power", GRID_MARKERS_LABEL] },
-    { label: "Solar Generation", color: SOLAR_BORDER, datasetLabels: ["Solar Generation"] },
-    { label: TARIFF_LABEL, color: PRICE_BORDER, datasetLabels: [TARIFF_LABEL] },
-    { label: "Current SOC", color: SOC_BORDER, datasetLabels: ["Current SOC"] },
+    {label: "State of Charge", color: SOC_BORDER, datasetLabels: ["State of Charge"]},
+    {label: "Grid Power", color: GRID_BORDER, datasetLabels: ["Grid Power", GRID_MARKERS_LABEL]},
+    {label: "Solar Generation", color: SOLAR_BORDER, datasetLabels: ["Solar Generation"]},
+    {label: TARIFF_LABEL, color: PRICE_BORDER, datasetLabels: [TARIFF_LABEL]},
+    {label: "Current SOC", color: SOC_BORDER, datasetLabels: ["Current SOC"]},
   ];
 
   const legendGroups: LegendGroup[] = legendConfig
@@ -870,7 +865,7 @@ const buildDatasets = (
       if (!indices.length) {
         return null;
       }
-      return { label: entry.label, color: entry.color, datasetIndices: indices };
+      return {label: entry.label, color: entry.color, datasetIndices: indices};
     })
     .filter((item): item is LegendGroup => item !== null);
 
@@ -893,7 +888,7 @@ const buildOptions = (config: {
   timeRange: { min: number | null; max: number | null };
   legendGroups: LegendGroup[];
 }): ChartOptions<"line"> => {
-  const { bounds, timeRange, legendGroups } = config;
+  const {bounds, timeRange, legendGroups} = config;
   const groupedLegendEntries = legendGroups.filter((group) => group.datasetIndices.length > 0);
   const legendDefaults = Chart.defaults.plugins.legend;
   const legendLabelDefaults = legendDefaults.labels;
@@ -911,13 +906,13 @@ const buildOptions = (config: {
       intersect: false,
     },
     plugins: {
-          legend: {
-            position: "top",
-            labels: {
-              color: LEGEND_COLOR,
-              font: {
-                weight: 500,
-              },
+      legend: {
+        position: "top",
+        labels: {
+          color: LEGEND_COLOR,
+          font: {
+            weight: 500,
+          },
           boxWidth: 16,
           usePointStyle: true,
           generateLabels: (chart) => {
@@ -970,7 +965,7 @@ const buildOptions = (config: {
             return dateTimeFormatter.format(new Date(value));
           },
           label(item) {
-            const { dataset, parsed } = item;
+            const {dataset, parsed} = item;
             const value =
               typeof parsed.y === "number" && Number.isFinite(parsed.y)
                 ? parsed.y
@@ -1125,8 +1120,8 @@ export const useProjectionChart = (
       return;
     }
 
-    const { datasets, bounds, timeRange, legendGroups } = buildDatasets(history, forecast, oracleEntries, summary);
-    const options = buildOptions({ bounds, timeRange, legendGroups });
+    const {datasets, bounds, timeRange, legendGroups} = buildDatasets(history, forecast, oracleEntries, summary);
+    const options = buildOptions({bounds, timeRange, legendGroups});
 
     if (chartInstance.current) {
       chartInstance.current.destroy();
@@ -1135,7 +1130,7 @@ export const useProjectionChart = (
 
     const chart = new Chart(context, {
       type: "line",
-      data: { datasets },
+      data: {datasets},
       options,
     });
 

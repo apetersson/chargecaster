@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { ConfigSyncService } from "../src/config/config-sync.service.ts";
-import type { SimulationService } from "../src/simulation/simulation.service.ts";
-import { normalizePriceSlots } from "../src/simulation/simulation.service.ts";
-import type { FroniusService } from "../src/fronius/fronius.service.ts";
-import type { RawForecastEntry, RawSolarEntry } from "../src/simulation/types.ts";
+import { ConfigSyncService } from "../src/config/config-sync.service";
+import type { SimulationService } from "../src/simulation/simulation.service";
+import { normalizePriceSlots } from "../src/simulation/simulation.service";
+import type { FroniusService } from "../src/fronius/fronius.service";
+import type { RawForecastEntry, RawSolarEntry } from "../src/simulation/types";
 
 describe("ConfigSyncService price normalization", () => {
   const simulation = {

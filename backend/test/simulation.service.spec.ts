@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { simulateOptimalSchedule } from "../src/simulation/simulation.service.ts";
-import type { PriceSlot, SimulationConfig } from "../src/simulation/types.ts";
+import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
+import type { PriceSlot, SimulationConfig } from "../src/simulation/types";
 
 function createSlot(hour: number, price: number): PriceSlot {
   const start = new Date(Date.UTC(2025, 0, 1, hour, 0, 0));

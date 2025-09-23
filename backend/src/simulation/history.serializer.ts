@@ -1,4 +1,4 @@
-import type { HistoryPoint, HistoryRawEntry } from "./types.ts";
+import type { HistoryPoint, HistoryRawEntry } from "./types";
 
 interface NumericSelector {
   key: string;
@@ -26,11 +26,11 @@ function toNullableNumber(value: unknown): number | null {
 }
 
 function pickNumeric(entry: HistoryRawEntry, selectors: NumericSelector[]): number | null {
-  for (const { key, factor = 1 } of selectors) {
+  for (const {key, factor = 1} of selectors) {
     if (!(key in entry)) {
       continue;
     }
-    const raw = entry[key] as unknown;
+    const raw = entry[key];
     const numeric = toNullableNumber(raw);
     if (numeric === null) {
       continue;
@@ -63,92 +63,92 @@ function resolvePriceValues(entry: HistoryRawEntry): {
   priceEur: number | null;
 } {
   const priceCt = pickNumeric(entry, [
-    { key: "price_ct_per_kwh" },
-    { key: "priceCtPerKwh" },
-    { key: "price_ct" },
-    { key: "priceCt" },
-    { key: "price_cent" },
+    {key: "price_ct_per_kwh"},
+    {key: "priceCtPerKwh"},
+    {key: "price_ct"},
+    {key: "priceCt"},
+    {key: "price_cent"},
   ]);
 
   const priceEur = pickNumeric(entry, [
-    { key: "price_eur_per_kwh" },
-    { key: "priceEurPerKwh" },
-    { key: "price_eur" },
-    { key: "priceEur" },
-    { key: "price" },
+    {key: "price_eur_per_kwh"},
+    {key: "priceEurPerKwh"},
+    {key: "price_eur"},
+    {key: "priceEur"},
+    {key: "price"},
   ]);
 
   if (priceCt !== null) {
-    return { priceCt, priceEur: priceEur ?? priceCt / 100 };
+    return {priceCt, priceEur: priceEur ?? priceCt / 100};
   }
 
   if (priceEur !== null) {
-    return { priceCt: priceEur * 100, priceEur };
+    return {priceCt: priceEur * 100, priceEur};
   }
 
-  return { priceCt: null, priceEur: null };
+  return {priceCt: null, priceEur: null};
 }
 
 function resolveBatterySoc(entry: HistoryRawEntry): number | null {
   return pickNumeric(entry, [
-    { key: "battery_soc_percent" },
-    { key: "batterySocPercent" },
-    { key: "soc_percent" },
-    { key: "soc" },
-    { key: "state_of_charge" },
-    { key: "stateOfCharge" },
+    {key: "battery_soc_percent"},
+    {key: "batterySocPercent"},
+    {key: "soc_percent"},
+    {key: "soc"},
+    {key: "state_of_charge"},
+    {key: "stateOfCharge"},
   ]);
 }
 
 export function normalizeHistoryEntry(entry: HistoryRawEntry): HistoryPoint {
   const timestamp = resolveTimestamp(entry);
   const batterySoc = resolveBatterySoc(entry);
-  const { priceCt, priceEur } = resolvePriceValues(entry);
+  const {priceCt, priceEur} = resolvePriceValues(entry);
 
   const gridPowerW = pickNumeric(entry, [
-    { key: "grid_power_w" },
-    { key: "gridPowerW" },
-    { key: "grid_power" },
-    { key: "gridPower" },
-    { key: "grid_import_power" },
-    { key: "gridImportPower" },
-    { key: "grid_power_kw", factor: 1000 },
-    { key: "gridPowerKw", factor: 1000 },
+    {key: "grid_power_w"},
+    {key: "gridPowerW"},
+    {key: "grid_power"},
+    {key: "gridPower"},
+    {key: "grid_import_power"},
+    {key: "gridImportPower"},
+    {key: "grid_power_kw", factor: 1000},
+    {key: "gridPowerKw", factor: 1000},
   ]);
 
   const gridEnergyWh = pickNumeric(entry, [
-    { key: "grid_energy_wh" },
-    { key: "gridEnergyWh" },
-    { key: "grid_energy_w" },
-    { key: "gridEnergyW" },
-    { key: "grid_energy_kwh", factor: 1000 },
-    { key: "gridEnergyKwh", factor: 1000 },
+    {key: "grid_energy_wh"},
+    {key: "gridEnergyWh"},
+    {key: "grid_energy_w"},
+    {key: "gridEnergyW"},
+    {key: "grid_energy_kwh", factor: 1000},
+    {key: "gridEnergyKwh", factor: 1000},
   ]);
 
   const solarPowerW = pickNumeric(entry, [
-    { key: "solar_power_w" },
-    { key: "solarPowerW" },
-    { key: "solar_power" },
-    { key: "solarPower" },
-    { key: "pv_power_w" },
-    { key: "pvPowerW" },
-    { key: "pv_power" },
-    { key: "pvPower" },
-    { key: "pv_kw", factor: 1000 },
-    { key: "pvKw", factor: 1000 },
-    { key: "solar_kw", factor: 1000 },
-    { key: "solarKw", factor: 1000 },
+    {key: "solar_power_w"},
+    {key: "solarPowerW"},
+    {key: "solar_power"},
+    {key: "solarPower"},
+    {key: "pv_power_w"},
+    {key: "pvPowerW"},
+    {key: "pv_power"},
+    {key: "pvPower"},
+    {key: "pv_kw", factor: 1000},
+    {key: "pvKw", factor: 1000},
+    {key: "solar_kw", factor: 1000},
+    {key: "solarKw", factor: 1000},
   ]);
 
   const solarEnergyWh = pickNumeric(entry, [
-    { key: "solar_energy_wh" },
-    { key: "solarEnergyWh" },
-    { key: "pv_energy_wh" },
-    { key: "pvEnergyWh" },
-    { key: "solar_energy_kwh", factor: 1000 },
-    { key: "solarEnergyKwh", factor: 1000 },
-    { key: "pv_energy_kwh", factor: 1000 },
-    { key: "pvEnergyKwh", factor: 1000 },
+    {key: "solar_energy_wh"},
+    {key: "solarEnergyWh"},
+    {key: "pv_energy_wh"},
+    {key: "pvEnergyWh"},
+    {key: "solar_energy_kwh", factor: 1000},
+    {key: "solarEnergyKwh", factor: 1000},
+    {key: "pv_energy_kwh", factor: 1000},
+    {key: "pvEnergyKwh", factor: 1000},
   ]);
 
   return {

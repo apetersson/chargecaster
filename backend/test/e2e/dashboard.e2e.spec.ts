@@ -2,17 +2,19 @@ import "reflect-metadata";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import cors from "@fastify/cors";
+import type { FastifyCorsOptions } from "@fastify/cors";
 import { createTRPCProxyClient, httpBatchLink } from "@trpc/client";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
+import type { FastifyTRPCPluginOptions } from "@trpc/server/adapters/fastify";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
+import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { AppModule } from "../../src/app.module.ts";
-import { SimulationService, extractForecastFromState } from "../../src/simulation/simulation.service.ts";
-import type { AppRouter } from "../../src/trpc/trpc.router.ts";
-import { TrpcRouter } from "../../src/trpc/trpc.router.ts";
-import type { JsonObject } from "../../src/common/json.ts";
+import { AppModule } from "../../src/app.module";
+import { SimulationService, extractForecastFromState } from "../../src/simulation/simulation.service";
+import type { AppRouter } from "../../src/trpc/trpc.router";
+import { TrpcRouter } from "../../src/trpc/trpc.router";
 
 const config = {
   battery: {
@@ -32,7 +34,7 @@ const config = {
 
 describe("dashboard tRPC", () => {
   const sampleDataPath = join(process.cwd(), "fixtures", "sample_data.json");
-  const rawSample = JSON.parse(readFileSync(sampleDataPath, "utf-8")) as JsonObject;
+  const rawSample: unknown = JSON.parse(readFileSync(sampleDataPath, "utf-8"));
   const forecast = extractForecastFromState(rawSample);
 
   let app: NestFastifyApplication;
@@ -42,19 +44,17 @@ describe("dashboard tRPC", () => {
     process.env.NODE_ENV = "test";
     const adapter = new FastifyAdapter({ logger: false, maxParamLength: 4096 });
     app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, { logger: false });
-    const fastify = app.getHttpAdapter().getInstance();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any
-    await (fastify.register as any)(cors, { origin: true });
+    const fastify = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
+    await fastify.register(cors, { origin: true } satisfies FastifyCorsOptions);
     const trpcRouter = app.get(TrpcRouter);
     const simulationService = app.get(SimulationService);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any
-    await (fastify.register as any)(fastifyTRPCPlugin, {
+    await fastify.register(fastifyTRPCPlugin, {
       prefix: "/trpc",
       trpcOptions: {
         router: trpcRouter.router,
         createContext: () => ({ simulationService }),
       },
-    });
+    } satisfies FastifyTRPCPluginOptions<AppRouter>);
     await app.init();
 
     client = createTRPCProxyClient<AppRouter>({

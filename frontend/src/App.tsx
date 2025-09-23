@@ -19,7 +19,6 @@ import type {
 const REFRESH_INTERVAL_MS = 60_000;
 
 interface HistoryEntryLike {
-  [key: string]: unknown;
   timestamp?: unknown;
   battery_soc_percent?: unknown;
   price_with_fee_ct_per_kwh?: unknown;
@@ -64,6 +63,8 @@ interface HistoryEntryLike {
   solarEnergyWh?: unknown;
   pv_energy_wh?: unknown;
   pvEnergyWh?: unknown;
+
+  [key: string]: unknown;
 }
 
 const getErrorMessage = (error: unknown): string => {
@@ -130,38 +131,38 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
 
   const solarPowerKw = toNumber(
     record.solar_power_kw ??
-      record.solarPowerKw ??
-      record.pv_power_kw ??
-      record.pvPowerKw ??
-      record.solar_kw ??
-      record.solarKw ??
-      record.pv_kw ??
-      record.pvKw,
+    record.solarPowerKw ??
+    record.pv_power_kw ??
+    record.pvPowerKw ??
+    record.solar_kw ??
+    record.solarKw ??
+    record.pv_kw ??
+    record.pvKw,
   );
   const solarPower =
     toNumber(
       record.solar_power_w ??
-        record.solarPowerW ??
-        record.solar_power ??
-        record.solarPower ??
-        record.pv_power_w ??
-        record.pvPowerW ??
-        record.pv_power ??
-        record.pvPower,
+      record.solarPowerW ??
+      record.solar_power ??
+      record.solarPower ??
+      record.pv_power_w ??
+      record.pvPowerW ??
+      record.pv_power ??
+      record.pvPower,
     ) ?? (solarPowerKw !== null ? solarPowerKw * 1000 : null);
 
   const solarEnergyKwh = toNumber(
     record.solar_energy_kwh ??
-      record.solarEnergyKwh ??
-      record.pv_energy_kwh ??
-      record.pvEnergyKwh,
+    record.solarEnergyKwh ??
+    record.pv_energy_kwh ??
+    record.pvEnergyKwh,
   );
   const solarEnergy =
     toNumber(
       record.solar_energy_wh ??
-        record.solarEnergyWh ??
-        record.pv_energy_wh ??
-        record.pvEnergyWh,
+      record.solarEnergyWh ??
+      record.pv_energy_wh ??
+      record.pvEnergyWh,
     ) ?? (solarEnergyKwh !== null ? solarEnergyKwh * 1000 : null);
 
   return {
@@ -239,19 +240,19 @@ const App = () => {
         </section>
       ) : null}
 
-      <SummaryCards data={summary} />
+      <SummaryCards data={summary}/>
 
       <section className="card chart">
         <h2>SOC over time</h2>
-        <canvas ref={chartRef} aria-label="SOC projection chart" />
+        <canvas ref={chartRef} aria-label="SOC projection chart"/>
       </section>
 
-      <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries} />
+      <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries}/>
 
-      <HistoryTable history={history} />
+      <HistoryTable history={history}/>
 
-      <MessageList items={summary?.warnings} tone="warning" />
-      <MessageList items={summary?.errors} tone="error" />
+      <MessageList items={summary?.warnings} tone="warning"/>
+      <MessageList items={summary?.errors} tone="error"/>
 
       <section className="card banner">
         <div>

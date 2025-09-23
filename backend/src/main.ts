@@ -8,16 +8,16 @@ import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 
-import { AppModule } from "./app.module.ts";
-import { SimulationService } from "./simulation/simulation.service.ts";
-import { ConfigSyncService } from "./config/config-sync.service.ts";
-import { TrpcRouter } from "./trpc/trpc.router.ts";
+import { AppModule } from "./app.module";
+import { SimulationService } from "./simulation/simulation.service";
+import { ConfigSyncService } from "./config/config-sync.service";
+import { TrpcRouter } from "./trpc/trpc.router";
 
 const isAddressInfo = (value: AddressInfo | string | null): value is AddressInfo =>
   typeof value === "object" && value !== null && "port" in value;
 
 async function bootstrap(): Promise<NestFastifyApplication> {
-  const adapter = new FastifyAdapter({ logger: false, maxParamLength: 4096 });
+  const adapter = new FastifyAdapter({logger: false, maxParamLength: 4096});
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     bufferLogs: true,
   });
@@ -40,7 +40,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
     prefix: "/trpc",
     trpcOptions: {
       router: trpcRouter.router,
-      createContext: () => ({ simulationService }),
+      createContext: () => ({simulationService}),
     },
   });
 
@@ -65,7 +65,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
 
     logger.log(`API ready at ${baseUrl}`);
 
-    const routesTree = fastify.printRoutes({ includeHooks: false, includeMeta: false, commonPrefix: false });
+    const routesTree = fastify.printRoutes({includeHooks: false, includeMeta: false, commonPrefix: false});
     if (typeof routesTree === "string" && routesTree.trim().length > 0) {
       logger.log(`Routes:\n${routesTree}`);
     }
