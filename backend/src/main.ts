@@ -10,7 +10,7 @@ import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify
 
 import { AppModule } from "./app.module";
 import { SimulationService } from "./simulation/simulation.service";
-import { ConfigSyncService } from "./config/config-sync.service";
+import { SimulationSeedService } from "./config/simulation-seed.service";
 import { TrpcRouter } from "./trpc/trpc.router";
 
 const isAddressInfo = (value: AddressInfo | string | null): value is AddressInfo =>
@@ -34,7 +34,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
 
   const trpcRouter = app.get(TrpcRouter);
   const simulationService = app.get(SimulationService);
-  const configSyncService = app.get(ConfigSyncService);
+  const configSeedService = app.get(SimulationSeedService);
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any
   await (fastify.register as any)(fastifyTRPCPlugin, {
     prefix: "/trpc",
@@ -45,7 +45,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   });
 
   if (process.env.NODE_ENV !== "test") {
-    await configSyncService.seedFromConfig();
+    await configSeedService.seedFromConfig();
   }
 
   const port = Number(process.env.PORT ?? 4000);
