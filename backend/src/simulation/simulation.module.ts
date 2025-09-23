@@ -8,6 +8,10 @@ import { OracleService } from "./oracle.service";
 import { ConfigFileService } from "../config/config-file.service";
 import { SimulationPreparationService } from "../config/simulation-preparation.service";
 import { SimulationSeedService } from "../config/simulation-seed.service";
+import { SimulationConfigFactory } from "../config/simulation-config.factory";
+import { MarketDataService } from "../config/market-data.service";
+import { EvccDataService } from "../config/evcc-data.service";
+import { ForecastAssemblyService } from "../config/forecast-assembly.service";
 import { FroniusService } from "../fronius/fronius.service";
 import { StorageModule } from "../storage/storage.module";
 
@@ -22,6 +26,10 @@ import { StorageModule } from "../storage/storage.module";
     SimulationSeedService,
     SimulationPreparationService,
     ConfigFileService,
+    SimulationConfigFactory,
+    MarketDataService,
+    EvccDataService,
+    ForecastAssemblyService,
     FroniusService,
   ],
   exports: [
@@ -33,6 +41,10 @@ import { StorageModule } from "../storage/storage.module";
     SimulationSeedService,
     SimulationPreparationService,
     ConfigFileService,
+    SimulationConfigFactory,
+    MarketDataService,
+    EvccDataService,
+    ForecastAssemblyService,
     FroniusService,
   ],
 })
