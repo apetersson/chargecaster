@@ -1,9 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 
-import type { JsonObject } from "../common/json.ts";
-import { isJsonObject } from "../common/json.ts";
-import type { SnapshotPayload } from "../simulation/types.ts";
+import type { ConfigDocument } from "../config/schemas";
+import type { SnapshotPayload } from "../simulation/types";
 
 interface FroniusConfig {
   host: string;
@@ -16,13 +15,16 @@ interface FroniusConfig {
 
 const DIGEST_PREFIX = "digest";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 @Injectable()
 export class FroniusService {
   private readonly logger = new Logger(FroniusService.name);
   private lastAppliedTarget: number | null = null;
   private lastAppliedMode: "charge" | "auto" | null = null;
 
-  async applyOptimization(config: JsonObject, snapshot: SnapshotPayload): Promise<void> {
+  async applyOptimization(config: ConfigDocument, snapshot: SnapshotPayload): Promise<void> {
     const froniusConfig = this.extractConfig(config);
     if (!froniusConfig) {
       return;
@@ -60,29 +62,26 @@ export class FroniusService {
     }
   }
 
-  private extractConfig(config: JsonObject): FroniusConfig | null {
+  private extractConfig(config: ConfigDocument): FroniusConfig | null {
     const record = config.fronius;
-    if (!isJsonObject(record)) {
+    if (!record?.enabled) {
       return null;
     }
-    const hostRaw = record.host;
-    const userRaw = record.user;
-    const passwordRaw = record.password;
-    if (typeof hostRaw !== "string" || typeof userRaw !== "string" || typeof passwordRaw !== "string") {
+    const hostRaw = record.host?.trim() ?? "";
+    const userRaw = record.user ?? "";
+    const passwordRaw = record.password ?? "";
+    if (!hostRaw || !userRaw || !passwordRaw) {
       return null;
     }
-
-    const batteriesPathRaw = record.batteries_path;
-    const timeoutRaw = record.timeout_s;
-    const verifyRaw = record.verify_tls;
 
     return {
-      host: hostRaw.trim(),
+      host: hostRaw,
       user: userRaw,
       password: passwordRaw,
-      batteriesPath: typeof batteriesPathRaw === "string" && batteriesPathRaw.length ? batteriesPathRaw : "/config/batteries",
-      timeoutSeconds: typeof timeoutRaw === "number" ? timeoutRaw : Number(timeoutRaw ?? 6) || 6,
-      verifyTls: typeof verifyRaw === "boolean" ? verifyRaw : Boolean(verifyRaw ?? false),
+      batteriesPath: record.batteries_path?.length ? record.batteries_path : "/config/batteries",
+      timeoutSeconds:
+        typeof record.timeout_s === "number" && Number.isFinite(record.timeout_s) ? record.timeout_s : 6,
+      verifyTls: record.verify_tls ?? false,
     } satisfies FroniusConfig;
   }
 
@@ -99,7 +98,7 @@ export class FroniusService {
   }
 
   private extractCurrentTarget(payload: unknown): number | null {
-    if (!isJsonObject(payload)) {
+    if (!isRecord(payload)) {
       return null;
     }
     const record = payload;
@@ -108,7 +107,7 @@ export class FroniusService {
       return direct;
     }
     const primary = record.primary;
-    if (isJsonObject(primary)) {
+    if (isRecord(primary)) {
       const nested = primary.BAT_M0_SOC_MIN;
       if (typeof nested === "number" && Number.isFinite(nested)) {
         return nested;
@@ -118,7 +117,7 @@ export class FroniusService {
   }
 
   private extractCurrentMode(payload: unknown): "charge" | "auto" | null {
-    if (!isJsonObject(payload)) {
+    if (!isRecord(payload)) {
       return null;
     }
     const record = payload;
@@ -128,7 +127,7 @@ export class FroniusService {
       return mode;
     }
     const primary = record.primary;
-    if (isJsonObject(primary)) {
+    if (isRecord(primary)) {
       return this.normaliseMode(primary.BAT_M0_SOC_MODE ?? primary.bat_m0_soc_mode);
     }
     return null;
@@ -149,10 +148,10 @@ export class FroniusService {
   }
 
   private buildPayload(
-    config: JsonObject,
+    config: ConfigDocument,
     snapshot: SnapshotPayload,
     mode: "charge" | "auto",
-  ): JsonObject | null {
+  ): Record<string, unknown> | null {
     if (mode === "charge") {
       return {BAT_M0_SOC_MIN: 100, BAT_M0_SOC_MODE: "manual"};
     }
@@ -160,11 +159,8 @@ export class FroniusService {
     return {BAT_M0_SOC_MIN: floorSoc, BAT_M0_SOC_MODE: "auto"};
   }
 
-  private resolveAutoFloor(config: JsonObject, snapshot: SnapshotPayload): number {
-    const batteryCfg = isJsonObject(config.battery) ? config.battery : null;
-    const configFloor = batteryCfg && typeof batteryCfg.auto_mode_floor_soc === "number"
-      ? batteryCfg.auto_mode_floor_soc
-      : null;
+  private resolveAutoFloor(config: ConfigDocument, snapshot: SnapshotPayload): number {
+    const configFloor = config.battery?.auto_mode_floor_soc ?? null;
     if (typeof configFloor === "number" && Number.isFinite(configFloor)) {
       return this.clampSoc(configFloor);
     }
@@ -201,7 +197,7 @@ export class FroniusService {
     method: string,
     url: string,
     credentials: FroniusConfig,
-    payload: JsonObject | null = null,
+    payload: Record<string, unknown> | null = null,
   ): Promise<unknown> {
     const headers = new Headers({Accept: "application/json, text/plain, */*"});
     let body: string | undefined;

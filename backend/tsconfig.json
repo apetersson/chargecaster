@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "allowImportingTsExtensions": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "target": "ES2022",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,

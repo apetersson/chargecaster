@@ -1,76 +1,238 @@
-import type { JsonObject, MutableJsonObject } from "../common/json.ts";
+import { z } from "zod";
 
-type TimestampInput = string | number | Date | null;
-type NumericInput = string | number | null;
+import {
+  nullableNumberSchema,
+  optionalBooleanSchema,
+  optionalStringSchema,
+  optionalTimestampSchema,
+  requiredTimestampSchema,
+  unknownRecordSchema,
+} from "../common/parsing";
 
-export interface BatteryConfig {
-  capacity_kwh: number;
-  max_charge_power_w: number;
-  auto_mode_floor_soc?: number;
-}
+export const rawForecastEntrySchema = z
+  .object({
+    start: optionalTimestampSchema.optional(),
+    from: optionalTimestampSchema.optional(),
+    end: optionalTimestampSchema.optional(),
+    to: optionalTimestampSchema.optional(),
+    price: nullableNumberSchema.optional(),
+    value: nullableNumberSchema.optional(),
+    unit: optionalStringSchema.optional(),
+    price_unit: optionalStringSchema.optional(),
+    value_unit: optionalStringSchema.optional(),
+    price_ct_per_kwh: nullableNumberSchema.optional(),
+    price_with_fee_ct_per_kwh: nullableNumberSchema.optional(),
+    price_with_fee_eur_per_kwh: nullableNumberSchema.optional(),
+    value_ct_per_kwh: nullableNumberSchema.optional(),
+    duration_hours: nullableNumberSchema.optional(),
+    durationHours: nullableNumberSchema.optional(),
+    duration_minutes: nullableNumberSchema.optional(),
+    durationMinutes: nullableNumberSchema.optional(),
+    era_id: optionalStringSchema.optional(),
+    eraId: optionalStringSchema.optional(),
+  })
+  .catchall(z.unknown());
 
-export interface PriceConfig {
-  grid_fee_eur_per_kwh?: number;
-  network_tariff_eur_per_kwh?: number;
-  feed_in_tariff_eur_per_kwh?: number;
-}
+export type RawForecastEntry = z.infer<typeof rawForecastEntrySchema>;
 
-export interface LogicConfig {
-  interval_seconds?: number;
-  min_hold_minutes?: number;
-  house_load_w?: number;
-  allow_battery_export?: boolean;
-}
+export const rawSolarEntrySchema = z
+  .object({
+    start: optionalTimestampSchema.optional(),
+    end: optionalTimestampSchema.optional(),
+    energy_kwh: nullableNumberSchema.optional(),
+    energy_wh: nullableNumberSchema.optional(),
+    value: nullableNumberSchema.optional(),
+    val: nullableNumberSchema.optional(),
+    ts: optionalTimestampSchema.optional(),
+  })
+  .catchall(z.unknown());
 
-export interface SolarConfig {
-  direct_use_ratio?: number;
-  max_charge_power_w?: number;
-}
+export type RawSolarEntry = z.infer<typeof rawSolarEntrySchema>;
 
-export interface StateConfig {
-  path?: string;
-}
+export type HistoryRawEntry = Record<string, unknown>;
 
-export interface SimulationConfig {
-  battery: BatteryConfig;
-  price: PriceConfig;
-  logic: LogicConfig;
-  solar?: SolarConfig;
-  state?: StateConfig;
-}
+export const historyPointSchema = z
+  .object({
+    timestamp: requiredTimestampSchema,
+    battery_soc_percent: nullableNumberSchema,
+    price_ct_per_kwh: nullableNumberSchema.optional(),
+    price_eur_per_kwh: nullableNumberSchema,
+    grid_power_w: nullableNumberSchema.optional().default(null),
+    grid_energy_w: nullableNumberSchema.optional().default(null),
+    grid_energy_wh: nullableNumberSchema.optional(),
+    solar_power_w: nullableNumberSchema.optional().default(null),
+    solar_energy_wh: nullableNumberSchema.optional().default(null),
+  })
+  .strip();
 
-export interface RawForecastEntry extends MutableJsonObject {
-  start?: TimestampInput;
-  from?: TimestampInput;
-  end?: TimestampInput;
-  to?: TimestampInput;
-  price?: NumericInput;
-  value?: NumericInput;
-  unit?: string | null;
-  price_unit?: string | null;
-  value_unit?: string | null;
-  price_ct_per_kwh?: NumericInput;
-  price_with_fee_ct_per_kwh?: NumericInput;
-  price_with_fee_eur_per_kwh?: NumericInput;
-  value_ct_per_kwh?: NumericInput;
-  duration_hours?: NumericInput;
-  durationHours?: NumericInput;
-  duration_minutes?: NumericInput;
-  durationMinutes?: NumericInput;
-  era_id?: string | null;
-  eraId?: string | null;
-}
+export type HistoryPoint = z.infer<typeof historyPointSchema>;
 
-export interface RawSolarEntry extends MutableJsonObject {
-  start?: TimestampInput;
-  end?: TimestampInput;
-  energy_kwh?: NumericInput;
-  energy_wh?: NumericInput;
-  value?: NumericInput;
-  val?: NumericInput;
-}
+const forecastSourcePayloadSchema = z.object({
+  provider: z.string(),
+  type: z.string(),
+  payload: unknownRecordSchema.optional().default({}),
+});
 
-export type HistoryRawEntry = MutableJsonObject;
+export type ForecastSourcePayload = z.infer<typeof forecastSourcePayloadSchema>;
+
+export const forecastEraSchema = z.object({
+  era_id: z.string(),
+  start: optionalTimestampSchema.optional(),
+  end: optionalTimestampSchema.optional(),
+  duration_hours: nullableNumberSchema,
+  sources: z.array(forecastSourcePayloadSchema),
+});
+
+export type ForecastEra = z.infer<typeof forecastEraSchema>;
+
+const oracleEntrySchema = z.object({
+  era_id: z.string(),
+  start_soc_percent: nullableNumberSchema,
+  end_soc_percent: nullableNumberSchema,
+  target_soc_percent: nullableNumberSchema.optional(),
+  grid_power_w: nullableNumberSchema,
+  grid_energy_kwh: nullableNumberSchema,
+  grid_energy_w: nullableNumberSchema.optional(),
+  strategy: z.union([z.literal("charge"), z.literal("auto")]),
+});
+
+export type OracleEntry = z.infer<typeof oracleEntrySchema>;
+
+export const snapshotPayloadSchema = z.object({
+  timestamp: requiredTimestampSchema,
+  interval_seconds: nullableNumberSchema,
+  house_load_w: nullableNumberSchema,
+  current_soc_percent: nullableNumberSchema,
+  next_step_soc_percent: nullableNumberSchema,
+  recommended_soc_percent: nullableNumberSchema,
+  recommended_final_soc_percent: nullableNumberSchema,
+  current_mode: z.union([z.literal("charge"), z.literal("auto")]).optional(),
+  price_snapshot_ct_per_kwh: nullableNumberSchema.optional(),
+  price_snapshot_eur_per_kwh: nullableNumberSchema,
+  projected_cost_eur: nullableNumberSchema,
+  baseline_cost_eur: nullableNumberSchema,
+  basic_battery_cost_eur: nullableNumberSchema.optional(),
+  active_control_savings_eur: nullableNumberSchema.optional(),
+  projected_savings_eur: nullableNumberSchema,
+  projected_grid_energy_w: nullableNumberSchema,
+  forecast_hours: nullableNumberSchema,
+  forecast_samples: nullableNumberSchema,
+  forecast_eras: z.array(forecastEraSchema),
+  oracle_entries: z.array(oracleEntrySchema),
+  history: z.array(historyPointSchema),
+  warnings: z.array(z.string()),
+  errors: z.array(z.string()),
+});
+
+export type SnapshotPayload = z.infer<typeof snapshotPayloadSchema>;
+
+export const snapshotSummarySchema = snapshotPayloadSchema.pick({
+  timestamp: true,
+  interval_seconds: true,
+  house_load_w: true,
+  current_soc_percent: true,
+  next_step_soc_percent: true,
+  recommended_soc_percent: true,
+  recommended_final_soc_percent: true,
+  current_mode: true,
+  price_snapshot_ct_per_kwh: true,
+  price_snapshot_eur_per_kwh: true,
+  projected_cost_eur: true,
+  baseline_cost_eur: true,
+  basic_battery_cost_eur: true,
+  active_control_savings_eur: true,
+  projected_savings_eur: true,
+  projected_grid_energy_w: true,
+  forecast_hours: true,
+  forecast_samples: true,
+  warnings: true,
+  errors: true,
+});
+
+export type SnapshotSummary = z.infer<typeof snapshotSummarySchema>;
+
+export const historyResponseSchema = z.object({
+  generated_at: requiredTimestampSchema,
+  entries: z.array(historyPointSchema),
+});
+
+export type HistoryResponse = z.infer<typeof historyResponseSchema>;
+
+export const forecastResponseSchema = z.object({
+  generated_at: requiredTimestampSchema,
+  eras: z.array(forecastEraSchema),
+});
+
+export type ForecastResponse = z.infer<typeof forecastResponseSchema>;
+
+export const oracleResponseSchema = z.object({
+  generated_at: requiredTimestampSchema,
+  entries: z.array(oracleEntrySchema),
+});
+
+export type OracleResponse = z.infer<typeof oracleResponseSchema>;
+
+export const forecastSlotInputSchema = z.object({
+  start: requiredTimestampSchema,
+  end: optionalTimestampSchema.optional(),
+  price: nullableNumberSchema,
+  unit: optionalStringSchema.optional(),
+  price_ct_per_kwh: nullableNumberSchema,
+  price_with_fee_ct_per_kwh: nullableNumberSchema.optional(),
+  price_with_fee_eur_per_kwh: nullableNumberSchema.optional(),
+  duration_hours: nullableNumberSchema,
+  era_id: optionalStringSchema.optional(),
+});
+
+export type ForecastSlotInput = z.infer<typeof forecastSlotInputSchema>;
+
+export const solarSlotInputSchema = z.object({
+  start: requiredTimestampSchema,
+  end: optionalTimestampSchema.optional(),
+  energy_kwh: nullableNumberSchema,
+});
+
+export type SolarSlotInput = z.infer<typeof solarSlotInputSchema>;
+
+export const batteryConfigSchema = z.object({
+  capacity_kwh: nullableNumberSchema,
+  max_charge_power_w: nullableNumberSchema,
+  auto_mode_floor_soc: nullableNumberSchema.optional(),
+  max_charge_power_solar_w: nullableNumberSchema.optional(),
+});
+
+export type BatteryConfig = z.infer<typeof batteryConfigSchema>;
+
+export const priceConfigSchema = z.object({
+  grid_fee_eur_per_kwh: nullableNumberSchema.optional(),
+  feed_in_tariff_eur_per_kwh: nullableNumberSchema.optional(),
+});
+
+export type PriceConfig = z.infer<typeof priceConfigSchema>;
+
+export const logicConfigSchema = z.object({
+  interval_seconds: nullableNumberSchema.optional(),
+  min_hold_minutes: nullableNumberSchema.optional(),
+  house_load_w: nullableNumberSchema.optional(),
+  allow_battery_export: optionalBooleanSchema.optional(),
+});
+
+export type LogicConfig = z.infer<typeof logicConfigSchema>;
+
+export const solarConfigSchema = z.object({
+  direct_use_ratio: nullableNumberSchema.optional(),
+});
+
+export type SolarConfig = z.infer<typeof solarConfigSchema>;
+
+export const simulationConfigSchema = z.object({
+  battery: batteryConfigSchema,
+  price: priceConfigSchema,
+  logic: logicConfigSchema,
+  solar: solarConfigSchema.optional(),
+});
+
+export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
 
 export interface PriceSlot {
   start: Date;
@@ -80,128 +242,4 @@ export interface PriceSlot {
   eraId?: string;
 }
 
-export interface HistoryPoint {
-  timestamp: string;
-  battery_soc_percent: number | null;
-  price_ct_per_kwh?: number | null;
-  price_eur_per_kwh: number | null; // deprecated
-  grid_power_w: number | null;
-  grid_energy_w: number | null;
-  solar_power_w: number | null;
-  solar_energy_wh: number | null;
-}
-
 export type ForecastSourceType = "cost" | "solar" | (string & {});
-
-export interface ForecastSourcePayload {
-  provider: string;
-  type: ForecastSourceType;
-  payload: JsonObject;
-}
-
-export interface ForecastEra {
-  era_id: string;
-  start: string | null;
-  end: string | null;
-  duration_hours: number | null;
-  sources: ForecastSourcePayload[];
-}
-
-export interface SnapshotPayload {
-  timestamp: string;
-  interval_seconds: number | null;
-  house_load_w: number | null;
-  current_soc_percent: number | null;
-  next_step_soc_percent: number | null;
-  recommended_soc_percent: number | null;
-  recommended_final_soc_percent: number | null;
-  current_mode?: "charge" | "auto";
-  price_snapshot_ct_per_kwh?: number | null;
-  price_snapshot_eur_per_kwh: number | null; // deprecated
-  projected_cost_eur: number | null;
-  baseline_cost_eur: number | null;
-  basic_battery_cost_eur?: number | null;
-  active_control_savings_eur?: number | null;
-  projected_savings_eur: number | null;
-  projected_grid_energy_w: number | null;
-  forecast_hours: number | null;
-  forecast_samples: number | null;
-  forecast_eras: ForecastEra[];
-  oracle_entries: OracleEntry[];
-  history: HistoryPoint[];
-  warnings: string[];
-  errors: string[];
-}
-
-export interface SnapshotSummary {
-  timestamp: string;
-  interval_seconds: number | null;
-  house_load_w: number | null;
-  current_soc_percent: number | null;
-  next_step_soc_percent: number | null;
-  recommended_soc_percent: number | null;
-  recommended_final_soc_percent: number | null;
-  current_mode?: "charge" | "auto";
-  price_snapshot_ct_per_kwh?: number | null;
-  price_snapshot_eur_per_kwh: number | null;
-  projected_cost_eur: number | null;
-  baseline_cost_eur: number | null;
-  basic_battery_cost_eur?: number | null;
-  projected_savings_eur: number | null;
-  active_control_savings_eur?: number | null;
-  projected_grid_energy_w: number | null;
-  forecast_hours: number | null;
-  forecast_samples: number | null;
-  warnings: string[];
-  errors: string[];
-}
-
-export interface HistoryResponse {
-  generated_at: string;
-  entries: HistoryPoint[];
-}
-
-export interface ForecastResponse {
-  generated_at: string;
-  eras: ForecastEra[];
-}
-
-export interface OracleEntry {
-  era_id: string;
-  start_soc_percent: number | null;
-  end_soc_percent: number | null;
-  /**
-   * @deprecated use end_soc_percent instead
-   */
-  target_soc_percent?: number | null;
-  grid_power_w: number | null;
-  grid_energy_kwh: number | null;
-  /**
-   * @deprecated use grid_power_w/grid_energy_kwh instead
-   */
-  grid_energy_w?: number | null;
-  strategy: "charge" | "auto";
-}
-
-export interface OracleResponse {
-  generated_at: string;
-  entries: OracleEntry[];
-}
-
-export interface ForecastSlotInput {
-  start: string;
-  end: string | null;
-  price: number | null;
-  unit: string | null;
-  price_ct_per_kwh: number | null;
-  price_with_fee_ct_per_kwh?: number | null;
-  price_with_fee_eur_per_kwh?: number | null;
-  duration_hours: number | null;
-  era_id?: string;
-}
-
-export interface SolarSlotInput {
-  start: string;
-  end: string | null;
-  energy_kwh: number | null;
-}

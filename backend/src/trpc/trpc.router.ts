@@ -2,12 +2,12 @@ import { Inject, Injectable } from "@nestjs/common";
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 
-import type { RawForecastEntry, SimulationConfig } from "../simulation/types.ts";
-import { SimulationService } from "../simulation/simulation.service.ts";
-import { ForecastService } from "../simulation/forecast.service.ts";
-import { HistoryService } from "../simulation/history.service.ts";
-import { SummaryService } from "../simulation/summary.service.ts";
-import { OracleService } from "../simulation/oracle.service.ts";
+import type { RawForecastEntry, SimulationConfig } from "../simulation/types";
+import { SimulationService } from "../simulation/simulation.service";
+import { ForecastService } from "../simulation/forecast.service";
+import { HistoryService } from "../simulation/history.service";
+import { SummaryService } from "../simulation/summary.service";
+import { OracleService } from "../simulation/oracle.service";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -19,11 +19,12 @@ const batterySchema = z.object({
   capacity_kwh: z.number().positive(),
   max_charge_power_w: z.number().nonnegative(),
   auto_mode_floor_soc: z.number().min(0).max(100).optional(),
+  max_charge_power_solar_w: z.number().nonnegative().optional(),
 });
 
 const priceSchema = z.object({
   grid_fee_eur_per_kwh: z.number().nonnegative().optional(),
-  network_tariff_eur_per_kwh: z.number().nonnegative().optional(),
+  feed_in_tariff_eur_per_kwh: z.number().nonnegative().optional(),
 });
 
 const logicSchema = z.object({
@@ -35,7 +36,6 @@ const logicSchema = z.object({
 const solarSchema = z
   .object({
     direct_use_ratio: z.number().min(0).max(1).optional(),
-    max_charge_power_w: z.number().nonnegative().optional(),
   })
   .optional();
 
@@ -44,7 +44,6 @@ const configSchema: z.ZodType<SimulationConfig> = z.object({
   price: priceSchema,
   logic: logicSchema,
   solar: solarSchema,
-  state: z.object({ path: z.string().optional() }).optional(),
 });
 
 const jsonScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -66,7 +65,7 @@ const forecastEntrySchema = z.object({
 
 const runSimulationInputSchema = z.object({
   config: configSchema,
-  liveState: z.object({ battery_soc: z.number().optional() }).default({}),
+  liveState: z.object({battery_soc: z.number().optional()}).default({}),
   forecast: z.array(forecastEntrySchema),
 });
 
@@ -86,10 +85,10 @@ export class TrpcRouter {
     @Inject(OracleService) private readonly oracleService: OracleService,
   ) {
     this.router = t.router({
-      health: t.procedure.query(() => ({ status: "ok" })),
+      health: t.procedure.query(() => ({status: "ok"})),
       dashboard: t.router({
         summary: t.procedure.query(() => this.summaryService.toSummary(this.simulationService.ensureSeedFromFixture())),
-        history: t.procedure.input(historyInputSchema.optional()).query(({ input }) => {
+        history: t.procedure.input(historyInputSchema.optional()).query(({input}) => {
           const limit = input?.limit ?? 96;
           return this.historyService.getHistory(limit);
         }),
@@ -98,7 +97,7 @@ export class TrpcRouter {
           return this.forecastService.buildResponse(snap.timestamp, Array.isArray(snap.forecast_eras) ? snap.forecast_eras : []);
         }),
         oracle: t.procedure.query(() => this.oracleService.build(this.simulationService.ensureSeedFromFixture())),
-        snapshot: t.procedure.query(({ ctx }) => {
+        snapshot: t.procedure.query(({ctx}) => {
           const service = ctx.simulationService ?? this.simulationService;
           const latest = service.getLatestSnapshot();
           if (latest) {
@@ -106,7 +105,7 @@ export class TrpcRouter {
           }
           return service.ensureSeedFromFixture();
         }),
-        runSimulation: t.procedure.input(runSimulationInputSchema).mutation(({ ctx, input }) => {
+        runSimulation: t.procedure.input(runSimulationInputSchema).mutation(({ctx, input}) => {
           const service = ctx.simulationService ?? this.simulationService;
           return service.runSimulation({
             config: input.config,
@@ -114,7 +113,7 @@ export class TrpcRouter {
             forecast: input.forecast as RawForecastEntry[],
           });
         }),
-        loadFixture: t.procedure.mutation(({ ctx }) => {
+        loadFixture: t.procedure.mutation(({ctx}) => {
           const service = ctx.simulationService ?? this.simulationService;
           return service.ensureSeedFromFixture();
         }),

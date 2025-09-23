@@ -1,9 +1,9 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 
-import { SimulationModule } from "./simulation/simulation.module.ts";
-import { StorageModule } from "./storage/storage.module.ts";
-import { TrpcModule } from "./trpc/trpc.module.ts";
+import { SimulationModule } from "./simulation/simulation.module";
+import { StorageModule } from "./storage/storage.module";
+import { TrpcModule } from "./trpc/trpc.module";
 
 @Module({
   imports: [
@@ -17,4 +17,5 @@ import { TrpcModule } from "./trpc/trpc.module.ts";
     TrpcModule,
   ],
 })
-export class AppModule {}
+export class AppModule {
+}

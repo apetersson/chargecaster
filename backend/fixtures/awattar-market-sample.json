@@ -1,0 +1,24 @@
+{
+  "data": [
+    {
+      "start_timestamp": "2025-09-23T00:00:00Z",
+      "end_timestamp": "2025-09-23T00:30:00Z",
+      "marketprice": 12.34,
+      "unit": "ct/kWh",
+      "price_ct_per_kwh": 12.34,
+      "price_with_fee_ct_per_kwh": 15.34,
+      "price_with_fee_eur_per_kwh": 0.1534,
+      "duration_hours": 0.5
+    },
+    {
+      "start_timestamp": "2025-09-23T00:30:00Z",
+      "end_timestamp": "2025-09-23T01:00:00Z",
+      "marketprice": 10.12,
+      "unit": "ct/kWh",
+      "price_ct_per_kwh": 10.12,
+      "price_with_fee_ct_per_kwh": 13.12,
+      "price_with_fee_eur_per_kwh": 0.1312,
+      "duration_hours": 0.5
+    }
+  ]
+}

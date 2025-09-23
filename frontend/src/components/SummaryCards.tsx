@@ -1,14 +1,12 @@
 import type { SnapshotSummary } from "../types";
 import { formatDate, formatNumber, formatPercent, statusClass } from "../utils/format";
 
-const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
+const SummaryCards = ({data}: { data: SnapshotSummary | null }) => {
   if (!data) {
     return null;
   }
-  const { label, className } = statusClass(data.errors, data.warnings);
+  const {label, className} = statusClass(data.errors, data.warnings);
 
-  const currentSoc = typeof data.current_soc_percent === "number" ? data.current_soc_percent : null;
-  const recommendedSoc = typeof data.recommended_soc_percent === "number" ? data.recommended_soc_percent : null;
   const activeControlSavings =
     (data as { active_control_savings_eur?: number | null }).active_control_savings_eur ?? null;
 
@@ -51,9 +49,9 @@ const SummaryCards = ({ data }: { data: SnapshotSummary | null }) => {
           <span className="value small">
             {formatNumber(
               data.price_snapshot_ct_per_kwh ??
-                (typeof data.price_snapshot_eur_per_kwh === "number"
-                  ? data.price_snapshot_eur_per_kwh * 100
-                  : null),
+              (typeof data.price_snapshot_eur_per_kwh === "number"
+                ? data.price_snapshot_eur_per_kwh * 100
+                : null),
               " ct/kWh",
             )}
           </span>

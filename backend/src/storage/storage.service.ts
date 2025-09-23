@@ -1,21 +1,22 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
-import DatabaseConstructor from "better-sqlite3";
 import type { Database } from "better-sqlite3";
+import DatabaseConstructor from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import type { JsonObject } from "../common/json.ts";
+import type { HistoryPoint, SnapshotPayload } from "../simulation/types";
+import { historyPointSchema, snapshotPayloadSchema } from "../simulation/types";
 
 export interface SnapshotRecord {
   id: number;
   timestamp: string;
-  payload: JsonObject;
+  payload: SnapshotPayload;
 }
 
 export interface HistoryRecord {
   id: number;
   timestamp: string;
-  payload: JsonObject;
+  payload: HistoryPoint;
 }
 
 @Injectable()
@@ -25,7 +26,7 @@ export class StorageService implements OnModuleDestroy {
 
   constructor() {
     const folder = join(process.cwd(), "..", "data", "db");
-    mkdirSync(folder, { recursive: true });
+    mkdirSync(folder, {recursive: true});
     this.db = new DatabaseConstructor(this.dbPath);
     this.db.pragma("journal_mode = WAL");
     this.migrate();
@@ -35,32 +36,12 @@ export class StorageService implements OnModuleDestroy {
     this.db.close();
   }
 
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS snapshots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT NOT NULL,
-        payload TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp DESC);
-    `);
-
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT NOT NULL,
-        payload TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp DESC);
-    `);
-  }
-
-  saveSnapshot(timestamp: string, payload: JsonObject): void {
+  saveSnapshot(timestamp: string, payload: SnapshotPayload): void {
     const stmt = this.db.prepare("INSERT INTO snapshots (timestamp, payload) VALUES (?, ?)");
     stmt.run(timestamp, JSON.stringify(payload));
   }
 
-  replaceSnapshot(payload: JsonObject): void {
+  replaceSnapshot(payload: SnapshotPayload): void {
     const rawTimestamp = payload.timestamp;
     const timestamp = typeof rawTimestamp === "string" && rawTimestamp.length > 0 ? rawTimestamp : new Date().toISOString();
     const deleteStmt = this.db.prepare("DELETE FROM snapshots");
@@ -72,12 +53,12 @@ export class StorageService implements OnModuleDestroy {
     txn();
   }
 
-  appendHistory(entries: JsonObject[]): void {
+  appendHistory(entries: HistoryPoint[]): void {
     if (!entries.length) {
       return;
     }
     const stmt = this.db.prepare("INSERT INTO history (timestamp, payload) VALUES (?, ?)");
-    const txn = this.db.transaction((items: JsonObject[]) => {
+    const txn = this.db.transaction((items: HistoryPoint[]) => {
       for (const entry of items) {
         const rawTimestamp = entry.timestamp;
         const timestamp = typeof rawTimestamp === "string" && rawTimestamp.length > 0 ? rawTimestamp : new Date().toISOString();
@@ -93,10 +74,11 @@ export class StorageService implements OnModuleDestroy {
     if (!row) {
       return null;
     }
+    const parsed = snapshotPayloadSchema.parse(JSON.parse(row.payload));
     return {
       id: row.id,
       timestamp: row.timestamp,
-      payload: JSON.parse(row.payload) as JsonObject,
+      payload: parsed,
     };
   }
 
@@ -106,7 +88,29 @@ export class StorageService implements OnModuleDestroy {
     return rows.map((row) => ({
       id: row.id,
       timestamp: row.timestamp,
-      payload: JSON.parse(row.payload) as JsonObject,
+      payload: historyPointSchema.parse(JSON.parse(row.payload)),
     }));
+  }
+
+  private migrate(): void {
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS snapshots
+        (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            payload   TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots (timestamp DESC);
+    `);
+
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS history
+        (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            payload   TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history (timestamp DESC);
+    `);
   }
 }

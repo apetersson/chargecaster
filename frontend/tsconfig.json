@@ -13,11 +13,10 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
     "paths": {
-      "@backend/trpc": ["../backend/src/trpc/trpc.router.ts"],
-      "@backend/trpc-types": ["../backend/src/trpc/trpc.router.ts"],
-      "@backend/simulation-types": ["../backend/src/simulation/types.ts"]
+      "@backend/trpc": ["../backend/src/trpc/trpc.router"],
+      "@backend/trpc-types": ["../backend/src/trpc/trpc.router"],
+      "@backend/simulation-types": ["../backend/src/simulation/types"]
     },
     "isolatedModules": true,
     "noEmit": true,
