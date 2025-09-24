@@ -1,0 +1,44 @@
+import { useEffect, useRef } from "react";
+
+import type { ChartDataset, ChartOptions } from "./chartSetup";
+import { Chart } from "./chartSetup";
+import type { ProjectionPoint } from "./types";
+
+export const useChartInstance = (
+  datasets: ChartDataset<"line", ProjectionPoint[]>[],
+  options: ChartOptions<"line">,
+) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartInstance = useRef<Chart<"line", ProjectionPoint[]> | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    if (chartInstance.current) {
+      chartInstance.current.destroy();
+      chartInstance.current = null;
+    }
+
+    const chart = new Chart(context, {
+      type: "line",
+      data: {datasets},
+      options,
+    });
+
+    chartInstance.current = chart;
+
+    return () => {
+      chart.destroy();
+      chartInstance.current = null;
+    };
+  }, [datasets, options]);
+
+  return canvasRef;
+};
