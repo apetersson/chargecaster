@@ -70,7 +70,7 @@ const SummaryCards = ({data}: { data: SnapshotSummary | null }) => {
         </div>
         <div className="metric">
           <span className="label">Projected Grid Power</span>
-          <span className="value small">{formatNumber(data.projected_grid_energy_w, " W")}</span>
+          <span className="value small">{formatNumber(data.projected_grid_power_w, " W")}</span>
         </div>
         <div className="metric">
           <span className="label">Forecast Horizon</span>

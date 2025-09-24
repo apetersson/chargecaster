@@ -457,7 +457,7 @@ const buildGridSeries = (
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
     const power = derivePowerFromEnergy(
-      era.oracle?.grid_energy_w ?? null,
+      era.oracle?.grid_energy_wh ?? null,
       era.slot.duration.hours,
     );
     if (!isFiniteNumber(power)) {

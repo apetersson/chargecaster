@@ -157,7 +157,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
             const strategy = oracle?.strategy ?? "auto";
             const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);
             const targetLabel = oracle ? `${endSocValue} (${strategy.toUpperCase()})` : "n/a";
-            const gridEnergyWh = oracle?.grid_energy_w;
+            const gridEnergyWh = oracle?.grid_energy_wh;
             let gridPower = "n/a";
             if (typeof gridEnergyWh === "number" && Number.isFinite(gridEnergyWh)) {
               const durationHours = slot ? slot.duration.hours :

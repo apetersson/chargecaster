@@ -105,7 +105,7 @@ const oracleEntrySchema = z.object({
   start_soc_percent: nullableNumberSchema,
   end_soc_percent: nullableNumberSchema,
   target_soc_percent: nullableNumberSchema.optional(),
-  grid_energy_w: nullableNumberSchema,
+  grid_energy_wh: nullableNumberSchema,
   strategy: z.union([z.literal("charge"), z.literal("auto")]),
 });
 
@@ -127,7 +127,7 @@ export const snapshotPayloadSchema = z.object({
   basic_battery_cost_eur: nullableNumberSchema.optional(),
   active_control_savings_eur: nullableNumberSchema.optional(),
   projected_savings_eur: nullableNumberSchema,
-  projected_grid_energy_w: nullableNumberSchema,
+  projected_grid_power_w: nullableNumberSchema,
   forecast_hours: nullableNumberSchema,
   forecast_samples: nullableNumberSchema,
   forecast_eras: z.array(forecastEraSchema),
@@ -155,7 +155,7 @@ export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   basic_battery_cost_eur: true,
   active_control_savings_eur: true,
   projected_savings_eur: true,
-  projected_grid_energy_w: true,
+  projected_grid_power_w: true,
   forecast_hours: true,
   forecast_samples: true,
   warnings: true,

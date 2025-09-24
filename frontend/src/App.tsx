@@ -38,8 +38,8 @@ interface HistoryEntryLike {
   gridImportPower?: unknown;
   grid_energy_kwh?: unknown;
   gridEnergyKwh?: unknown;
-  grid_energy_w?: unknown;
-  gridEnergyW?: unknown;
+  grid_energy_wh?: unknown;
+  gridEnergyWh?: unknown;
   solar_power_kw?: unknown;
   solarPowerKw?: unknown;
   pv_power_kw?: unknown;

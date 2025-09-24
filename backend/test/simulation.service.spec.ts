@@ -58,11 +58,11 @@ describe("simulateOptimalSchedule oracle output", () => {
       expect(first.end_soc_percent).toBeGreaterThan(first.start_soc_percent);
     }
 
-    expect(first.grid_energy_w).not.toBeNull();
-    if (first.grid_energy_w !== null) {
-      expect(first.grid_energy_w).toBeGreaterThan(0);
+    expect(first.grid_energy_wh).not.toBeNull();
+    if (first.grid_energy_wh !== null) {
+      expect(first.grid_energy_wh).toBeGreaterThan(0);
       const durationHours = slots[0].durationHours;
-      const derivedPower = first.grid_energy_w / durationHours;
+      const derivedPower = first.grid_energy_wh / durationHours;
       expect(derivedPower).toBeGreaterThan(0);
     }
 
@@ -103,10 +103,10 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(result.oracle_entries).toHaveLength(2);
     const first = result.oracle_entries[0];
     expect(first.strategy).toBe("auto");
-    expect(first.grid_energy_w).not.toBeNull();
-    if (first.grid_energy_w !== null) {
+    expect(first.grid_energy_wh).not.toBeNull();
+    if (first.grid_energy_wh !== null) {
       const durationHours = slots[0].durationHours;
-      const derivedPower = first.grid_energy_w / durationHours;
+      const derivedPower = first.grid_energy_wh / durationHours;
       expect(derivedPower).toBeLessThanOrEqual(0);
     }
 

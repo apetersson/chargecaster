@@ -125,7 +125,7 @@ export class SimulationService {
       baseline_cost_eur: snapshot.baseline_cost_eur,
       basic_battery_cost_eur: snapshot.basic_battery_cost_eur,
       projected_savings_eur: snapshot.projected_savings_eur,
-      projected_grid_energy_w: snapshot.projected_grid_energy_w,
+      projected_grid_power_w: snapshot.projected_grid_power_w,
       forecast_hours: snapshot.forecast_hours,
       forecast_samples: snapshot.forecast_samples,
       warnings: snapshot.warnings ?? [],
@@ -245,7 +245,7 @@ export class SimulationService {
       active_control_savings_eur: autoResult.projected_cost_eur !== null && result.projected_cost_eur !== null
         ? autoResult.projected_cost_eur - result.projected_cost_eur
         : null,
-      projected_grid_energy_w: result.projected_grid_energy_w,
+      projected_grid_power_w: result.projected_grid_power_w,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
       forecast_eras: hasProvidedEras ? input.forecastEras! : fallbackEras,
@@ -532,7 +532,7 @@ interface SimulationOutput {
   projected_cost_eur: number;
   baseline_cost_eur: number;
   projected_savings_eur: number;
-  projected_grid_energy_w: number;
+  projected_grid_power_w: number;
   average_price_eur_per_kwh: number;
   forecast_samples: number;
   forecast_hours: number;
@@ -745,7 +745,7 @@ function simulateOptimalSchedule(
       start_soc_percent: Number.isFinite(startSocPercent) ? startSocPercent : null,
       end_soc_percent: Number.isFinite(endSocPercent) ? endSocPercent : null,
       target_soc_percent: Number.isFinite(endSocPercent) ? endSocPercent : null,
-      grid_energy_w: normalizedGridEnergyWh,
+      grid_energy_wh: normalizedGridEnergyWh,
       strategy,
     });
 
@@ -776,7 +776,7 @@ function simulateOptimalSchedule(
     projected_cost_eur: costTotal,
     baseline_cost_eur: baselineCost,
     projected_savings_eur: projectedSavings,
-    projected_grid_energy_w: projectedGridPowerW,
+    projected_grid_power_w: projectedGridPowerW,
     average_price_eur_per_kwh: avgPrice,
     forecast_samples: slots.length,
     forecast_hours: totalDuration,
