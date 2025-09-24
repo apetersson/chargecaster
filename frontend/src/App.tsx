@@ -108,23 +108,10 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
     toNumber(record.grid_power_w ?? record.gridPowerW ?? record.grid_power ?? record.gridPower ?? record.grid_import_power ?? record.gridImportPower) ??
     (gridPowerKw !== null ? gridPowerKw * 1000 : null);
 
-  const gridEnergyKwh = toNumber(record.grid_energy_kwh ?? record.gridEnergyKwh);
-  const rawGridEnergyWh =
-    toNumber(record.grid_energy_w ?? record.gridEnergyW) ??
-    (gridEnergyKwh !== null ? gridEnergyKwh * 1000 : null);
-
-  const gridEnergy = rawGridEnergyWh !== null && Number.isFinite(rawGridEnergyWh)
-    ? Energy.fromWattHours(rawGridEnergyWh)
-    : null;
-
   let gridPower: number | null = null;
   if (rawGridPower !== null && Number.isFinite(rawGridPower)) {
     gridPower = Power.fromWatts(rawGridPower).watts;
-  } else if (gridEnergy) {
-    gridPower = gridEnergy.divideByDuration(Duration.fromHours(1)).watts;
   }
-
-  const gridEnergyWh = gridEnergy ? gridEnergy.wattHours : null;
 
   const solarPowerKw = toNumber(
     record.solar_power_kw ??
@@ -181,7 +168,6 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
     price_ct_per_kwh: priceCt ?? (priceEur !== null ? priceEur * 100 : null),
     price_eur_per_kwh: priceEur,
     grid_power_w: gridPower,
-    grid_energy_w: gridEnergyWh,
     solar_power_w: solarPower,
     solar_energy_wh: solarEnergyWh,
   };

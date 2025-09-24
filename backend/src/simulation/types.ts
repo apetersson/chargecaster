@@ -58,7 +58,6 @@ export const historyPointSchema = z
     price_ct_per_kwh: nullableNumberSchema.optional(),
     price_eur_per_kwh: nullableNumberSchema,
     grid_power_w: nullableNumberSchema.optional().default(null),
-    grid_energy_w: nullableNumberSchema.optional().default(null),
     solar_power_w: nullableNumberSchema.optional().default(null),
     solar_energy_wh: nullableNumberSchema.optional().default(null),
   })

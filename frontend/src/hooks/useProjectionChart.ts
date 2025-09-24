@@ -449,9 +449,7 @@ const buildGridSeries = (
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => {
-      const power = isFiniteNumber(entry.grid_power_w)
-        ? entry.grid_power_w
-        : derivePowerFromEnergy(entry.grid_energy_w, 1);
+      const power = isFiniteNumber(entry.grid_power_w) ? entry.grid_power_w : null;
       return toHistoryPoint(entry.timestamp, power);
     })
     .filter((point): point is ProjectionPoint => point !== null);
