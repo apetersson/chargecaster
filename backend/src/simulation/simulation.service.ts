@@ -262,7 +262,6 @@ export class SimulationService {
       price_eur_per_kwh: priceSnapshotEur,
       price_ct_per_kwh: priceSnapshotCt,
       grid_power_w: null,
-      grid_energy_w: null,
       solar_power_w: null,
       solar_energy_wh: null,
     };
@@ -270,24 +269,6 @@ export class SimulationService {
     const observedGridPower = input.observations?.gridPowerW;
     if (typeof observedGridPower === "number" && Number.isFinite(observedGridPower)) {
       historyEntry.grid_power_w = observedGridPower;
-    }
-
-    const firstOracle = result.oracle_entries[0];
-    if (firstOracle) {
-      const firstSlot = slots[0];
-      if (
-        typeof firstOracle.grid_energy_w === "number" &&
-        Number.isFinite(firstOracle.grid_energy_w)
-      ) {
-        const durationHours = firstSlot?.durationHours ?? null;
-        if (durationHours && durationHours > 0) {
-          const derivedPower = firstOracle.grid_energy_w / durationHours;
-          if (Number.isFinite(derivedPower)) {
-            historyEntry.grid_power_w ??= derivedPower;
-          }
-        }
-        historyEntry.grid_energy_w = firstOracle.grid_energy_w;
-      }
     }
 
     const firstSolarKwh = solarGeneration[0];

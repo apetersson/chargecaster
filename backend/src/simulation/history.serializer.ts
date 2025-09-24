@@ -116,15 +116,6 @@ export function normalizeHistoryEntry(entry: HistoryRawEntry): HistoryPoint {
     {key: "gridPowerKw", factor: 1000},
   ]);
 
-  const gridEnergyWh = pickNumeric(entry, [
-    {key: "grid_energy_wh"},
-    {key: "gridEnergyWh"},
-    {key: "grid_energy_w"},
-    {key: "gridEnergyW"},
-    {key: "grid_energy_kwh", factor: 1000},
-    {key: "gridEnergyKwh", factor: 1000},
-  ]);
-
   const solarPowerW = pickNumeric(entry, [
     {key: "solar_power_w"},
     {key: "solarPowerW"},
@@ -157,7 +148,6 @@ export function normalizeHistoryEntry(entry: HistoryRawEntry): HistoryPoint {
     price_ct_per_kwh: priceCt,
     price_eur_per_kwh: priceEur,
     grid_power_w: gridPowerW,
-    grid_energy_w: gridEnergyWh,
     solar_power_w: solarPowerW,
     solar_energy_wh: solarEnergyWh,
   };
