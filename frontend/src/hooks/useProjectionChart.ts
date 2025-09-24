@@ -333,12 +333,13 @@ const computeBounds = (
   let min = dataMin;
   let max = dataMax;
 
+  const paddingFactor = 0.0;
   if (min === max) {
-    const padding = Math.max(Math.abs(min) * 0.1, 1);
+    const padding = Math.max(Math.abs(min) * paddingFactor, 1);
     min -= padding;
     max += padding;
   } else {
-    const padding = Math.max((max - min) * 0.1, Number.EPSILON);
+    const padding = Math.max((max - min) * paddingFactor, Number.EPSILON);
     min -= padding;
     max += padding;
   }
