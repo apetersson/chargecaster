@@ -57,6 +57,8 @@ export function normaliseSolarTimeseries(points: RawSolarTimeseriesPoint[]): Nor
     return samples;
   }
 
+  let previousDurationMs: number | null = null;
+
   for (let index = 0; index < points.length; index += 1) {
     const current = points[index] ?? {};
     const next = index + 1 < points.length ? points[index + 1] ?? {} : undefined;
@@ -66,14 +68,21 @@ export function normaliseSolarTimeseries(points: RawSolarTimeseriesPoint[]): Nor
       continue;
     }
 
-    const end = parseTemporal(current.end ?? next?.ts ?? next?.start);
-    const resolvedEnd = end ?? new Date(start.getTime() + SLOT_DURATION_MS);
+    const nextStart = parseTemporal(next?.ts ?? next?.start);
+    let end = parseTemporal(current.end);
+    if (!end && nextStart) {
+      end = nextStart;
+    }
+
+    const fallbackDurationMs = previousDurationMs ?? SLOT_DURATION_MS;
+    const resolvedEnd = end ?? new Date(start.getTime() + fallbackDurationMs);
 
     if (resolvedEnd.getTime() <= start.getTime()) {
       continue;
     }
 
     const slot = TimeSlot.fromDates(start, resolvedEnd);
+    previousDurationMs = slot.end.getTime() - slot.start.getTime();
     const duration = slot.duration;
 
     const explicitEnergyKwh = typeof current.energy_kwh === "number" ? current.energy_kwh : null;
