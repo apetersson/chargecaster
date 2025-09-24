@@ -100,11 +100,57 @@ table {
     font-size: 0.9rem;
 }
 
+.history-table,
+.forecast-table {
+    table-layout: fixed;
+}
+
+.history-table col.col-time,
+.forecast-table col.col-time {
+    width: 25%;
+}
+
+.history-table col.col-range,
+.forecast-table col.col-range {
+    width: 5%;
+}
+
+.history-table col.col-price,
+.forecast-table col.col-price {
+    width: 20%;
+}
+
+.history-table col.col-solar,
+.forecast-table col.col-solar {
+    width: 15%;
+}
+
+.history-table col.col-soc,
+.forecast-table col.col-soc {
+    width: 15%;
+}
+
+.history-table col.col-power,
+.forecast-table col.col-power {
+    width: 20%;
+}
+
 th,
 td {
     padding: 0.6rem 0.8rem;
     border-bottom: 1px solid rgba(148, 163, 184, 0.2);
     text-align: left;
+}
+
+th.numeric,
+td.numeric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+th.timestamp,
+td.timestamp {
+    white-space: nowrap;
 }
 
 tr:nth-child(odd) {

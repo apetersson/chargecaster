@@ -18,40 +18,37 @@ const HistoryTable = ({history}: HistoryTableProps) => {
     <section className="card">
       <h2>Recent History</h2>
       <div className="table-wrapper">
-        <table>
+        <table className="history-table">
+          <colgroup>
+            <col className="col-time"/>
+            <col className="col-range"/>
+            <col className="col-price"/>
+            <col className="col-solar"/>
+            <col className="col-soc"/>
+            <col className="col-power"/>
+          </colgroup>
           <thead>
           <tr>
-            <th>Timestamp</th>
-            <th>Battery SOC %</th>
-            <th>Price (ct/kWh)</th>
-            <th>Grid Power</th>
-            <th>Solar Production</th>
+            <th className="timestamp">Timestamp</th>
+            <th className="timestamp">End</th>
+            <th className="numeric">Price (ct/kWh)</th>
+            <th className="numeric">Solar (W)</th>
+            <th className="numeric">Battery SOC %</th>
+            <th className="numeric">Grid Power (W)</th>
           </tr>
           </thead>
           <tbody>
           {rows.map((item, idx) => (
             <tr key={`${item.timestamp}-${idx}`}>
-              <td>{formatDate(item.timestamp)}</td>
-              <td>{formatPercent(item.battery_soc_percent ?? null)}</td>
-              <td>{
-                typeof item.price_ct_per_kwh === "number"
-                  ? formatNumber(item.price_ct_per_kwh, " ct/kWh")
-                  : typeof item.price_eur_per_kwh === "number"
-                    ? formatNumber(item.price_eur_per_kwh * 100, " ct/kWh")
-                    : "n/a"
-              }</td>
-              <td>{
-                typeof item.grid_power_w === "number"
-                  ? formatNumber(item.grid_power_w, " W")
-                  : "n/a"
-              }</td>
-              <td>{
-                typeof item.solar_power_w === "number"
-                  ? formatNumber(item.solar_power_w, " W")
-                  : typeof item.solar_energy_wh === "number"
-                    ? formatNumber(item.solar_energy_wh, " Wh")
-                    : "n/a"
-              }</td>
+              <td className="timestamp">{formatDate(item.timestamp)}</td>
+              <td className="timestamp">--</td>
+              <td className="numeric">{
+                formatNumber(item.price_ct_per_kwh, " ct/kWh")}</td>
+              <td className="numeric">{
+                formatNumber(item.solar_power_w, " W")}</td>
+              <td className="numeric">{formatPercent(item.battery_soc_percent ?? null)}</td>
+              <td className="numeric">{
+                formatNumber(item.grid_power_w, " W")}</td>
             </tr>
           ))}
           </tbody>

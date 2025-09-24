@@ -123,15 +123,23 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
     <section className="card">
       <h2>Forecast Horizon</h2>
       <div className="table-wrapper">
-        <table>
+        <table className="forecast-table">
+          <colgroup>
+            <col className="col-time" />
+            <col className="col-range" />
+            <col className="col-price" />
+            <col className="col-solar" />
+            <col className="col-soc" />
+            <col className="col-power" />
+          </colgroup>
           <thead>
           <tr>
-            <th>Start</th>
-            <th>End</th>
-            <th>Market Price</th>
-            <th>Solar (W)</th>
-            <th>End SOC %</th>
-            <th>Grid Power (W)</th>
+            <th className="timestamp">Start</th>
+            <th className="timestamp">End</th>
+            <th className="numeric">Market Price</th>
+            <th className="numeric">Solar (W)</th>
+            <th className="numeric">End SOC %</th>
+            <th className="numeric">Grid Power (W)</th>
           </tr>
           </thead>
           <tbody>
@@ -180,12 +188,12 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
             }
             return (
               <tr key={era.era_id}>
-                <td>{formatDate(era.start)}</td>
-                <td>{era.end ? timeFormatter.format(new Date(era.end)) : "n/a"}</td>
-                <td>{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
-                <td>{solarLabel}</td>
-                <td>{targetLabel}</td>
-                <td>{gridPower}</td>
+                <td className="timestamp">{formatDate(era.start)}</td>
+                <td className="timestamp">{era.end ? timeFormatter.format(new Date(era.end)) : "n/a"}</td>
+                <td className="numeric">{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
+                <td className="numeric">{solarLabel}</td>
+                <td className="numeric">{targetLabel}</td>
+                <td className="numeric">{gridPower}</td>
               </tr>
             );
           })}
