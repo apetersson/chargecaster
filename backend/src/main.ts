@@ -69,6 +69,17 @@ async function bootstrap(): Promise<NestFastifyApplication> {
     if (typeof routesTree === "string" && routesTree.trim().length > 0) {
       logger.log(`Routes:\n${routesTree}`);
     }
+
+    const trpcProcedures = trpcRouter.listProcedures();
+    if (trpcProcedures.length) {
+      const formatted = trpcProcedures
+        .map(({path, type}, index) => {
+          const prefix = index === trpcProcedures.length - 1 ? "└──" : "├──";
+          return `${prefix} ${type.toUpperCase()} /trpc/${path}`;
+        })
+        .join("\n");
+      logger.log(`tRPC procedures:\n${formatted}`);
+    }
   }
 
   return app;

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { initTRPC } from "@trpc/server";
+import { initTRPC, type AnyProcedure, type AnyRouter, type ProcedureType } from "@trpc/server";
 import { z } from "zod";
 
 import type { RawForecastEntry, SimulationConfig } from "../simulation/types";
@@ -119,6 +119,39 @@ export class TrpcRouter {
         }),
       }),
     });
+  }
+
+  public listProcedures(): { path: string; type: ProcedureType }[] {
+    return this.collectProcedures(this.router);
+  }
+
+  private collectProcedures(router: AnyRouter, parent = ""): { path: string; type: ProcedureType }[] {
+    const result: { path: string; type: ProcedureType }[] = [];
+    const entries = Object.entries(router._def.procedures as Record<string, unknown>);
+
+    for (const [key, value] of entries) {
+      const path = parent ? `${parent}.${key}` : key;
+      if (this.isRouter(value)) {
+        result.push(...this.collectProcedures(value, path));
+        continue;
+      }
+
+      const procedure = value as AnyProcedure;
+      result.push({path, type: procedure._def.type});
+    }
+
+    return result;
+  }
+
+  private isRouter(value: unknown): value is AnyRouter {
+    if (typeof value !== "object" || value === null) {
+      return false;
+    }
+    const rawDef = (value as { _def?: unknown })._def;
+    if (typeof rawDef !== "object" || rawDef === null) {
+      return false;
+    }
+    return Object.prototype.hasOwnProperty.call(rawDef, "procedures");
   }
 }
 
