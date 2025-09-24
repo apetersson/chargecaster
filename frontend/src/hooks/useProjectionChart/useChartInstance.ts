@@ -26,6 +26,11 @@ export const useChartInstance = (
       chartInstance.current = null;
     }
 
+    const activeChart = Chart.getChart(canvas as HTMLCanvasElement | string);
+    if (activeChart) {
+      activeChart.destroy();
+    }
+
     const chart = new Chart(context, {
       type: "line",
       data: {datasets},
