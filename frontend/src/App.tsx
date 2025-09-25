@@ -8,15 +8,7 @@ import SummaryCards from "./components/SummaryCards";
 import TrajectoryTable from "./components/TrajectoryTable";
 import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart";
-import type {
-  ForecastEra,
-  ForecastResponse,
-  HistoryPoint,
-  HistoryResponse,
-  OracleEntry,
-  OracleResponse,
-  SnapshotSummary,
-} from "./types";
+import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary, } from "./types";
 import { toNumber } from "./utils/number";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -170,6 +162,12 @@ const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
     grid_power_w: gridPower,
     solar_power_w: solarPower,
     solar_energy_wh: solarEnergyWh,
+    backtested_savings_eur: toNumber(
+      record.backtested_savings_eur ??
+      record.backtest_savings_eur ??
+      record.backtestedSavingsEur ??
+      record.backtestSavingsEur,
+    ),
   };
 };
 
@@ -186,19 +184,10 @@ const App = () => {
     const execute = async () => {
       try {
         setLoading(true);
-        const client = trpcClient as unknown as {
-          dashboard: {
-            summary: { query: () => Promise<SnapshotSummary> };
-            history: { query: () => Promise<HistoryResponse> };
-            forecast: { query: () => Promise<ForecastResponse> };
-            oracle: { query: () => Promise<OracleResponse> };
-          };
-        };
-
-        const summaryData = await client.dashboard.summary.query();
-        const historyData = await client.dashboard.history.query();
-        const forecastData = await client.dashboard.forecast.query();
-        const oracleData = await client.dashboard.oracle.query();
+        const summaryData = await trpcClient.dashboard.summary.query();
+        const historyData = await trpcClient.dashboard.history.query();
+        const forecastData = await trpcClient.dashboard.forecast.query();
+        const oracleData = await trpcClient.dashboard.oracle.query();
 
         setSummary(summaryData);
 

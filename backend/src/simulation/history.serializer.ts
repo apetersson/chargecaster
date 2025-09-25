@@ -142,6 +142,13 @@ export function normalizeHistoryEntry(entry: HistoryRawEntry): HistoryPoint {
     {key: "pvEnergyKwh", factor: 1000},
   ]);
 
+  const backtestedSavingsEur = pickNumeric(entry, [
+    {key: "backtested_savings_eur"},
+    {key: "backtest_savings_eur"},
+    {key: "backtestedSavingsEur"},
+    {key: "backtestSavingsEur"},
+  ]);
+
   return {
     timestamp,
     battery_soc_percent: batterySoc,
@@ -150,6 +157,7 @@ export function normalizeHistoryEntry(entry: HistoryRawEntry): HistoryPoint {
     grid_power_w: gridPowerW,
     solar_power_w: solarPowerW,
     solar_energy_wh: solarEnergyWh,
+    backtested_savings_eur: backtestedSavingsEur,
   };
 }
 

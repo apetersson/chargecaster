@@ -8,7 +8,7 @@
     "start": "tsx src/main.ts",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
+    "test": "vitest run",
     "test:e2e": "vitest run test/e2e"
   },
   "dependencies": {
