@@ -53,11 +53,13 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=4000 \
     BATTERYCTL_CONFIG=/app/config.yaml \
-    VITE_TRPC_URL=/trpc
+    VITE_TRPC_URL=/trpc \
+    NGINX_PORT=8080
 
 COPY --from=backend-builder /app/backend /app/backend
 COPY --from=frontend-builder /app/frontend/dist /public
 
+COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-default.conf /etc/nginx/conf.d/default.conf
 COPY config.yaml.sample /app/config.yaml.sample
 COPY config.yaml /app/config.yaml.dist
@@ -66,10 +68,14 @@ COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh \
   && rm -f /etc/nginx/sites-enabled/default \
-  && ln -s /data /app/data
+  && mkdir -p /data /var/run/nginx \
+  && ln -s /data /app/data \
+  && chown -R node:node /app /data /var/cache/nginx /var/lib/nginx /var/run/nginx
 
 VOLUME ["/data"]
 
-EXPOSE 80
+EXPOSE 8080
+
+USER node
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
