@@ -22,6 +22,7 @@ export class SummaryService {
       baseline_cost_eur: snapshot.baseline_cost_eur,
       basic_battery_cost_eur: snapshot.basic_battery_cost_eur,
       active_control_savings_eur: snapshot.active_control_savings_eur,
+      backtested_savings_eur: snapshot.backtested_savings_eur,
       projected_savings_eur: snapshot.projected_savings_eur,
       projected_grid_power_w: snapshot.projected_grid_power_w,
       forecast_hours: snapshot.forecast_hours,

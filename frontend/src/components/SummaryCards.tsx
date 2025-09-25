@@ -7,9 +7,6 @@ const SummaryCards = ({data}: { data: SnapshotSummary | null }) => {
   }
   const {label, className} = statusClass(data.errors, data.warnings);
 
-  const activeControlSavings =
-    (data as { active_control_savings_eur?: number | null }).active_control_savings_eur ?? null;
-
   const currentMode = data.current_mode ?? null;
   const actionLabel = (() => {
     if (currentMode === "charge") {
@@ -65,8 +62,12 @@ const SummaryCards = ({data}: { data: SnapshotSummary | null }) => {
           <span className="value small">{formatNumber(data.projected_savings_eur, " €")}</span>
         </div>
         <div className="metric">
-          <span className="label">Active Control Savings</span>
-          <span className="value small">{formatNumber(activeControlSavings, " €")}</span>
+          <span className="label">Active Control Projected Savings</span>
+          <span className="value small">{formatNumber(data.active_control_savings_eur, " €")}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Past 24h Savings</span>
+          <span className="value small">{formatNumber(data.backtested_savings_eur, " €")}</span>
         </div>
         <div className="metric">
           <span className="label">Projected Grid Power</span>

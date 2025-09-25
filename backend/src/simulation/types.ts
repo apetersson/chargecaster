@@ -60,6 +60,7 @@ export const historyPointSchema = z
     grid_power_w: nullableNumberSchema.optional().default(null),
     solar_power_w: nullableNumberSchema.optional().default(null),
     solar_energy_wh: nullableNumberSchema.optional().default(null),
+    backtested_savings_eur: nullableNumberSchema.optional().default(null),
   })
   .strip();
 
@@ -126,6 +127,7 @@ export const snapshotPayloadSchema = z.object({
   baseline_cost_eur: nullableNumberSchema,
   basic_battery_cost_eur: nullableNumberSchema.optional(),
   active_control_savings_eur: nullableNumberSchema.optional(),
+  backtested_savings_eur: nullableNumberSchema.optional(),
   projected_savings_eur: nullableNumberSchema,
   projected_grid_power_w: nullableNumberSchema,
   forecast_hours: nullableNumberSchema,
@@ -154,6 +156,7 @@ export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   baseline_cost_eur: true,
   basic_battery_cost_eur: true,
   active_control_savings_eur: true,
+  backtested_savings_eur: true,
   projected_savings_eur: true,
   projected_grid_power_w: true,
   forecast_hours: true,

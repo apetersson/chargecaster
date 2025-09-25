@@ -4,3 +4,4 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 /packages/domain/dist-cjs/
+/data/

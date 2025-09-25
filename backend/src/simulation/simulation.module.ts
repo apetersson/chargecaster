@@ -5,6 +5,7 @@ import { ForecastService } from "./forecast.service";
 import { HistoryService } from "./history.service";
 import { SummaryService } from "./summary.service";
 import { OracleService } from "./oracle.service";
+import { BacktestSavingsService } from "./backtest.service";
 import { ConfigFileService } from "../config/config-file.service";
 import { SimulationPreparationService } from "../config/simulation-preparation.service";
 import { SimulationSeedService } from "../config/simulation-seed.service";
@@ -22,6 +23,7 @@ import { StorageModule } from "../storage/storage.module";
     ForecastService,
     HistoryService,
     SummaryService,
+    BacktestSavingsService,
     OracleService,
     SimulationSeedService,
     SimulationPreparationService,
@@ -37,6 +39,7 @@ import { StorageModule } from "../storage/storage.module";
     ForecastService,
     HistoryService,
     SummaryService,
+    BacktestSavingsService,
     OracleService,
     SimulationSeedService,
     SimulationPreparationService,

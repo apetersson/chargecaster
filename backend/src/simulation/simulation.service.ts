@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
+import { BacktestSavingsService } from "./backtest.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { parseEvccState } from "../config/schemas";
 import { EnergyPrice, TariffSlot } from "@batteryctl/domain";
@@ -43,7 +44,10 @@ export interface SimulationInput {
 export class SimulationService {
   private readonly logger = new Logger(SimulationService.name);
 
-  constructor(@Inject(StorageService) private readonly storageRef: StorageService) {
+  constructor(
+    @Inject(StorageService) private readonly storageRef: StorageService,
+    @Inject(BacktestSavingsService) private readonly backtestService: BacktestSavingsService,
+  ) {
   }
 
   getLatestSnapshot(): SnapshotPayload | null {
@@ -124,6 +128,7 @@ export class SimulationService {
       projected_cost_eur: snapshot.projected_cost_eur,
       baseline_cost_eur: snapshot.baseline_cost_eur,
       basic_battery_cost_eur: snapshot.basic_battery_cost_eur,
+      backtested_savings_eur: snapshot.backtested_savings_eur,
       projected_savings_eur: snapshot.projected_savings_eur,
       projected_grid_power_w: snapshot.projected_grid_power_w,
       forecast_hours: snapshot.forecast_hours,
@@ -245,6 +250,7 @@ export class SimulationService {
       active_control_savings_eur: autoResult.projected_cost_eur !== null && result.projected_cost_eur !== null
         ? autoResult.projected_cost_eur - result.projected_cost_eur
         : null,
+      backtested_savings_eur: null,
       projected_grid_power_w: result.projected_grid_power_w,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
@@ -254,8 +260,6 @@ export class SimulationService {
       warnings,
       errors,
     };
-
-    this.storageRef.replaceSnapshot(structuredClone(snapshot));
     const historyEntry: HistoryPoint = {
       timestamp: result.timestamp,
       battery_soc_percent: result.initial_soc_percent,
@@ -264,6 +268,7 @@ export class SimulationService {
       grid_power_w: null,
       solar_power_w: null,
       solar_energy_wh: null,
+      backtested_savings_eur: null,
     };
 
     const observedGridPower = input.observations?.gridPowerW;
@@ -298,6 +303,18 @@ export class SimulationService {
       }
     }
 
+    const backtestHistoryCandidates = this.storageRef.listHistory(500);
+    const backtestResult = this.backtestService.calculate(input.config, {
+      history: backtestHistoryCandidates.map((item) => item.payload),
+      extraEntries: [historyEntry],
+      referenceTimestamp: result.timestamp,
+    });
+    if (backtestResult) {
+      snapshot.backtested_savings_eur = backtestResult.savingsEur;
+      historyEntry.backtested_savings_eur = backtestResult.savingsEur;
+    }
+
+    this.storageRef.replaceSnapshot(structuredClone(snapshot));
     this.storageRef.appendHistory([historyEntry]);
 
     const historyRecords = this.storageRef.listHistory();
