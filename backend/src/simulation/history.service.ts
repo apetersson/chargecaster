@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { HistoryPoint, HistoryRawEntry, HistoryResponse } from "./types";
+import type { HistoryPoint, HistoryResponse } from "./types";
 import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
 
@@ -15,7 +15,7 @@ export class HistoryService {
     return {generated_at: generated_at ?? new Date().toISOString(), entries};
   }
 
-  private serialize(history: HistoryRawEntry[]): HistoryPoint[] {
+  private serialize(history: HistoryPoint[]): HistoryPoint[] {
     return normalizeHistoryList(history);
   }
 }

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Duration, Energy, Power } from "@batteryctl/domain";
 
 import HistoryTable from "./components/HistoryTable";
 import MessageList from "./components/MessageList";
@@ -9,56 +8,8 @@ import TrajectoryTable from "./components/TrajectoryTable";
 import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary, } from "./types";
-import { toNumber } from "./utils/number";
 
 const REFRESH_INTERVAL_MS = 60_000;
-
-interface HistoryEntryLike {
-  timestamp?: unknown;
-  battery_soc_percent?: unknown;
-  price_with_fee_ct_per_kwh?: unknown;
-  total_price_ct_per_kwh?: unknown;
-  price_ct_per_kwh?: unknown;
-  price_eur_per_kwh?: unknown;
-  grid_power_kw?: unknown;
-  gridPowerKw?: unknown;
-  grid_power_w?: unknown;
-  gridPowerW?: unknown;
-  grid_power?: unknown;
-  gridPower?: unknown;
-  grid_import_power?: unknown;
-  gridImportPower?: unknown;
-  grid_energy_kwh?: unknown;
-  gridEnergyKwh?: unknown;
-  grid_energy_wh?: unknown;
-  gridEnergyWh?: unknown;
-  solar_power_kw?: unknown;
-  solarPowerKw?: unknown;
-  pv_power_kw?: unknown;
-  pvPowerKw?: unknown;
-  solar_kw?: unknown;
-  solarKw?: unknown;
-  pv_kw?: unknown;
-  pvKw?: unknown;
-  solar_power_w?: unknown;
-  solarPowerW?: unknown;
-  solar_power?: unknown;
-  solarPower?: unknown;
-  pv_power_w?: unknown;
-  pvPowerW?: unknown;
-  pv_power?: unknown;
-  pvPower?: unknown;
-  solar_energy_kwh?: unknown;
-  solarEnergyKwh?: unknown;
-  pv_energy_kwh?: unknown;
-  pvEnergyKwh?: unknown;
-  solar_energy_wh?: unknown;
-  solarEnergyWh?: unknown;
-  pv_energy_wh?: unknown;
-  pvEnergyWh?: unknown;
-
-  [key: string]: unknown;
-}
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -74,101 +25,6 @@ const getErrorMessage = (error: unknown): string => {
     }
   }
   return "Unknown error";
-};
-
-const toTimestamp = (value: unknown): string => {
-  if (typeof value === "string" && value.length > 0) {
-    return value;
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value).toISOString();
-  }
-  return new Date().toISOString();
-};
-
-const normalizeHistoryEntry = (entry: unknown): HistoryPoint => {
-  const record = (entry ?? {}) as HistoryEntryLike;
-  const priceCt =
-    toNumber(record.price_with_fee_ct_per_kwh ?? record.total_price_ct_per_kwh) ??
-    toNumber(record.price_ct_per_kwh);
-  const priceEur = toNumber(record.price_eur_per_kwh);
-  const gridPowerKw = toNumber(record.grid_power_kw ?? record.gridPowerKw);
-  const rawGridPower =
-    toNumber(record.grid_power_w ?? record.gridPowerW ?? record.grid_power ?? record.gridPower ?? record.grid_import_power ?? record.gridImportPower) ??
-    (gridPowerKw !== null ? gridPowerKw * 1000 : null);
-
-  let gridPower: number | null = null;
-  if (rawGridPower !== null && Number.isFinite(rawGridPower)) {
-    gridPower = Power.fromWatts(rawGridPower).watts;
-  }
-
-  const solarPowerKw = toNumber(
-    record.solar_power_kw ??
-    record.solarPowerKw ??
-    record.pv_power_kw ??
-    record.pvPowerKw ??
-    record.solar_kw ??
-    record.solarKw ??
-    record.pv_kw ??
-    record.pvKw,
-  );
-  const rawSolarPower =
-    toNumber(
-      record.solar_power_w ??
-      record.solarPowerW ??
-      record.solar_power ??
-      record.solarPower ??
-      record.pv_power_w ??
-      record.pvPowerW ??
-      record.pv_power ??
-      record.pvPower,
-    ) ?? (solarPowerKw !== null ? solarPowerKw * 1000 : null);
-
-  const solarEnergyKwh = toNumber(
-    record.solar_energy_kwh ??
-    record.solarEnergyKwh ??
-    record.pv_energy_kwh ??
-    record.pvEnergyKwh,
-  );
-  const rawSolarEnergyWh =
-    toNumber(
-      record.solar_energy_wh ??
-      record.solarEnergyWh ??
-      record.pv_energy_wh ??
-      record.pvEnergyWh,
-    ) ?? (solarEnergyKwh !== null ? solarEnergyKwh * 1000 : null);
-
-  const solarEnergy = rawSolarEnergyWh !== null && Number.isFinite(rawSolarEnergyWh)
-    ? Energy.fromWattHours(rawSolarEnergyWh)
-    : null;
-
-  let solarPower: number | null = null;
-  if (rawSolarPower !== null && Number.isFinite(rawSolarPower)) {
-    solarPower = Power.fromWatts(rawSolarPower).watts;
-  } else if (solarEnergy) {
-    solarPower = solarEnergy.divideByDuration(Duration.fromHours(1)).watts;
-  }
-
-  const solarEnergyWh = solarEnergy ? solarEnergy.wattHours : null;
-
-  return {
-    timestamp: toTimestamp(record.timestamp),
-    battery_soc_percent: toNumber(record.battery_soc_percent),
-    price_ct_per_kwh: priceCt ?? (priceEur !== null ? priceEur * 100 : null),
-    price_eur_per_kwh: priceEur,
-    grid_power_w: gridPower,
-    solar_power_w: solarPower,
-    solar_energy_wh: solarEnergyWh,
-    backtested_savings_eur: toNumber(
-      record.backtested_savings_eur ??
-      record.backtest_savings_eur ??
-      record.backtestedSavingsEur ??
-      record.backtestSavingsEur,
-    ),
-  };
 };
 
 
@@ -191,8 +47,8 @@ const App = () => {
 
         setSummary(summaryData);
 
-        const normalizedHistory = (historyData.entries ?? []).map((entry) => normalizeHistoryEntry(entry));
-        setHistory(normalizedHistory);
+        const entries = Array.isArray(historyData.entries) ? historyData.entries : [];
+        setHistory(entries);
 
         setForecast(Array.isArray(forecastData.eras) ? forecastData.eras : []);
         setOracleEntries(Array.isArray(oracleData.entries) ? oracleData.entries : []);
