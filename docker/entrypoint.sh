@@ -15,7 +15,8 @@ if [ ! -e "${BATTERYCTL_CONFIG}" ] && [ -f "${APP_ROOT}/config.yaml.sample" ]; t
 fi
 
 if [ ! -d /data ]; then
-  mkdir -p /data
+  echo "/data mount not present; bind the volume so user $(id -un) can persist state" >&2
+  exit 1
 fi
 
 if [ ! -L "${APP_ROOT}/data" ]; then
@@ -24,6 +25,17 @@ if [ ! -L "${APP_ROOT}/data" ]; then
 fi
 
 mkdir -p /data/db
+
+if [ ! -r "${BATTERYCTL_CONFIG}" ]; then
+  echo "Config ${BATTERYCTL_CONFIG} must be readable by user $(id -un)" >&2
+  exit 1
+fi
+
+if ! touch /data/db/.write-test 2>/dev/null; then
+  echo "User $(id -un) requires write access to /data/db for SQLite state" >&2
+  exit 1
+fi
+rm -f /data/db/.write-test 2>/dev/null || true
 
 cd "${BACKEND_ROOT}"
 

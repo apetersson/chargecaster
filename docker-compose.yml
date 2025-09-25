@@ -3,7 +3,7 @@ services:
     build: .
     container_name: batteryctl
     ports:
-      - "6969:80"
+      - "6969:8080"
     environment:
       BATTERYCTL_CONFIG: /app/config.yaml
     volumes:
