@@ -244,12 +244,13 @@ export const computeBounds = (
   let min = dataMin;
   let max = dataMax;
 
+  const PADDING_FACTOR = 0.0;
   if (min === max) {
-    const padding = Math.max(Math.abs(min) * 0.1, 1);
+    const padding = Math.max(Math.abs(min) * PADDING_FACTOR, 1);
     min -= padding;
     max += padding;
   } else {
-    const padding = Math.max((max - min) * 0.1, Number.EPSILON);
+    const padding = Math.max((max - min) * PADDING_FACTOR, Number.EPSILON);
     min -= padding;
     max += padding;
   }
