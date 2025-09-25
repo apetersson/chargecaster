@@ -2,6 +2,7 @@ services:
   batteryctl:
     build: .
     container_name: batteryctl
+    read_only: true
     ports:
       - "6969:8080"
     environment:
@@ -9,4 +10,9 @@ services:
     volumes:
       - ./data:/data
       - ${BATTERYCTL_CONFIG_FILE:-./config.local.yaml}:/app/config.yaml:ro
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+      - /var/cache/nginx:uid=1000,gid=1000,mode=755
+      - /var/run/nginx:uid=1000,gid=1000,mode=755
+      - /var/lib/nginx:uid=1000,gid=1000,mode=755
     restart: unless-stopped

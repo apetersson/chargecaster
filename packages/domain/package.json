@@ -9,15 +9,17 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist-cjs/index.js",
       "types": "./dist/index.d.ts"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "dist-cjs"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "clean": "rm -rf dist"
+    "build": "yarn clean && tsc -p tsconfig.build.json && tsc -p tsconfig.build.cjs.json && node -e \"const fs=require('fs');fs.mkdirSync('dist-cjs',{recursive:true});fs.writeFileSync('dist-cjs/package.json', JSON.stringify({type:'commonjs'}, null, 2));\"",
+    "clean": "rm -rf dist dist-cjs"
   },
   "engines": {
     "node": ">=18"

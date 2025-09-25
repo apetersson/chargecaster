@@ -4,6 +4,7 @@ node_modules
 dist
 frontend/dist
 backend/dist
+config.yaml
 data
 state
 __pycache__
