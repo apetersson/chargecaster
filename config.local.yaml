@@ -1,0 +1,47 @@
+dry_run: true
+
+fronius:
+  host: "http://192.168.0.15"
+  user: technician
+  password: CHANGE_ME
+  batteries_path: "/config/batteries"
+  verify_tls: false
+  timeout_s: 2
+
+evcc:
+  enabled: true
+  base_url: http://biene.internal:7070
+
+price:
+  grid_fee_eur_per_kwh: 0.11
+  feed_in_tariff_eur_per_kwh: 0.038
+
+battery:
+  capacity_kwh: 10
+  max_charge_power_w: 500
+  max_charge_power_solar_w: 4500
+  auto_mode_floor_soc: 5
+
+logic:
+  min_hold_minutes: 0
+  interval_seconds: 300
+  house_load_w: 1200
+  allow_battery_export: false
+
+solar:
+  direct_use_ratio: 0.6
+
+logging:
+  level: INFO
+
+market_data:
+  enabled: true
+  prefer_market: true
+  url: https://api.awattar.at/v1/marketdata
+  max_hours: 72
+  source_label: awattar
+
+public:
+  snapshot_path: "./frontend/public/data/latest.json"
+  history_path: "./frontend/public/data/history.json"
+  history_hours: 12
