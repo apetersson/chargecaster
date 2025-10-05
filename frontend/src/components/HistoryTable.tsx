@@ -21,7 +21,6 @@ const HistoryTable = ({history}: HistoryTableProps) => {
         <table className="history-table">
           <colgroup>
             <col className="col-time"/>
-            <col className="col-range"/>
             <col className="col-price"/>
             <col className="col-solar"/>
             <col className="col-soc"/>
@@ -29,8 +28,7 @@ const HistoryTable = ({history}: HistoryTableProps) => {
           </colgroup>
           <thead>
           <tr>
-            <th className="timestamp">Timestamp</th>
-            <th className="timestamp">End</th>
+            <th className="timestamp">Time</th>
             <th className="numeric">Price (ct/kWh)</th>
             <th className="numeric">Solar (W)</th>
             <th className="numeric">Battery SOC %</th>
@@ -41,14 +39,10 @@ const HistoryTable = ({history}: HistoryTableProps) => {
           {rows.map((item, idx) => (
             <tr key={`${item.timestamp}-${idx}`}>
               <td className="timestamp">{formatDate(item.timestamp)}</td>
-              <td className="timestamp">--</td>
-              <td className="numeric">{
-                formatNumber(item.price_ct_per_kwh, " ct/kWh")}</td>
-              <td className="numeric">{
-                formatNumber(item.solar_power_w, " W")}</td>
+              <td className="numeric">{formatNumber(item.price_ct_per_kwh, " ct/kWh")}</td>
+              <td className="numeric">{formatNumber(item.solar_power_w, " W")}</td>
               <td className="numeric">{formatPercent(item.battery_soc_percent ?? null)}</td>
-              <td className="numeric">{
-                formatNumber(item.grid_power_w, " W")}</td>
+              <td className="numeric">{formatNumber(item.grid_power_w, " W")}</td>
             </tr>
           ))}
           </tbody>

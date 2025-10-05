@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import type { ForecastEra, OracleEntry } from "../types";
-import { formatDate, formatNumber, formatPercent, timeFormatter } from "../utils/format";
+import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
 import { TimeSlot } from "@chargecaster/domain";
 
 type TrajectoryTableProps = {
@@ -126,7 +126,6 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
         <table className="forecast-table">
           <colgroup>
             <col className="col-time" />
-            <col className="col-range" />
             <col className="col-price" />
             <col className="col-solar" />
             <col className="col-soc" />
@@ -134,8 +133,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
           </colgroup>
           <thead>
           <tr>
-            <th className="timestamp">Start</th>
-            <th className="timestamp">End</th>
+            <th className="timestamp">Time</th>
             <th className="numeric">Market Price</th>
             <th className="numeric">Solar (W)</th>
             <th className="numeric">End SOC %</th>
@@ -186,10 +184,15 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
                 }
               }
             }
+            const startLabel = era.start ? new Date(era.start) : null;
+            const endLabel = era.end ? new Date(era.end) : null;
+            const timeCell = startLabel
+              ? `${dateTimeNoSecondsFormatter.format(startLabel)}${endLabel ? ` — ${timeFormatter.format(endLabel)}` : ""}`
+              : "n/a";
+
             return (
               <tr key={era.era_id}>
-                <td className="timestamp">{formatDate(era.start)}</td>
-                <td className="timestamp">{era.end ? timeFormatter.format(new Date(era.end)) : "n/a"}</td>
+                <td className="timestamp">{timeCell}</td>
                 <td className="numeric">{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
                 <td className="numeric">{solarLabel}</td>
                 <td className="numeric">{targetLabel}</td>
