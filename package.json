@@ -1,0 +1,23 @@
+{
+  "name": "chargecaster",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend",
+    "packages/domain"
+  ],
+  "scripts": {
+    "bootstrap": "yarn install",
+    "build:domain": "yarn workspace @chargecaster/domain build",
+    "lint:backend": "yarn workspace chargecaster-backend lint",
+    "typecheck:backend": "yarn workspace chargecaster-backend typecheck",
+    "build:backend": "yarn workspace chargecaster-backend build",
+    "lint:frontend": "yarn workspace chargecaster-frontend lint",
+    "typecheck:frontend": "yarn workspace chargecaster-frontend typecheck",
+    "build:frontend": "yarn workspace chargecaster-frontend build",
+    "lint:all": "yarn lint:backend && yarn lint:frontend",
+    "typecheck:all": "yarn typecheck:backend && yarn typecheck:frontend",
+    "build:all": "yarn build:domain && yarn build:backend && yarn build:frontend"
+  }
+}
+
