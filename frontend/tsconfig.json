@@ -16,9 +16,7 @@
     "paths": {
       "@backend/trpc": ["../backend/src/trpc/trpc.router"],
       "@backend/trpc-types": ["../backend/src/trpc/trpc.router"],
-      "@backend/simulation-types": ["../backend/src/simulation/types"],
-      "@chargecaster/domain": ["../packages/domain/src/index.ts"],
-      "@chargecaster/domain/*": ["../packages/domain/src/*"]
+      "@backend/simulation-types": ["../backend/src/simulation/types"]
     },
     "isolatedModules": true,
     "noEmit": true,
