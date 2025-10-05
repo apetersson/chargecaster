@@ -66,7 +66,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
     logger.log(`API ready at ${baseUrl}`);
 
     const routesTree = fastify.printRoutes({includeHooks: false, includeMeta: false, commonPrefix: false});
-    if (typeof routesTree === "string" && routesTree.trim().length > 0) {
+    if (routesTree.trim().length > 0) {
       logger.log(`Routes:\n${routesTree}`);
     }
 
