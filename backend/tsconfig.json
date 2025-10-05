@@ -3,6 +3,11 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2022",
+    "baseUrl": ".",
+    "paths": {
+      "@chargecaster/domain": ["../packages/domain/src/index.ts"],
+      "@chargecaster/domain/*": ["../packages/domain/src/*"]
+    },
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "strict": true,
