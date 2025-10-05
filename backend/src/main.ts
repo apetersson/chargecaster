@@ -3,10 +3,10 @@ import "reflect-metadata";
 import type { AddressInfo } from "node:net";
 
 import cors from "@fastify/cors";
-import { existsSync, createReadStream } from "node:fs";
+import type { FastifyInstance } from "fastify";
+import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join, normalize } from "node:path";
-import { join } from "node:path";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
@@ -29,9 +29,8 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   app.useLogger(new Logger("bootstrap"));
   app.flushLogs();
 
-  const fastify = app.getHttpAdapter().getInstance();
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any
-  await (fastify.register as any)(cors, {
+  const fastify = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
+  await fastify.register(cors, {
     origin: true,
     methods: ["GET", "POST", "OPTIONS"],
   });
@@ -39,8 +38,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   const trpcRouter = app.get(TrpcRouter);
   const simulationService = app.get(SimulationService);
   const configSeedService = app.get(SimulationSeedService);
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any
-  await (fastify.register as any)(fastifyTRPCPlugin, {
+  await fastify.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
     trpcOptions: {
       router: trpcRouter.router,
@@ -64,7 +62,6 @@ async function bootstrap(): Promise<NestFastifyApplication> {
       return "application/octet-stream";
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     fastify.get("/*", async (req, reply) => {
       const url = req.raw.url ?? "/";
       let target = url.startsWith("/assets/") ? url : "/index.html";
