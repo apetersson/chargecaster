@@ -67,7 +67,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=4000 \
-    BATTERYCTL_CONFIG=/app/config.yaml \
+    CHARGECASTER_CONFIG=/app/config.yaml \
     VITE_TRPC_URL=/trpc \
     NGINX_PORT=8080
 

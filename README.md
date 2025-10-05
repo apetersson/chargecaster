@@ -1,6 +1,6 @@
-# batteryctl
+# chargecaster
 
-batteryctl plans charge/discharge schedules for a residential battery, persists the latest optimiser snapshot, and serves a React dashboard for quick monitoring. The codebase is TypeScript end-to-end: a NestJS backend publishes a tRPC API while a Vite bundle renders the UI.
+chargecaster plans charge/discharge schedules for a residential battery, persists the latest optimiser snapshot, and serves a React dashboard for quick monitoring. The codebase is TypeScript end-to-end: a NestJS backend publishes a tRPC API while a Vite bundle renders the UI.
 
 ---
 
@@ -71,11 +71,11 @@ The dashboard batches tRPC calls such as `dashboard.summary`, `dashboard.history
 
 ## Configuration
 - `config.local.yaml` is the canonical sample. Copy or symlink it to customise credentials, tariff providers, or solar forecasts.
-- The backend reads `BATTERYCTL_CONFIG` if set; otherwise it falls back to `../config.local.yaml` relative to the backend working directory.
+- The backend reads `CHARGECASTER_CONFIG` if set; otherwise it falls back to `../config.local.yaml` relative to the backend working directory.
 - `data/db/backend.sqlite` is created automatically; mount `data/` as a volume to persist history.
 
 Key environment variables:
-- `BATTERYCTL_CONFIG` – absolute path to the YAML config (default `/app/config.yaml` inside Docker).
+- `CHARGECASTER_CONFIG` – absolute path to the YAML config (default `/app/config.yaml` inside Docker).
 - `PORT` / `HOST` – Fastify bind target (defaults `4000` / `0.0.0.0`).
 - `NODE_ENV` – set to `production` in the container image.
 
@@ -109,14 +109,14 @@ The root `Dockerfile` produces a single image with three stages:
 
 Build and run manually:
 ```bash
-docker build -t batteryctl:local .
+docker build -t chargecaster:local .
 docker run \
   -p 6969:80 \
   -v $(pwd)/data:/data \
   -v $(pwd)/config.local.yaml:/app/config.yaml:ro \
-  -e BATTERYCTL_CONFIG=/app/config.yaml \
-  --name batteryctl \
-  batteryctl:local
+  -e CHARGECASTER_CONFIG=/app/config.yaml \
+  --name chargecaster \
+  chargecaster:local
 ```
 
 - Visit `http://localhost:6969` for the UI.
@@ -133,14 +133,14 @@ docker compose up --build
 Configuration highlights:
 - Binds host port `6969` to container port `80`.
 - Mounts the repository `data/` directory into `/data`.
-- Mounts `config.local.yaml` into `/app/config.yaml` (read-only) via the `BATTERYCTL_CONFIG_FILE` variable (defaults to `./config.local.yaml`).
+- Mounts `config.local.yaml` into `/app/config.yaml` (read-only) via the `CHARGECASTER_CONFIG_FILE` variable (defaults to `./config.local.yaml`).
 - Restarts the container unless stopped manually.
 
 Update `docker-compose.yml` if your config file lives elsewhere or if you prefer a pre-built registry image.
 
 Example with an absolute config path:
 ```bash
-BATTERYCTL_CONFIG_FILE=/Users/andreas/Documents/code/scripts/qnd/batteryctl/config.local.yaml \
+CHARGECASTER_CONFIG_FILE=/Users/andreas/Documents/code/scripts/qnd/chargecaster/config.local.yaml \
   docker compose up --build
 ```
 

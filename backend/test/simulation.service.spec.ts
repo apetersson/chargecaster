@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EnergyPrice, TariffSlot } from "@batteryctl/domain";
+import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
 
 import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
 import type { PriceSlot, SimulationConfig } from "../src/simulation/types";

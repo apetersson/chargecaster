@@ -7,7 +7,7 @@ import {
   optionalTimestampSchema,
   requiredTimestampSchema,
 } from "../common/parsing";
-import type { TariffSlot } from "@batteryctl/domain";
+import type { TariffSlot } from "@chargecaster/domain";
 
 export const rawForecastEntrySchema = z
   .object({

@@ -133,7 +133,7 @@ const App = () => {
       <section className="card banner">
         <div>
           <h2>Latest Optimisation</h2>
-          <p>Live data reloads every minute from batteryctl.</p>
+          <p>Live data reloads every minute from chargecaster.</p>
         </div>
         <button
           type="button"
