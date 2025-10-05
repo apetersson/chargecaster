@@ -8,6 +8,7 @@ export const useProjectionChart = (
   forecast: ForecastEra[],
   oracleEntries: OracleEntry[],
   summary: SnapshotSummary | null,
+  options?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean },
 ) => {
   const {datasets, bounds, timeRange, legendGroups} = useProjectionDatasets(
     history,
@@ -16,9 +17,14 @@ export const useProjectionChart = (
     summary,
   );
 
-  const options = useProjectionChartOptions(bounds, timeRange, legendGroups);
+  const chartOptions = useProjectionChartOptions(
+    bounds,
+    timeRange,
+    legendGroups,
+    options,
+  );
 
-  return useChartInstance(datasets, options);
+  return useChartInstance(datasets, chartOptions);
 };
 
 export type { ProjectionPoint, AxisBounds, LegendGroup } from "./types";
