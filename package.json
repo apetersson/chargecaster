@@ -1,6 +1,7 @@
 {
   "name": "chargecaster",
   "private": true,
+  "license": "UNLICENSED",
   "workspaces": [
     "backend",
     "frontend",
@@ -20,4 +21,3 @@
     "build:all": "yarn build:domain && yarn build:backend && yarn build:frontend"
   }
 }
-

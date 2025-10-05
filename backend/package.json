@@ -2,6 +2,7 @@
   "name": "chargecaster-backend",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "backend:dev": "tsx watch src/main.ts",

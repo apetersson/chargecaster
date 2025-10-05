@@ -215,4 +215,4 @@ CHARGECASTER_CONFIG_FILE=./config.local.yaml \
 
 ## License
 
-Provided as-is without warranty. Adapt configuration and deployment to suit your installation.
+No license granted. All rights reserved. A final license will be determined at a later date. Until then, you may not copy, distribute, or use this software except with explicit written permission from the author.
