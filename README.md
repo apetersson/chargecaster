@@ -69,30 +69,24 @@ yarn dev
 The dashboard batches tRPC calls such as `dashboard.summary`, `dashboard.history`, and `dashboard.oracle`. Snapshot data is persisted to `data/db/backend.sqlite` so subsequent loads reuse the latest optimiser output.
 
 ### Lint / Typecheck / Build (all subprojects)
-Run the following in the repo root to build everything from source:
+Option A — Workspaces (recommended):
 
 ```bash
-# Domain library
-cd packages/domain
-yarn install
-yarn build
-
-# Backend
-cd ../backend
-yarn install
-yarn lint
-yarn typecheck
-yarn build
-
-# Frontend
-cd ../frontend
-yarn install
-yarn lint
-yarn typecheck
-yarn build
+yarn bootstrap
+yarn lint:all
+yarn typecheck:all
+yarn build:all
 ```
 
-In dev mode the backend and frontend import the domain package via TS path aliases; for production builds, the domain package should be built first so `dist/` is available.
+Option B — Per project:
+
+```bash
+(cd packages/domain  && yarn install && yarn build)
+(cd backend          && yarn install && yarn lint && yarn typecheck && yarn build)
+(cd frontend         && yarn install && yarn lint && yarn typecheck && yarn build)
+```
+
+In dev mode the backend and frontend import the domain package via TS path aliases; for production builds, the domain package should be built first so `dist/` is available (handled by `yarn build:all`).
 
 ---
 
