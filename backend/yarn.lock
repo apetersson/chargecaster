@@ -2,7 +2,7 @@
 # yarn lockfile v1
 
 
-"@batteryctl/domain@file:../packages/domain":
+"@chargecaster/domain@file:../packages/domain":
   version "0.1.0"
 
 "@borewit/text-codec@^0.1.0":

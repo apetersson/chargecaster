@@ -53,7 +53,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   await app.listen(port, host);
 
   if (process.env.NODE_ENV !== "test") {
-    const logger = new Logger("batteryctl");
+    const logger = new Logger("chargecaster");
     const address = fastify.server.address();
     let baseUrl = `http://localhost:${port}`;
     if (isAddressInfo(address)) {

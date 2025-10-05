@@ -1,5 +1,5 @@
 {
-  "name": "batteryctl-frontend",
+  "name": "chargecaster-frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@batteryctl/domain": "file:../packages/domain",
+    "@chargecaster/domain": "file:../packages/domain",
     "@trpc/client": "^11.0.0",
     "chart.js": "^4.4.6",
     "chartjs-adapter-date-fns": "^3.0.0",

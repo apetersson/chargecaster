@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { normaliseSolarTimeseries, toSolarForecastSlots, type RawSolarTimeseriesPoint } from "@batteryctl/domain";
+import { normaliseSolarTimeseries, toSolarForecastSlots, type RawSolarTimeseriesPoint } from "@chargecaster/domain";
 
 interface SolarForecastSource {
   provider: string;

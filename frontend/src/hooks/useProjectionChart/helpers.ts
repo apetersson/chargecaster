@@ -1,5 +1,5 @@
 import type { ForecastEra, HistoryPoint, OracleEntry } from "../../types";
-import { TimeSlot } from "@batteryctl/domain";
+import { TimeSlot } from "@chargecaster/domain";
 
 import {
   DEFAULT_POWER_BOUNDS,

@@ -1,15 +1,15 @@
 services:
-  batteryctl:
+  chargecaster:
     build: .
-    container_name: batteryctl
+    container_name: chargecaster
     read_only: true
     ports:
       - "6969:8080"
     environment:
-      BATTERYCTL_CONFIG: /app/config.yaml
+      CHARGECASTER_CONFIG: /app/config.yaml
     volumes:
       - ./data:/data
-      - ${BATTERYCTL_CONFIG_FILE:-./config.local.yaml}:/app/config.yaml:ro
+      - ${CHARGECASTER_CONFIG_FILE:-./config.local.yaml}:/app/config.yaml:ro
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=1777
       - /var/cache/nginx:uid=1000,gid=1000,mode=755

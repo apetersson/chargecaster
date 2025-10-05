@@ -1,4 +1,4 @@
-import { normaliseSolarTimeseries, parseTemporal } from "@batteryctl/domain";
+import { normaliseSolarTimeseries, parseTemporal } from "@chargecaster/domain";
 
 import type { RawSolarEntry } from "./types";
 

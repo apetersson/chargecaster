@@ -4,14 +4,14 @@ set -euo pipefail
 APP_ROOT="/app"
 BACKEND_ROOT="${APP_ROOT}/backend"
 
-BATTERYCTL_CONFIG="${BATTERYCTL_CONFIG:-${APP_ROOT}/config.yaml}"
-export BATTERYCTL_CONFIG
+CHARGECASTER_CONFIG="${CHARGECASTER_CONFIG:-${APP_ROOT}/config.yaml}"
+export CHARGECASTER_CONFIG
 export NODE_ENV="${NODE_ENV:-production}"
 export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-4000}"
 
-if [ ! -f "${BATTERYCTL_CONFIG}" ]; then
-  echo "Config ${BATTERYCTL_CONFIG} not found; mount a readable config file for user $(id -un)" >&2
+if [ ! -f "${CHARGECASTER_CONFIG}" ]; then
+  echo "Config ${CHARGECASTER_CONFIG} not found; mount a readable config file for user $(id -un)" >&2
   exit 1
 fi
 
@@ -22,8 +22,8 @@ fi
 
 mkdir -p /data/db
 
-if [ ! -r "${BATTERYCTL_CONFIG}" ]; then
-  echo "Config ${BATTERYCTL_CONFIG} must be readable by user $(id -un)" >&2
+if [ ! -r "${CHARGECASTER_CONFIG}" ]; then
+  echo "Config ${CHARGECASTER_CONFIG} must be readable by user $(id -un)" >&2
   exit 1
 fi
 

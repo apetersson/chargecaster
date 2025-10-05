@@ -20,7 +20,7 @@ import { StorageService } from "../storage/storage.service";
 import { BacktestSavingsService } from "./backtest.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { parseEvccState } from "../config/schemas";
-import { EnergyPrice, TariffSlot } from "@batteryctl/domain";
+import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
 
 const SOC_STEPS = 100;
 const SLOT_DURATION_MS = 3_600_000;

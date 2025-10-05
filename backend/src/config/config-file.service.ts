@@ -14,7 +14,7 @@ export class ConfigFileService {
   private readonly logger = new Logger(ConfigFileService.name);
 
   resolvePath(): string {
-    const override = process.env.BATTERYCTL_CONFIG;
+    const override = process.env.CHARGECASTER_CONFIG;
     if (override && override.trim().length > 0) {
       return resolve(process.cwd(), override.trim());
     }
