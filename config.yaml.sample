@@ -28,11 +28,6 @@ logic:
 logging:
   level: "INFO"            # DEBUG, INFO, WARNING
 
-public:
-  snapshot_path: "/public/data/latest.json"
-  history_path: "/public/data/history.json"
-  history_hours: 12
-
 market_data:
   enabled: true
   url: "https://api.awattar.de/v1/marketdata"

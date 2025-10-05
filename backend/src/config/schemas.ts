@@ -73,6 +73,12 @@ const marketConfigSchema = configSectionSchema
   })
   .strip();
 
+const loggingConfigSchema = z
+  .object({
+    level: optionalStringSchema.optional(),
+  })
+  .strict();
+
 export const configDocumentSchema = z
   .object({
     dry_run: optionalBooleanSchema.optional().default(false),
@@ -83,8 +89,9 @@ export const configDocumentSchema = z
     evcc: evccConfigSchema.optional(),
     market_data: marketConfigSchema.optional(),
     solar: solarConfigSchema.optional(),
+    logging: loggingConfigSchema.optional(),
   })
-  .passthrough();
+  .strict();
 
 export type ConfigDocument = z.infer<typeof configDocumentSchema>;
 

@@ -40,8 +40,3 @@ market_data:
   url: https://api.awattar.at/v1/marketdata
   max_hours: 72
   source_label: awattar
-
-public:
-  snapshot_path: "./frontend/public/data/latest.json"
-  history_path: "./frontend/public/data/history.json"
-  history_hours: 12
