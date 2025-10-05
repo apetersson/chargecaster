@@ -40,32 +40,59 @@ chargecaster plans charge/discharge schedules for a residential battery, persist
 ---
 
 ## Local Development
-1. Install backend dependencies:
-   ```bash
-   cd backend
-   yarn install
-   ```
-2. Install frontend dependencies:
-   ```bash
-   cd ../frontend
-   yarn install
-   ```
-3. Start the backend in one terminal:
-   ```bash
-   cd backend
-   yarn start
-   ```
-   - Listens on `http://localhost:4000`.
-   - Loads optimisation inputs from `config.local.yaml` by default.
-4. Start the frontend in another terminal:
-   ```bash
-   cd frontend
-   yarn dev
-   ```
-   - Serves the dashboard at `http://localhost:5173`.
-   - Uses `VITE_TRPC_URL` (defaults to `http://localhost:4000/trpc`).
+
+Quickstart (two terminals):
+
+Terminal A – API/backend
+```bash
+cd backend
+yarn install
+# Dev mode with auto‑reload (tsx)
+yarn run backend:dev
+# or single run
+yarn start
+```
+Notes:
+- Binds to `http://localhost:4000`.
+- Reads `config.local.yaml` by default, or `CHARGECASTER_CONFIG` if set.
+- The backend uses TS path aliases to import the domain package from source (`../packages/domain/src`), so no pre‑build is required in dev.
+
+Terminal B – Web/frontend
+```bash
+cd ../frontend
+yarn install
+yarn dev
+```
+- Serves the dashboard at `http://localhost:5173`.
+- Uses `VITE_TRPC_URL` (defaults to `http://localhost:4000/trpc`).
 
 The dashboard batches tRPC calls such as `dashboard.summary`, `dashboard.history`, and `dashboard.oracle`. Snapshot data is persisted to `data/db/backend.sqlite` so subsequent loads reuse the latest optimiser output.
+
+### Lint / Typecheck / Build (all subprojects)
+Run the following in the repo root to build everything from source:
+
+```bash
+# Domain library
+cd packages/domain
+yarn install
+yarn build
+
+# Backend
+cd ../backend
+yarn install
+yarn lint
+yarn typecheck
+yarn build
+
+# Frontend
+cd ../frontend
+yarn install
+yarn lint
+yarn typecheck
+yarn build
+```
+
+In dev mode the backend and frontend import the domain package via TS path aliases; for production builds, the domain package should be built first so `dist/` is available.
 
 ---
 
@@ -78,6 +105,8 @@ Key environment variables:
 - `CHARGECASTER_CONFIG` – absolute path to the YAML config (default `/app/config.yaml` inside Docker).
 - `PORT` / `HOST` – Fastify bind target (defaults `4000` / `0.0.0.0`).
 - `NODE_ENV` – set to `production` in the container image.
+
+Strict validation: The configuration parser rejects unknown top‑level keys. Valid sections are `dry_run`, `fronius`, `battery`, `price`, `logic`, `evcc`, `market_data`, `solar`, and `logging`. Unknown keys will raise a validation error at startup.
 
 ---
 
@@ -111,9 +140,9 @@ Build and run manually:
 ```bash
 docker build -t chargecaster:local .
 docker run \
-  -p 6969:80 \
-  -v $(pwd)/data:/data \
-  -v $(pwd)/config.local.yaml:/app/config.yaml:ro \
+  -p 6969:8080 \
+  -v "$(pwd)/data:/data" \
+  -v "$(pwd)/config.local.yaml:/app/config.yaml:ro" \
   -e CHARGECASTER_CONFIG=/app/config.yaml \
   --name chargecaster \
   chargecaster:local
@@ -140,7 +169,7 @@ Update `docker-compose.yml` if your config file lives elsewhere or if you prefer
 
 Example with an absolute config path:
 ```bash
-CHARGECASTER_CONFIG_FILE=/Users/andreas/Documents/code/scripts/qnd/chargecaster/config.local.yaml \
+CHARGECASTER_CONFIG_FILE=/Users/andreas/Documents/code/scripts/chargecaster/config.local.yaml \
   docker compose up --build
 ```
 

@@ -49,7 +49,7 @@ RUN yarn install --frozen-lockfile --check-files
 
 COPY backend/ ./
 
-RUN yarn run tsc -p tsconfig.build.json
+RUN yarn build
 
 RUN rm -rf node_modules \
   && yarn install --frozen-lockfile --production --check-files \
