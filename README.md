@@ -12,7 +12,7 @@ API while a Vite bundle renders the UI.
   `current_mode`, SOC targets, projected spend).
 - Shared TypeScript contracts between backend and frontend via direct source imports (`@backend/*` path aliases).
 - SQLite (via `better-sqlite3`) snapshot/history store managed by the backend.
-- Ready-to-run Docker image that serves the SPA through nginx and reverse-proxies API calls.
+- Ready-to-run distroless Docker image; the backend can serve the built SPA when enabled.
 
 ---
 
@@ -29,10 +29,9 @@ API while a Vite bundle renders the UI.
 │   └── package.json
 ├── config.local.yaml   # Example runtime configuration
 ├── data/               # Created at runtime; contains SQLite database
-├── Dockerfile          # Multi-stage image (frontend + backend + nginx)
+├── Dockerfile  # Distroless runtime image (bundled backend; serves SPA when enabled)
 ├── docker-compose.yml  # Local orchestration helper
-├── docker/entrypoint.sh
-└── nginx-default.conf
+└── docker/entrypoint.sh
 ```
 
 ---
@@ -50,15 +49,15 @@ API while a Vite bundle renders the UI.
 
 Quickstart (two terminals):
 
-Terminal A – API/backend
+Terminal A – API/backend (API‑only)
 
 ```bash
 cd backend
 yarn install
 # Dev mode with auto‑reload (tsx)
-yarn run backend:dev
-# or single run
-yarn start
+yarn backend:dev:api
+# or single run without static files
+yarn start:api
 ```
 
 Notes:
@@ -68,16 +67,16 @@ Notes:
 - The backend uses TS path aliases to import the domain package from source (`../packages/domain/src`), so no pre‑build
   is required in dev.
 
-Terminal B – Web/frontend
+Terminal B – Web/frontend (Vite)
 
 ```bash
 cd ../frontend
 yarn install
-yarn dev
+VITE_TRPC_URL=http://localhost:4000/trpc yarn dev
 ```
 
 - Serves the dashboard at `http://localhost:5173`.
-- Uses `VITE_TRPC_URL` (defaults to `http://localhost:4000/trpc`).
+- Uses `VITE_TRPC_URL` to point to the backend tRPC endpoint (e.g. `http://localhost:4000/trpc`).
 
 The dashboard batches tRPC calls such as `dashboard.summary`, `dashboard.history`, and `dashboard.oracle`. Snapshot data
 is persisted to `data/db/backend.sqlite` so subsequent loads reuse the latest optimiser output.
@@ -151,21 +150,22 @@ yarn build
 
 ## Docker Image
 
-The root `Dockerfile` produces a single image with three stages:
-
-1. Build the Vite frontend into `/public`.
-2. Install backend dependencies (including the native SQLite binding).
-3. Serve the app via nginx while running the NestJS API with `tsx`.
+Distroless build: `Dockerfile`
+- Bundles the backend with esbuild to `/app/backend/dist-bundle/index.js`.
+- Installs only native runtime deps (e.g. `better-sqlite3`).
+- Uses `gcr.io/distroless/nodejs20-debian12:nonroot` as the runtime.
+- The backend serves the built SPA from `/public` when `SERVE_STATIC=true`.
 
 Build and run manually:
 
 ```bash
-docker build -t chargecaster:local .
+docker build -f Dockerfile -t chargecaster:local .
 docker run \
   -p 6969:8080 \
   -v "$(pwd)/data:/data" \
   -v "$(pwd)/config.local.yaml:/app/config.yaml:ro" \
   -e CHARGECASTER_CONFIG=/app/config.yaml \
+  -e SERVE_STATIC=true \
   --name chargecaster \
   chargecaster:local
 ```
@@ -178,7 +178,7 @@ docker run \
 
 ## Docker Compose (local convenience)
 
-A helper compose file (`docker-compose.yml`) builds the image locally and wires the expected mounts:
+A helper compose file (`docker-compose.yml`) builds the distroless image locally and wires the expected mounts:
 
 ```bash
 docker compose up --build
@@ -186,7 +186,7 @@ docker compose up --build
 
 Configuration highlights:
 
-- Binds host port `6969` to container port `80`.
+- Binds host port `6969` to container port `8080`.
 - Mounts the repository `data/` directory into `/data`.
 - Mounts `config.local.yaml` into `/app/config.yaml` (read-only) via the `CHARGECASTER_CONFIG_FILE` variable (defaults
   to `./config.local.yaml`).
@@ -200,6 +200,20 @@ Example with an absolute config path:
 CHARGECASTER_CONFIG_FILE=./config.local.yaml \
   docker compose up --build
 ```
+
+---
+
+## Dev vs. Container: Static Files and Ports
+
+- In dev, run the backend without static files and use Vite for the SPA:
+  - Backend: `backend:dev:api` at `http://localhost:4000` (tRPC at `/trpc`).
+  - Frontend: `yarn dev` at `http://localhost:5173` with `VITE_TRPC_URL=http://localhost:4000/trpc`.
+- In containers, the backend serves the built SPA from `/public` when `SERVE_STATIC=true` (default in Dockerfiles).
+  - Container listens on `8080` and Compose maps it to `6969`.
+
+Environment flags:
+- `SERVE_STATIC` — `true` to serve `/public` and SPA fallback (containers), `false` for API‑only mode (dev).
+- `CHARGECASTER_CONFIG` — absolute path to YAML config (defaults to `/app/config.yaml` in containers).
 
 ---
 
