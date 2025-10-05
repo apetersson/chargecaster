@@ -1,7 +1,7 @@
 __pycache__/
 .pytest_cache/
 .venv/
-frontend/node_modules/
-frontend/dist/
 /packages/domain/dist-cjs/
 /data/
+node_modules/
+dist/
