@@ -3,6 +3,10 @@ import "reflect-metadata";
 import type { AddressInfo } from "node:net";
 
 import cors from "@fastify/cors";
+import { existsSync, createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { join, normalize } from "node:path";
+import { join } from "node:path";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
@@ -43,6 +47,44 @@ async function bootstrap(): Promise<NestFastifyApplication> {
       createContext: () => ({simulationService}),
     },
   });
+
+  // Optional static serving (replaces nginx in container). Enable when
+  // SERVE_STATIC=true and /public exists (container builds) or when explicitly opted in.
+  const serveStatic = (process.env.SERVE_STATIC === "true" || process.env.SERVE_STATIC === "1") && existsSync("/public");
+  if (serveStatic) {
+    const publicRoot = "/public";
+    const contentType = (p: string): string => {
+      if (p.endsWith(".js")) return "application/javascript";
+      if (p.endsWith(".css")) return "text/css";
+      if (p.endsWith(".svg")) return "image/svg+xml";
+      if (p.endsWith(".png")) return "image/png";
+      if (p.endsWith(".ico")) return "image/x-icon";
+      if (p.endsWith(".map")) return "application/json";
+      if (p.endsWith(".html")) return "text/html";
+      return "application/octet-stream";
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    fastify.get("/*", async (req, reply) => {
+      const url = req.raw.url ?? "/";
+      let target = url.startsWith("/assets/") ? url : "/index.html";
+      const fullPath = normalize(join(publicRoot, target));
+      if (!fullPath.startsWith(publicRoot)) {
+        return reply.code(403).send("Forbidden");
+      }
+      try {
+        await stat(fullPath);
+        reply.header("Cache-Control", target.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache");
+        reply.type(contentType(fullPath));
+        return reply.send(createReadStream(fullPath));
+      } catch {
+        // Fallback to SPA index
+        const indexPath = join(publicRoot, "index.html");
+        reply.type("text/html");
+        return reply.send(createReadStream(indexPath));
+      }
+    });
+  }
 
   if (process.env.NODE_ENV !== "test") {
     await configSeedService.seedFromConfig();

@@ -8,7 +8,7 @@ CHARGECASTER_CONFIG="${CHARGECASTER_CONFIG:-${APP_ROOT}/config.yaml}"
 export CHARGECASTER_CONFIG
 export NODE_ENV="${NODE_ENV:-production}"
 export HOST="${HOST:-0.0.0.0}"
-export PORT="${PORT:-4000}"
+export PORT="${PORT:-8080}"
 
 if [ ! -f "${CHARGECASTER_CONFIG}" ]; then
   echo "Config ${CHARGECASTER_CONFIG} not found; mount a readable config file for user $(id -un)" >&2
@@ -38,20 +38,16 @@ cd "${BACKEND_ROOT}"
 node "${BACKEND_ROOT}/dist/main.js" &
 backend_pid=$!
 
-nginx -g "daemon off;" &
-nginx_pid=$!
-
 terminate() {
-  kill -TERM "${backend_pid}" "${nginx_pid}" 2>/dev/null || true
+  kill -TERM "${backend_pid}" 2>/dev/null || true
 }
 
 trap terminate INT TERM
 
-wait -n "${backend_pid}" "${nginx_pid}"
+wait -n "${backend_pid}"
 exit_code=$?
 
 terminate
 wait "${backend_pid}" 2>/dev/null || true
-wait "${nginx_pid}" 2>/dev/null || true
 
 exit "${exit_code}"

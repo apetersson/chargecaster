@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "backend:dev": "tsx watch src/main.ts",
+    "backend:dev:api": "SERVE_STATIC=false tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "start:api": "SERVE_STATIC=false tsx src/main.ts",
+    "bundle": "esbuild src/main.ts --platform=node --target=node20 --format=cjs --bundle --alias:@chargecaster/domain=../packages/domain/dist/index.js --external:better-sqlite3 --external:@nestjs/websockets/socket-module --external:@nestjs/microservices/microservices-module --external:@nestjs/microservices --external:@nestjs/platform-express --external:@fastify/view --external:class-validator --external:class-transformer --outfile=dist-bundle/index.js",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
@@ -15,6 +18,7 @@
   },
   "dependencies": {
     "@chargecaster/domain": "file:../packages/domain",
+    "@fastify/static": "^7.0.4",
     "@fastify/cors": "^10.0.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
@@ -29,6 +33,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "esbuild": "^0.23.0",
     "@trpc/client": "^11.0.0",
     "@types/better-sqlite3": "^7.6.9",
     "@types/node": "^22.5.2",
