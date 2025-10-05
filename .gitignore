@@ -5,3 +5,10 @@ __pycache__/
 /data/
 node_modules/
 dist/
+/.idea/
+.env
+.env.*
+config.local.yaml
+package-lock.json
+.DS_Store
+yarn-error.log

@@ -1,39 +1,4 @@
-FROM node:20-bookworm-slim AS domain-builder
-
-RUN corepack enable
-
-WORKDIR /app/packages/domain
-
-COPY packages/domain/package.json packages/domain/tsconfig.json packages/domain/tsconfig.build.json packages/domain/tsconfig.build.cjs.json ./
-COPY packages/domain/src ./src
-
-RUN if [ -f yarn.lock ]; then \
-      yarn install --frozen-lockfile --check-files; \
-    else \
-      yarn install --check-files; \
-    fi \
-    && yarn build
-
-
-FROM node:20-bookworm-slim AS frontend-builder
-
-RUN corepack enable
-
-WORKDIR /app/frontend
-
-COPY --from=domain-builder /app/packages/domain /app/packages/domain
-COPY frontend/package.json frontend/yarn.lock ./
-RUN yarn install --frozen-lockfile --check-files
-
-COPY frontend/ ./
-
-ARG VITE_TRPC_URL=/trpc
-ENV VITE_TRPC_URL=${VITE_TRPC_URL}
-
-RUN yarn build
-
-
-FROM node:20-bookworm-slim AS backend-builder
+FROM node:20-bookworm-slim AS builder
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends build-essential python3 \
@@ -41,18 +6,28 @@ RUN apt-get update \
 
 RUN corepack enable
 
-WORKDIR /app/backend
+WORKDIR /app
 
-COPY --from=domain-builder /app/packages/domain /app/packages/domain
-COPY backend/package.json backend/yarn.lock ./
+# Install workspace dependencies using the root lockfile
+COPY package.json yarn.lock ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+COPY packages/domain/package.json packages/domain/package.json
 RUN yarn install --frozen-lockfile --check-files
 
-COPY backend/ ./
+# Build domain first so dependents can rely on dist outputs
+COPY packages/domain/ packages/domain/
+RUN yarn workspace @chargecaster/domain build
 
-RUN yarn build
+# Build frontend
+COPY frontend/ frontend/
+ARG VITE_TRPC_URL=/trpc
+ENV VITE_TRPC_URL=${VITE_TRPC_URL}
+RUN yarn workspace chargecaster-frontend build
 
-RUN rm -rf node_modules \
-  && yarn install --frozen-lockfile --production --check-files \
+# Build backend
+COPY backend/ backend/
+RUN yarn workspace chargecaster-backend build \
   && yarn cache clean --force || true
 
 
@@ -71,12 +46,14 @@ ENV NODE_ENV=production \
     VITE_TRPC_URL=/trpc \
     NGINX_PORT=8080
 
-COPY --from=backend-builder /app/backend/node_modules /app/backend/node_modules
-COPY --from=backend-builder /app/backend/dist /app/backend/dist
-COPY --from=backend-builder /app/backend/package.json /app/backend/package.json
-COPY --from=backend-builder /app/backend/yarn.lock /app/backend/yarn.lock
-COPY --from=frontend-builder /app/frontend/dist /public
-COPY --from=domain-builder /app/packages/domain /app/packages/domain
+# Copy production artifacts and the workspace node_modules from builder
+COPY --from=builder /app/node_modules /app/node_modules
+COPY --from=builder /app/backend/dist /app/backend/dist
+COPY --from=builder /app/backend/package.json /app/backend/package.json
+COPY --from=builder /app/frontend/dist /public
+COPY --from=builder /app/packages/domain/package.json /app/packages/domain/package.json
+COPY --from=builder /app/packages/domain/dist /app/packages/domain/dist
+COPY --from=builder /app/packages/domain/dist-cjs /app/packages/domain/dist-cjs
 
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-default.conf /etc/nginx/conf.d/default.conf
@@ -100,3 +77,4 @@ USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["curl", "-fsS", "http://127.0.0.1:8080/"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
+
