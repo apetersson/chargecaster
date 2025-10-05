@@ -57,6 +57,33 @@ section.card.chart {
     height: 360px;
 }
 
+@media (max-width: 640px) {
+    section.card.chart {
+        height: 280px;
+    }
+}
+
+.chart-controls {
+    display: inline-flex;
+    gap: 0.4rem;
+}
+
+.chart-controls .chip {
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148,163,184,0.5);
+    background: rgba(148, 163, 184, 0.15);
+    color: #e2e8f0;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.chart-controls .chip.active {
+    background: rgba(56, 189, 248, 0.25);
+    border-color: rgba(56, 189, 248, 0.6);
+    color: #e0f2fe;
+}
+
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

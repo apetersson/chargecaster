@@ -16,9 +16,13 @@ interface BuildOptionsConfig {
   };
   timeRange: TimeRange;
   legendGroups: LegendGroup[];
+  responsive?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean };
 }
 
-export const buildOptions = ({bounds, timeRange, legendGroups}: BuildOptionsConfig): ChartOptions<"line"> => {
+export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: BuildOptionsConfig): ChartOptions<"line"> => {
+  const isMobile = Boolean(responsive?.isMobile);
+  const showPowerAxisLabels = responsive?.showPowerAxisLabels ?? !isMobile;
+  const showPriceAxisLabels = responsive?.showPriceAxisLabels ?? !isMobile;
   const groupedLegendEntries = legendGroups.filter((group) => group.datasetIndices.length > 0);
   const legendDefaults = Chart.defaults.plugins.legend;
   const legendLabelDefaults = legendDefaults.labels;
@@ -129,13 +133,14 @@ export const buildOptions = ({bounds, timeRange, legendGroups}: BuildOptionsConf
         max: timeRange.max ?? undefined,
         time: {
           unit: "hour",
-          displayFormats: {
-            hour: "HH:mm",
-          },
+          displayFormats: isMobile
+            ? { hour: "HH 'h'" }
+            : { hour: "HH:mm" },
         },
         ticks: {
           color: TICK_COLOR,
           maxRotation: 0,
+          maxTicksLimit: isMobile ? 4 : undefined,
           autoSkip: true,
           callback: (value) => {
             const numeric =
@@ -144,6 +149,10 @@ export const buildOptions = ({bounds, timeRange, legendGroups}: BuildOptionsConf
               return "";
             }
             const date = new Date(numeric);
+            if (isMobile) {
+              const hours = String(date.getHours()).padStart(2, "0");
+              return `${hours}h`;
+            }
             return timeFormatter.format(date);
           },
         },
@@ -179,6 +188,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups}: BuildOptionsConf
         max: bounds.power.max,
         ticks: {
           color: TICK_COLOR,
+          display: showPowerAxisLabels,
           callback: (value) => {
             const numeric =
               typeof value === "number" ? value : Number(value);
@@ -192,7 +202,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups}: BuildOptionsConf
           color: GRID_COLOR,
         },
         title: {
-          display: true,
+          display: showPowerAxisLabels,
           text: "Watts",
           color: TICK_COLOR,
           font: {
@@ -207,6 +217,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups}: BuildOptionsConf
         max: bounds.price.max,
         ticks: {
           color: TICK_COLOR,
+          display: showPriceAxisLabels,
           callback: (value) => {
             const numeric =
               typeof value === "number" ? value : Number(value);
@@ -221,7 +232,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups}: BuildOptionsConf
           color: GRID_COLOR,
         },
         title: {
-          display: true,
+          display: showPriceAxisLabels,
           text: "ct/kWh",
           color: TICK_COLOR,
           font: {

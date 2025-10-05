@@ -8,6 +8,7 @@ import TrajectoryTable from "./components/TrajectoryTable";
 import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary, } from "./types";
+import { useIsMobile } from "./hooks/useIsMobile";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -35,6 +36,14 @@ const App = () => {
   const [oracleEntries, setOracleEntries] = useState<OracleEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMobile = useIsMobile();
+  const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
+  const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
+
+  useEffect(() => {
+    setShowPowerAxisLabels(!isMobile);
+    setShowPriceAxisLabels(!isMobile);
+  }, [isMobile]);
 
   const fetchData = useCallback((): void => {
     const execute = async () => {
@@ -71,7 +80,11 @@ const App = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const chartRef = useProjectionChart(history, forecast, oracleEntries, summary);
+  const chartRef = useProjectionChart(history, forecast, oracleEntries, summary, {
+    isMobile,
+    showPowerAxisLabels,
+    showPriceAxisLabels,
+  });
 
   return (
     <>
@@ -84,7 +97,29 @@ const App = () => {
       <SummaryCards data={summary}/>
 
       <section className="card chart">
-        <h2>SOC over time</h2>
+        <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+          <h2>SOC over time</h2>
+          {(
+            <div className="chart-controls" role="group" aria-label="Chart axis labels">
+              <button
+                type="button"
+                className={`chip ${showPowerAxisLabels ? "active" : ""}`}
+                onClick={() => setShowPowerAxisLabels((v) => !v)}
+                aria-pressed={showPowerAxisLabels}
+              >
+                Power
+              </button>
+              <button
+                type="button"
+                className={`chip ${showPriceAxisLabels ? "active" : ""}`}
+                onClick={() => setShowPriceAxisLabels((v) => !v)}
+                aria-pressed={showPriceAxisLabels}
+              >
+                Tariff
+              </button>
+            </div>
+          )}
+        </div>
         <canvas ref={chartRef} aria-label="SOC projection chart"/>
       </section>
 
