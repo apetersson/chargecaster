@@ -142,13 +142,19 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
           maxRotation: 0,
           maxTicksLimit: isMobile ? 4 : undefined,
           autoSkip: true,
-          callback: (value) => {
-            const numeric =
-              typeof value === "number" ? value : Number(value);
+          callback: (value, index, ticks) => {
+            const numeric = typeof value === "number" ? value : Number(value);
             if (!Number.isFinite(numeric)) {
               return "";
             }
             const date = new Date(numeric);
+            // Only show full date/time on desktop at the endpoints
+            if (!isMobile) {
+              const isEndpoint = index === 0 || index === ticks.length - 1;
+              if (isEndpoint) {
+                return dateTimeFormatter.format(date);
+              }
+            }
             if (isMobile) {
               const hours = String(date.getHours()).padStart(2, "0");
               return `${hours}h`;

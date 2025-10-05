@@ -25,7 +25,7 @@ battery:
 logic:
   min_hold_minutes: 0
   interval_seconds: 300
-  house_load_w: 1200
+  house_load_w: 2200
   allow_battery_export: false
 
 solar:

@@ -27,6 +27,15 @@ export const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   second: "2-digit",
 });
 
+// Same as dateTimeFormatter but without seconds for compact display
+export const dateTimeNoSecondsFormatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 export function formatPercent(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
@@ -38,10 +47,12 @@ export function formatNumber(value: number | null | undefined, unit = "") {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
-  if (unit === " slots") {
-    return `${integerFormatter.format(value)}${unit}`;
+  const trimmedUnit = unit.trim();
+  const nbspUnit = trimmedUnit ? `\u00A0${trimmedUnit}` : "";
+  if (trimmedUnit === "slots") {
+    return `${integerFormatter.format(value)}${nbspUnit}`;
   }
-  return `${numberFormatter.format(value)}${unit}`;
+  return `${numberFormatter.format(value)}${nbspUnit}`;
 }
 
 export function formatDate(value: string | null | undefined) {

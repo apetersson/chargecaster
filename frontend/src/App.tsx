@@ -120,7 +120,9 @@ const App = () => {
             </div>
           )}
         </div>
-        <canvas ref={chartRef} aria-label="SOC projection chart"/>
+        <div className="chart-viewport">
+          <canvas ref={chartRef} aria-label="SOC projection chart"/>
+        </div>
       </section>
 
       <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries}/>
