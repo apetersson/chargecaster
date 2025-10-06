@@ -308,6 +308,7 @@ export class SimulationService {
       history: backtestHistoryCandidates.map((item) => item.payload),
       extraEntries: [historyEntry],
       referenceTimestamp: result.timestamp,
+      endValuationPriceEurPerKwh: result.average_price_eur_per_kwh,
     });
     if (backtestResult) {
       snapshot.backtested_savings_eur = backtestResult.savingsEur;

@@ -13,6 +13,7 @@ export interface BacktestSavingsOptions {
   windowHours?: number;
   historyLimit?: number;
   importPriceFallbackEurPerKwh?: number | null;
+  endValuationPriceEurPerKwh?: number | null;
 }
 
 export interface BacktestSavingsResult {
@@ -90,11 +91,8 @@ function resolveTimestampMs(input: string | Date | number | null | undefined): n
     const time = input.getTime();
     return Number.isFinite(time) ? time : null;
   }
-  if (typeof input === "string") {
-    const time = Date.parse(input);
-    return Number.isFinite(time) ? time : null;
-  }
-  return null;
+  const time = Date.parse(input);
+  return Number.isFinite(time) ? time : null;
 }
 
 export function computeBacktestedSavings(
@@ -164,6 +162,10 @@ export function computeBacktestedSavings(
   let dumbCostEur = 0;
   let intervalCount = 0;
   let windowStartUsed: number | null = null;
+  let actualStartSoc: number | null = null;
+  let actualEndSoc: number | null = null;
+  let dumbStartSoc: number | null = null;
+  let dumbEndSoc: number | null = null;
 
   for (const entry of combined) {
     if (entry.__ts < windowStartMs) {
@@ -227,6 +229,10 @@ export function computeBacktestedSavings(
 
     state.lastPriceEur = intervalPriceEur;
 
+    // Track actual SoC delta within the window
+    actualStartSoc ??= socPrev;
+    actualEndSoc = socCurr;
+
     const batteryPowerW = ((socCurr - socPrev) / 100) * (state.capacityKwh / durationHours) * 1000;
 
     const houseLoadW = Math.max(0, gridPowerW + solarPowerW - batteryPowerW);
@@ -240,13 +246,14 @@ export function computeBacktestedSavings(
       actualCostEur += gridEnergyKwh * feedInTariff;
     }
 
-    if (socPrev !== null) {
-      state.dumbSoc ??= socPrev;
-    }
+    state.dumbSoc ??= socPrev;
     if (state.dumbSoc === null) {
       previous = entry;
       continue;
     }
+
+    // Track baseline (dumb) start SoC once we have it
+    dumbStartSoc ??= state.dumbSoc;
 
     const solarToLoadKwh = Math.min(houseLoadEnergyKwh, solarEnergyKwh);
     let remainingLoadKwh = houseLoadEnergyKwh - solarToLoadKwh;
@@ -291,6 +298,7 @@ export function computeBacktestedSavings(
       finalSoc = 100;
     }
     state.dumbSoc = finalSoc;
+    dumbEndSoc = state.dumbSoc;
 
     const importEnergyKwh = Math.max(0, remainingLoadKwh);
     const exportEnergyKwh = Math.max(0, solarSurplusKwh);
@@ -308,7 +316,24 @@ export function computeBacktestedSavings(
     return null;
   }
 
-  const savingsEur = dumbCostEur - actualCostEur;
+  // Apply inventory valuation adjustment if provided
+  const valuationPrice = toFiniteNumber(options.endValuationPriceEurPerKwh ?? null);
+  const aStart = toFiniteNumber(actualStartSoc);
+  const aEnd = toFiniteNumber(actualEndSoc);
+  const dStart = toFiniteNumber(dumbStartSoc);
+  const dEnd = toFiniteNumber(dumbEndSoc);
+  let valuationAdjustment = 0;
+  if (
+    valuationPrice !== null &&
+    aStart !== null && aEnd !== null &&
+    dStart !== null && dEnd !== null
+  ) {
+    const actualDeltaKwh = ((aEnd - aStart) / 100) * capacityKwh;
+    const dumbDeltaKwh = ((dEnd - dStart) / 100) * capacityKwh;
+    valuationAdjustment = (actualDeltaKwh - dumbDeltaKwh) * valuationPrice;
+  }
+
+  const savingsEur = dumbCostEur - actualCostEur + valuationAdjustment;
   const windowStartIso = new Date(windowStartUsed ?? windowStartMs).toISOString();
   const windowEndIso = new Date(latestTimestampMs).toISOString();
 
