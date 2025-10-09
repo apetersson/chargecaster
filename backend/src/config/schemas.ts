@@ -182,13 +182,39 @@ const getFirstRecord = (value: unknown): UnknownRecord | null => {
   return null;
 };
 
+const PRICE_UNITS = new Set([
+  "ct/kwh",
+  "cent/kwh",
+  "€/kwh",
+  "eur/kwh",
+  "eur/mwh",
+  "€/mwh",
+  "ct/mwh",
+]);
+
+const isPriceLikeEntry = (entry: RawForecastEntry): boolean => {
+  const hasExplicitPrice = typeof entry.price === "number" && Number.isFinite(entry.price);
+  const hasPriceCt = typeof entry.price_ct_per_kwh === "number" && Number.isFinite(entry.price_ct_per_kwh);
+  const hasPriceWithFeeCt = typeof entry.price_with_fee_ct_per_kwh === "number" && Number.isFinite(entry.price_with_fee_ct_per_kwh);
+  const hasPriceWithFeeEur = typeof entry.price_with_fee_eur_per_kwh === "number" && Number.isFinite(entry.price_with_fee_eur_per_kwh);
+  const unit = (entry.unit ?? entry.price_unit ?? entry.value_unit ?? "").toLowerCase().trim();
+  const hasValueWithPriceUnit = PRICE_UNITS.has(unit) && typeof entry.value === "number" && Number.isFinite(entry.value);
+  return hasExplicitPrice || hasPriceCt || hasPriceWithFeeCt || hasPriceWithFeeEur || hasValueWithPriceUnit;
+};
+
 const parseForecastValue = (value: unknown): RawForecastEntry[] => {
-  const entries: RawForecastEntry[] = [];
   const parsed = forecastArraySchema.safeParse(value);
-  if (parsed.success) {
-    entries.push(...parsed.data);
+  if (!parsed.success) {
+    return [];
   }
-  return entries;
+  // Filter out non-price series such as CO2 arrays which otherwise look like numbers without price units.
+  return parsed.data.filter(isPriceLikeEntry);
+};
+
+// Variant that accepts entries without explicit price units (used for known price arrays like `grid` and `planner`).
+const parseForecastValueAll = (value: unknown): RawForecastEntry[] => {
+  const parsed = forecastArraySchema.safeParse(value);
+  return parsed.success ? parsed.data : [];
 };
 
 const parseSolarTimeseriesValue = (value: unknown): RawSolarEntry[] => {
@@ -246,10 +272,21 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
         : [];
       solarTimeseries.push(...parseSolarTimeseriesValue(timeseries));
     }
-    for (const value of Object.values(forecastValue)) {
-      if (Array.isArray(value)) {
-        forecast.push(...parseForecastValue(value));
+    for (const [key, value] of Object.entries(forecastValue)) {
+      if (key === "solar") {
+        continue; // handled above
       }
+      if (!Array.isArray(value)) {
+        continue;
+      }
+      if (key === "grid" || key === "planner") {
+        forecast.push(...parseForecastValueAll(value));
+        continue;
+      }
+      if (key === "co2") {
+        continue; // ignore CO2 arrays for price forecast
+      }
+      forecast.push(...parseForecastValue(value));
     }
   }
 
