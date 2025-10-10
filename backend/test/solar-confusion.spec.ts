@@ -9,7 +9,8 @@ import { parseEvccState } from "../src/config/schemas";
 
 describe("solar-confusion fixture: project grid power including solar", () => {
   it("prints solar + grid power per slot (W)", () => {
-    const fixturePath = join(process.cwd(), "fixtures", "solar-confusion.json");
+    const fixtureName = process.env.FIXTURE ?? "solar-confusion.json";
+    const fixturePath = join(process.cwd(), "fixtures", fixtureName);
     const raw: unknown = JSON.parse(readFileSync(fixturePath, "utf-8"));
     const parsed = parseEvccState(raw);
 
@@ -91,7 +92,6 @@ describe("solar-confusion fixture: project grid power including solar", () => {
     });
 
     // Print a compact table for manual inspection in test output
-    // eslint-disable-next-line no-console
     console.table(entries.map((e) => ({
       start: e.start,
       price_ct_per_kwh: e.price_ct_per_kwh,

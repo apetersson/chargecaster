@@ -136,8 +136,11 @@ function normalisePower(value: number, unitHint: string | null): Power {
     return Power.fromWatts(value);
   }
 
-  // No explicit unit; EVCC reports W for values >= 100 and kW for small values.
-  if (Math.abs(value) <= 50) {
+  // No explicit unit; infer based on magnitude.
+  // Empirically: EVCC often reports small decimals in kW (e.g. 0.3–1.2),
+  // while larger integers represent W (e.g. 150, 1200, 2500).
+  // Values around sunset like 30.4 should be treated as 30.4 W, not kW.
+  if (Math.abs(value) < 2) {
     return Power.fromKilowatts(value);
   }
   return Power.fromWatts(value);
