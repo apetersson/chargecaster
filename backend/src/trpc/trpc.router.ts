@@ -8,6 +8,10 @@ import { ForecastService } from "../simulation/forecast.service";
 import { HistoryService } from "../simulation/history.service";
 import { SummaryService } from "../simulation/summary.service";
 import { OracleService } from "../simulation/oracle.service";
+import { BacktestSavingsService } from "../simulation/backtest.service";
+import { ConfigFileService } from "../config/config-file.service";
+import { SimulationConfigFactory } from "../config/simulation-config.factory";
+import type { BacktestSeriesResponse } from "../simulation/types";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -86,6 +90,9 @@ export class TrpcRouter {
     @Inject(HistoryService) private readonly historyService: HistoryService,
     @Inject(SummaryService) private readonly summaryService: SummaryService,
     @Inject(OracleService) private readonly oracleService: OracleService,
+    @Inject(BacktestSavingsService) private readonly backtestService: BacktestSavingsService,
+    @Inject(ConfigFileService) private readonly configFile: ConfigFileService,
+    @Inject(SimulationConfigFactory) private readonly configFactory: SimulationConfigFactory,
   ) {
     this.router = t.router({
       health: t.procedure.query(() => ({status: "ok"})),
@@ -100,6 +107,18 @@ export class TrpcRouter {
           return this.forecastService.buildResponse(snap.timestamp, Array.isArray(snap.forecast_eras) ? snap.forecast_eras : []);
         }),
         oracle: t.procedure.query(() => this.oracleService.build(this.simulationService.ensureSeedFromFixture())),
+        backtest24h: t.procedure.query(async (): Promise<BacktestSeriesResponse> => {
+          // Load current config from file to ensure battery parameters are available
+          const path = this.configFile.resolvePath();
+          const doc = await this.configFile.loadDocument(path);
+          const simConfig = this.configFactory.create(doc);
+          const series = this.backtestService.buildSeries(simConfig, { windowHours: 24, historyLimit: 1000 });
+          if (series) {
+            return series;
+          }
+          const nowIso = new Date().toISOString();
+          return { generated_at: nowIso, window_start: nowIso, window_end: nowIso, points: [] };
+        }),
         snapshot: t.procedure.query(({ctx}) => {
           const service = ctx.simulationService ?? this.simulationService;
           const latest = service.getLatestSnapshot();

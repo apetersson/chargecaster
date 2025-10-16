@@ -7,7 +7,8 @@ import SummaryCards from "./components/SummaryCards";
 import TrajectoryTable from "./components/TrajectoryTable";
 import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart";
-import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary, } from "./types";
+import { useBacktestChart } from "./hooks/useBacktestChart";
+import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary, BacktestSeriesResponse } from "./types";
 import { useIsMobile } from "./hooks/useIsMobile";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -34,25 +35,40 @@ const App = () => {
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastEra[]>([]);
   const [oracleEntries, setOracleEntries] = useState<OracleEntry[]>([]);
+  const [backtest, setBacktest] = useState<BacktestSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
   const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
+  const [chartMode, setChartMode] = useState<"projection" | "backtest">("projection");
+  const [focusMode, setFocusMode] = useState<"smart" | "dumb">("dumb");
 
   useEffect(() => {
     setShowPowerAxisLabels(!isMobile);
     setShowPriceAxisLabels(!isMobile);
   }, [isMobile]);
 
+  const fetchBacktest = useCallback(async (): Promise<void> => {
+    try {
+      const data = await trpcClient.dashboard.backtest24h.query();
+      setBacktest(data ?? null);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }, []);
+
   const fetchData = useCallback((): void => {
     const execute = async () => {
       try {
         setLoading(true);
-        const summaryData = await trpcClient.dashboard.summary.query();
-        const historyData = await trpcClient.dashboard.history.query();
-        const forecastData = await trpcClient.dashboard.forecast.query();
-        const oracleData = await trpcClient.dashboard.oracle.query();
+        const [summaryData, historyData, forecastData, oracleData, backtestData] = await Promise.all([
+          trpcClient.dashboard.summary.query(),
+          trpcClient.dashboard.history.query(),
+          trpcClient.dashboard.forecast.query(),
+          trpcClient.dashboard.oracle.query(),
+          trpcClient.dashboard.backtest24h.query(),
+        ]);
 
         setSummary(summaryData);
 
@@ -61,6 +77,7 @@ const App = () => {
 
         setForecast(Array.isArray(forecastData.eras) ? forecastData.eras : []);
         setOracleEntries(Array.isArray(oracleData.entries) ? oracleData.entries : []);
+        setBacktest(backtestData ?? null);
         setError(null);
       } catch (err) {
         setError(getErrorMessage(err));
@@ -80,10 +97,16 @@ const App = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const chartRef = useProjectionChart(history, forecast, oracleEntries, summary, {
+  const projectionChartRef = useProjectionChart(history, forecast, oracleEntries, summary, {
     isMobile,
     showPowerAxisLabels,
     showPriceAxisLabels,
+  });
+  const backtestChartRef = useBacktestChart(backtest, {
+    isMobile,
+    showPowerAxisLabels,
+    showPriceAxisLabels,
+    focus: focusMode,
   });
 
   return (
@@ -98,30 +121,76 @@ const App = () => {
 
       <section className="card chart">
         <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-          <h2>SOC over time</h2>
-          {(
-            <div className="chart-controls" role="group" aria-label="Chart axis labels">
-              <button
-                type="button"
-                className={`chip ${showPowerAxisLabels ? "active" : ""}`}
-                onClick={() => setShowPowerAxisLabels((v) => !v)}
-                aria-pressed={showPowerAxisLabels}
-              >
-                Power
-              </button>
-              <button
-                type="button"
-                className={`chip ${showPriceAxisLabels ? "active" : ""}`}
-                onClick={() => setShowPriceAxisLabels((v) => !v)}
-                aria-pressed={showPriceAxisLabels}
-              >
-                Tariff
-              </button>
-            </div>
-          )}
+          <div style={{display: "flex", alignItems: "center", gap: 8}}>
+            <h2 style={{marginRight: 8}}>{chartMode === "projection" ? "SOC over time" : "Backtest (Past 24h)"}</h2>
+            {chartMode === "backtest" ? (
+              <div className="chart-controls" role="group" aria-label="Series focus">
+                <button
+                  type="button"
+                  className={`chip ${focusMode === "smart" ? "active" : ""}`}
+                  onClick={() => setFocusMode("smart")}
+                  aria-pressed={focusMode === "smart"}
+                  title="Highlight smart data"
+                >
+                  Smart
+                </button>
+                <button
+                  type="button"
+                  className={`chip ${focusMode === "dumb" ? "active" : ""}`}
+                  onClick={() => setFocusMode("dumb")}
+                  aria-pressed={focusMode === "dumb"}
+                  title="Highlight dumb baseline"
+                >
+                  Dumb
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <div className="chart-controls" role="group" aria-label="Chart display">
+            <button
+              type="button"
+              className={`chip ${chartMode === "backtest" ? "active" : ""}`}
+              onClick={() => {
+                setChartMode("backtest");
+                void fetchBacktest();
+              }}
+              aria-pressed={chartMode === "backtest"}
+            >
+              Backtest
+            </button>
+            <button
+              type="button"
+              className={`chip ${chartMode === "projection" ? "active" : ""}`}
+              onClick={() => setChartMode("projection")}
+              aria-pressed={chartMode === "projection"}
+            >
+              Projection
+            </button>
+            <span style={{marginLeft: 12}}/>
+            <button
+              type="button"
+              className={`chip ${showPowerAxisLabels ? "active" : ""}`}
+              onClick={() => setShowPowerAxisLabels((v) => !v)}
+              aria-pressed={showPowerAxisLabels}
+            >
+              Power
+            </button>
+            <button
+              type="button"
+              className={`chip ${showPriceAxisLabels ? "active" : ""}`}
+              onClick={() => setShowPriceAxisLabels((v) => !v)}
+              aria-pressed={showPriceAxisLabels}
+            >
+              Values
+            </button>
+          </div>
         </div>
         <div className="chart-viewport">
-          <canvas ref={chartRef} aria-label="SOC projection chart"/>
+          {chartMode === "projection" ? (
+            <canvas ref={projectionChartRef} aria-label="SOC projection chart"/>
+          ) : (
+            <canvas ref={backtestChartRef} aria-label="Backtest 24h chart"/>
+          )}
         </div>
       </section>
 
