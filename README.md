@@ -203,6 +203,35 @@ CHARGECASTER_CONFIG_FILE=./config.local.yaml \
 
 ---
 
+## Release: Tag & Push
+
+Use `./tag_and_push.sh` to bump the git tag, build multi‑arch Docker images, push to Docker Hub, and push git refs (including the new tag).
+
+Usage:
+
+```
+./tag_and_push.sh [patch|minor|major|vX.Y.Z]
+```
+
+Defaults:
+- Repo: `apetersson/chargecaster` (override with `DOCKER_REPO`)
+- Platforms: `linux/amd64,linux/arm64` (override with `PLATFORMS`)
+- Remote: `origin` (override with `GIT_REMOTE`)
+
+Examples:
+
+```
+# Patch bump from latest tag
+./tag_and_push.sh
+
+# Explicit version
+./tag_and_push.sh v0.1.5
+```
+
+Prereqs: logged in to Docker (`docker login`) and Docker Buildx available.
+
+---
+
 ## Dev vs. Container: Static Files and Ports
 
 - In dev, run the backend without static files and use Vite for the SPA:
