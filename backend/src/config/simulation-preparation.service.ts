@@ -44,13 +44,12 @@ export class SimulationPreparationService {
     let priceSnapshot: number | null = null;
     let solarForecast: RawSolarEntry[] = [];
 
-    const marketResult = await this.marketDataService.collect(configFile.market_data, simulationConfig, warnings);
+    const evccResult = await this.evccDataService.collect(configFile.evcc, warnings);
+    const marketResult = await this.marketDataService.collect(configFile.market_data, simulationConfig, warnings, evccResult.forecast);
     this.logger.log(
       `Market data fetch summary: raw_slots=${marketResult.forecast.length}, price_snapshot=${marketResult.priceSnapshot ?? "n/a"}`,
     );
     const futureMarketForecast = this.filterFutureForecastEntries(marketResult.forecast);
-
-    const evccResult = await this.evccDataService.collect(configFile.evcc, warnings);
     this.logger.log(
       `EVCC fetch summary: raw_slots=${evccResult.forecast.length}, solar_slots=${evccResult.solarForecast.length}, battery_soc=${evccResult.batterySoc ?? "n/a"}`,
     );
@@ -61,16 +60,8 @@ export class SimulationPreparationService {
       `Future entry counts (ref=${nowIso}): evcc=${futureEvccForecast.length}, market=${futureMarketForecast.length}, solar=${futureSolarForecast.length}`,
     );
 
-    const preferMarket = configFile.market_data?.prefer_market ?? true;
-    this.logger.log(
-      `Market data: slots=${futureMarketForecast.length}, snapshot=${
-        marketResult.priceSnapshot ?? "n/a"
-      }, prefer_market=${preferMarket}`,
-    );
-    if (futureMarketForecast.length && (preferMarket || !forecast.length)) {
-      forecast = [...futureMarketForecast];
-      priceSnapshot = marketResult.priceSnapshot ?? priceSnapshot;
-    } else if (!forecast.length && futureMarketForecast.length) {
+    // Provider order determines preference. If marketResult has data, use it; otherwise fall back to EVCC forecast later.
+    if (futureMarketForecast.length) {
       forecast = [...futureMarketForecast];
       priceSnapshot = marketResult.priceSnapshot ?? priceSnapshot;
     }
@@ -99,10 +90,8 @@ export class SimulationPreparationService {
       this.logger.warn(message);
     }
 
-    const canonicalForecast = preferMarket && futureMarketForecast.length ? futureMarketForecast : forecast;
-
     const forecastErasResult = this.forecastAssembly.buildForecastEras(
-      canonicalForecast,
+      forecast,
       futureEvccForecast,
       futureMarketForecast,
       futureSolarForecast,

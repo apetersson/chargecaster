@@ -67,13 +67,11 @@ const evccConfigSchema = configSectionSchema
   })
   .strip();
 
-const marketConfigSchema = configSectionSchema
-  .extend({
-    url: optionalStringSchema.optional(),
-    max_hours: optionalNumberSchema.optional(),
-    prefer_market: optionalBooleanSchema.optional().default(true),
-  })
-  .strip();
+const marketConfigSchema = z.object({
+  awattar: awattarConfigSchema.optional(),
+  entsoe: entsoeNewConfigSchema.optional(),
+  from_evcc: fromEvccConfigSchema.optional(),
+}).strip();
 
 const loggingConfigSchema = z
   .object({
@@ -316,9 +314,10 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     state.pvPower,
   );
 
+  const stateObj = state as UnknownRecord;
   const homePowerW = pickFirstNumber(
-    (site as UnknownRecord)?.homePower,
-    (state as UnknownRecord)?.homePower,
+    site.homePower,
+    stateObj?.homePower,
   );
 
   const priceSnapshot = pickFirstNumber(
@@ -351,3 +350,6 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     homePowerW,
   };
 };
+import { awattarConfigSchema } from "./providers/awattar.provider";
+import { entsoeNewConfigSchema } from "./providers/entsoe_new.provider";
+import { fromEvccConfigSchema } from "./providers/from_evcc.provider";

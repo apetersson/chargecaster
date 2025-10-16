@@ -98,8 +98,8 @@ export class ForecastAssemblyService {
         }
       }
 
-      const solarPayload = this.findSolarPayload(slot.startDate, slot.endDate, solarSlots);
-      const solarSource = this.buildSolarSource("evcc", slot, solarPayload);
+      const solarSlot = this.findSolarSlot(slot.startDate, slot.endDate, solarSlots);
+      const solarSource = this.buildSolarSource("evcc", slot, solarSlot);
       if (solarSource) {
         this.addSource(entry, solarSource);
       }
@@ -209,13 +209,14 @@ export class ForecastAssemblyService {
     return payload;
   }
 
-  private buildSolarSource(provider: string, slot: NormalizedSlot, raw: MutableRecord | undefined): SolarSource | null {
-    if (!raw) {
+  private buildSolarSource(provider: string, eraSlot: NormalizedSlot, solarSlot: NormalizedSlot | undefined): SolarSource | null {
+    if (!solarSlot) {
       return null;
     }
-    let energyWh = this.toNumber(raw.energy_wh);
+    // Extract solar energy from the matched solar slot
+    let energyWh = this.toNumber(solarSlot.payload.energy_wh);
     if (energyWh === null) {
-      const energyKwh = this.toNumber(raw.energy_kwh);
+      const energyKwh = this.toNumber(solarSlot.payload.energy_kwh);
       if (energyKwh !== null) {
         energyWh = energyKwh * 1000;
       }
@@ -223,21 +224,39 @@ export class ForecastAssemblyService {
     if (energyWh === null || energyWh <= 0) {
       return null;
     }
-    const durationHours = slot.timeSlot?.duration.hours ?? slot.durationHours ?? null;
-    const averagePower = durationHours && durationHours > 0 ? energyWh / durationHours : undefined;
+    // Compute overlap between the era slot (e.g., 15 min ENTSO-E) and the solar slot (often hourly)
+    const eraStart = eraSlot.startDate?.getTime();
+    const eraEnd = eraSlot.endDate?.getTime();
+    const solarStart = solarSlot.startDate?.getTime();
+    const solarEnd = solarSlot.endDate?.getTime();
+
+    if (!eraStart || !eraEnd || !solarStart || !solarEnd) {
+      return {provider, type: "solar", payload: {energy_wh: energyWh}};
+    }
+
+    const overlapMs = Math.max(0, Math.min(eraEnd, solarEnd) - Math.max(eraStart, solarStart));
+    if (overlapMs <= 0) {
+      return null;
+    }
+    const solarSlotMs = Math.max(1, solarEnd - solarStart);
+    const overlapRatio = overlapMs / solarSlotMs;
+    const scaledEnergyWh = energyWh * overlapRatio;
+
+    const eraDurationHours = eraSlot.timeSlot?.duration.hours ?? eraSlot.durationHours ?? null;
+    const averagePower = eraDurationHours && eraDurationHours > 0 ? scaledEnergyWh / eraDurationHours : undefined;
     return averagePower !== undefined
-      ? {provider, type: "solar", payload: {energy_wh: energyWh, average_power_w: averagePower}}
-      : {provider, type: "solar", payload: {energy_wh: energyWh}};
+      ? {provider, type: "solar", payload: {energy_wh: scaledEnergyWh, average_power_w: averagePower}}
+      : {provider, type: "solar", payload: {energy_wh: scaledEnergyWh}};
   }
 
-  private findSolarPayload(startDate: Date | null, endDate: Date | null, slots: NormalizedSlot[]): MutableRecord | undefined {
+  private findSolarSlot(startDate: Date | null, endDate: Date | null, slots: NormalizedSlot[]): NormalizedSlot | undefined {
     if (!startDate) {
       return undefined;
     }
     const startIso = startDate.toISOString();
     const direct = slots.find((slot) => slot.startIso === startIso);
     if (direct) {
-      return {...direct.payload};
+      return direct;
     }
     const startTime = startDate.getTime();
     const endTime = endDate?.getTime() ?? startTime + SLOT_DURATION_MS;
@@ -248,7 +267,7 @@ export class ForecastAssemblyService {
       }
       const slotEnd = slot.endDate?.getTime() ?? slotStart + SLOT_DURATION_MS;
       if (slotStart < endTime && slotEnd > startTime) {
-        return {...slot.payload};
+        return slot;
       }
     }
     return undefined;

@@ -1,6 +1,7 @@
 {
   "name": "chargecaster",
   "private": true,
+  "type": "module",
   "license": "UNLICENSED",
   "workspaces": [
     "backend",
@@ -19,5 +20,8 @@
     "lint:all": "yarn lint:backend && yarn lint:frontend",
     "typecheck:all": "yarn typecheck:backend && yarn typecheck:frontend",
     "build:all": "yarn build:domain && yarn build:backend && yarn build:frontend"
+  },
+  "devDependencies": {
+    "jiti": "^2.6.1"
   }
 }
