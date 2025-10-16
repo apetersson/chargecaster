@@ -17,12 +17,15 @@ interface BuildOptionsConfig {
   timeRange: TimeRange;
   legendGroups: LegendGroup[];
   responsive?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean };
+  // Label for the right-hand value axis. Defaults to 'ct/kWh' (tariff). For backtest savings, pass 'ct'.
+  valueAxisUnit?: string;
 }
 
-export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: BuildOptionsConfig): ChartOptions<"line"> => {
+export const buildOptions = ({bounds, timeRange, legendGroups, responsive, valueAxisUnit}: BuildOptionsConfig): ChartOptions<"line"> => {
   const isMobile = Boolean(responsive?.isMobile);
   const showPowerAxisLabels = responsive?.showPowerAxisLabels ?? !isMobile;
   const showPriceAxisLabels = responsive?.showPriceAxisLabels ?? !isMobile;
+  const RIGHT_AXIS_UNIT = valueAxisUnit ?? "ct/kWh";
   const groupedLegendEntries = legendGroups.filter((group) => group.datasetIndices.length > 0);
   const legendDefaults = Chart.defaults.plugins.legend;
   const legendLabelDefaults = legendDefaults.labels;
@@ -115,13 +118,13 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
             if (dataset.yAxisID === "power") {
               return `${baseLabel}${numberFormatter.format(value)} W`;
             }
-            if (dataset.yAxisID === "price") {
-              return `${baseLabel}${numberFormatter.format(value)} ct/kWh`;
-            }
-            return `${baseLabel}${numberFormatter.format(value)}`;
-          },
+          if (dataset.yAxisID === "price") {
+            return `${baseLabel}${numberFormatter.format(value)} ${RIGHT_AXIS_UNIT}`;
+          }
+          return `${baseLabel}${numberFormatter.format(value)}`;
         },
       },
+    },
     },
     scales: {
       x: {
@@ -227,7 +230,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
             if (!Number.isFinite(numeric)) {
               return "";
             }
-            return `${numberFormatter.format(numeric)} ct/kWh`;
+            return `${numberFormatter.format(numeric)} ${RIGHT_AXIS_UNIT}`;
           },
         },
         grid: {
@@ -236,7 +239,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
         },
         title: {
           display: showPriceAxisLabels,
-          text: "ct/kWh",
+          text: RIGHT_AXIS_UNIT,
           color: TICK_COLOR,
           font: {
             size: 12,

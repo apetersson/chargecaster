@@ -7,6 +7,8 @@ import type {
   OracleEntry,
   OracleResponse,
   SnapshotSummary as BackendSnapshotSummary,
+  BacktestSeriesResponse,
+  BacktestSeriesPoint,
 } from "@backend/simulation-types";
 
 export type SnapshotSummary = BackendSnapshotSummary;
@@ -18,4 +20,6 @@ export type {
   OracleEntry,
   OracleResponse,
   ForecastSourcePayload,
+  BacktestSeriesResponse,
+  BacktestSeriesPoint,
 };

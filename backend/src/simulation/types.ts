@@ -252,3 +252,31 @@ export const simulationConfigSchema = z.object({
 export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
 
 export type PriceSlot = TariffSlot;
+
+// Backtest 24h series response for UI graphing
+// Each point represents one interval between two history samples inside the 24h window.
+export const backtestSeriesPointSchema = z.object({
+  start: requiredTimestampSchema,
+  end: requiredTimestampSchema,
+  price_ct_per_kwh: nullableNumberSchema.optional(),
+  price_eur_per_kwh: nullableNumberSchema,
+  grid_power_smart_w: nullableNumberSchema,
+  grid_power_dumb_w: nullableNumberSchema,
+  soc_smart_percent: nullableNumberSchema,
+  soc_dumb_percent: nullableNumberSchema,
+  cost_smart_eur: nullableNumberSchema,
+  cost_dumb_eur: nullableNumberSchema,
+  savings_eur: nullableNumberSchema,
+  savings_cum_eur: nullableNumberSchema.optional(),
+});
+
+export type BacktestSeriesPoint = z.infer<typeof backtestSeriesPointSchema>;
+
+export const backtestSeriesResponseSchema = z.object({
+  generated_at: requiredTimestampSchema,
+  window_start: requiredTimestampSchema,
+  window_end: requiredTimestampSchema,
+  points: z.array(backtestSeriesPointSchema),
+});
+
+export type BacktestSeriesResponse = z.infer<typeof backtestSeriesResponseSchema>;
