@@ -3,17 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   ForecastEra,
-  ForecastResponse,
   HistoryPoint,
-  HistoryResponse,
   OracleEntry,
-  OracleResponse,
   PriceSlot,
   RawForecastEntry,
   RawSolarEntry,
   SimulationConfig,
   SnapshotPayload,
-  SnapshotSummary,
 } from "./types";
 import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
@@ -113,60 +109,8 @@ export class SimulationService {
     return this.runSimulation({config, liveState, forecast, solarForecast});
   }
 
-  getSummary(): SnapshotSummary {
-    const snapshot = this.ensureSeedFromFixture();
-    return {
-      timestamp: snapshot.timestamp,
-      interval_seconds: snapshot.interval_seconds,
-      house_load_w: snapshot.house_load_w,
-      current_soc_percent: snapshot.current_soc_percent,
-      next_step_soc_percent: snapshot.next_step_soc_percent,
-      recommended_soc_percent: snapshot.recommended_soc_percent,
-      recommended_final_soc_percent: snapshot.recommended_final_soc_percent,
-      current_mode: snapshot.current_mode,
-      price_snapshot_eur_per_kwh: snapshot.price_snapshot_eur_per_kwh,
-      projected_cost_eur: snapshot.projected_cost_eur,
-      baseline_cost_eur: snapshot.baseline_cost_eur,
-      basic_battery_cost_eur: snapshot.basic_battery_cost_eur,
-      backtested_savings_eur: snapshot.backtested_savings_eur,
-      projected_savings_eur: snapshot.projected_savings_eur,
-      projected_grid_power_w: snapshot.projected_grid_power_w,
-      forecast_hours: snapshot.forecast_hours,
-      forecast_samples: snapshot.forecast_samples,
-      warnings: snapshot.warnings ?? [],
-      errors: snapshot.errors ?? [],
-    };
-  }
-
-  getHistory(limit = 96): HistoryResponse {
-    const snapshot = this.ensureSeedFromFixture();
-    const historyRecords = this.storageRef.listHistory(limit);
-    const entries = normalizeHistoryList(historyRecords.map((item) => item.payload));
-    return {
-      generated_at: snapshot.timestamp,
-      entries,
-    };
-  }
-
-  getForecast(): ForecastResponse {
-    const snapshot = this.ensureSeedFromFixture();
-    const eras = Array.isArray(snapshot.forecast_eras) ? snapshot.forecast_eras : [];
-    return {
-      generated_at: snapshot.timestamp,
-      eras,
-    };
-  }
-
-  getOracle(): OracleResponse {
-    const snapshot = this.ensureSeedFromFixture();
-    const entries = Array.isArray(snapshot.oracle_entries)
-      ? snapshot.oracle_entries.filter((entry): entry is OracleEntry => typeof entry?.era_id === "string")
-      : [];
-    return {
-      generated_at: snapshot.timestamp,
-      entries,
-    };
-  }
+  // Removed legacy getters (getSummary/getHistory/getForecast/getOracle).
+  // Dedicated services now handle these responsibilities (SummaryService, HistoryService, ForecastService, OracleService).
 
   runSimulation(input: SimulationInput): SnapshotPayload {
     if (!this.storageRef) {
@@ -279,7 +223,7 @@ export class SimulationService {
     const firstSolarKwh = solarGeneration[0];
     const firstSlot = slots[0];
     const observedSolarPower = input.observations?.solarPowerW;
-    if (typeof firstSolarKwh === "number" && Number.isFinite(firstSolarKwh) && firstSlot) {
+    if (Number.isFinite(firstSolarKwh) && firstSlot) {
       const durationHours = firstSlot.durationHours ?? 0;
       if (firstSolarKwh > 0) {
         historyEntry.solar_energy_wh = firstSolarKwh * 1000;
@@ -294,9 +238,7 @@ export class SimulationService {
     if (typeof observedSolarPower === "number" && Number.isFinite(observedSolarPower)) {
       historyEntry.solar_power_w = observedSolarPower;
       if (
-        historyEntry.solar_energy_wh === null &&
-        typeof firstSolarKwh === "number" &&
-        Number.isFinite(firstSolarKwh) &&
+        historyEntry.solar_energy_wh === null && Number.isFinite(firstSolarKwh) &&
         firstSolarKwh === 0
       ) {
         historyEntry.solar_energy_wh = 0;
@@ -337,7 +279,7 @@ export class SimulationService {
     const existing = Array.isArray(updatedPayload.errors) ? [...updatedPayload.errors] : [];
     let changed = false;
     for (const rawMessage of messages) {
-      const message = typeof rawMessage === "string" ? rawMessage.trim() : "";
+      const message = rawMessage.trim();
       if (!message) {
         continue;
       }
@@ -576,6 +518,9 @@ function simulateOptimalSchedule(
   const maxSolarChargePowerW = cfg.battery?.max_charge_power_solar_w != null
     ? Math.max(0, Number(cfg.battery.max_charge_power_solar_w))
     : null;
+  const maxDischargePowerW = cfg.battery?.max_discharge_power_w != null
+    ? Math.max(0, Number(cfg.battery.max_discharge_power_w))
+    : null;
   const networkTariff = gridFee(cfg);
   const solarGenerationPerSlot = options.solarGenerationKwhPerSlot ?? [];
   const directUseRatio = clampRatio(
@@ -600,6 +545,13 @@ function simulateOptimalSchedule(
 
   const percentStep = 100 / SOC_STEPS;
   const energyPerStep = capacityKwh / SOC_STEPS;
+  const maxChargeSoc = (() => {
+    const v = cfg.battery?.max_charge_soc;
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return Math.min(Math.max(v, 0), 100);
+    }
+    return 100;
+  })();
 
   const totalDuration = slots.reduce((acc, item) => acc + item.durationHours, 0);
   if (totalDuration <= 0) {
@@ -610,6 +562,7 @@ function simulateOptimalSchedule(
     slots.reduce((acc, slot) => acc + (slot.price + networkTariff) * slot.durationHours, 0) / totalDuration;
 
   const numStates = SOC_STEPS + 1;
+  const maxAllowedState = Math.round(maxChargeSoc / percentStep);
   const horizon = slots.length;
   const dp: number[][] = Array.from({length: horizon + 1}, () =>
     Array.from({length: numStates}, () => Number.POSITIVE_INFINITY),
@@ -648,6 +601,12 @@ function simulateOptimalSchedule(
       return availableSolar;
     })();
     const totalChargeLimitKwh = gridChargeLimitKwh + solarChargeLimitKwh;
+    const dischargeLimitKwh = (() => {
+      if (maxDischargePowerW == null) {
+        return Number.POSITIVE_INFINITY; // no explicit discharge cap
+      }
+      return (maxDischargePowerW / 1000) * duration;
+    })();
     const baselineGridEnergy = loadAfterDirect - availableSolar;
     const baselineGridImport = Math.max(0, baselineGridEnergy);
 
@@ -655,7 +614,7 @@ function simulateOptimalSchedule(
       let bestCost = Number.POSITIVE_INFINITY;
       let bestNext = state;
 
-      let maxChargeSteps = numStates - 1 - state;
+      let maxChargeSteps = Math.min(numStates - 1 - state, Math.max(0, maxAllowedState - state));
       if (totalChargeLimitKwh > 0) {
         maxChargeSteps = Math.min(
           maxChargeSteps,
@@ -664,17 +623,42 @@ function simulateOptimalSchedule(
       } else {
         maxChargeSteps = Math.min(maxChargeSteps, 0);
       }
-      const upLimit = Math.min(maxChargeSteps, numStates - 1 - state);
-      const downLimit = state;
+      const upLimit = Math.min(maxChargeSteps, numStates - 1 - state, Math.max(0, maxAllowedState - state));
+
+      let maxDischargeSteps = state;
+      if (Number.isFinite(dischargeLimitKwh)) {
+        maxDischargeSteps = Math.min(
+          maxDischargeSteps,
+          Math.floor(dischargeLimitKwh / energyPerStep + 1e-9),
+        );
+      }
+      // If we've already reached the max allowed SOC, we still allow discharge to supply house,
+      // subject to discharge power cap and export rules.
+      const downLimit = Math.max(0, Math.min(state, maxDischargeSteps));
 
       for (let delta = -downLimit; delta <= upLimit; delta += 1) {
         const nextState = state + delta;
         const energyChange = delta * energyPerStep;
         const gridEnergy = loadAfterDirect + energyChange - availableSolar;
         if (!allowBatteryExport) {
+          // 1) Never allow battery-origin export beyond PV-only baseline.
           const minGridEnergy = baselineGridEnergy < 0 ? baselineGridEnergy : 0;
           if (gridEnergy < minGridEnergy - 1e-9) {
             continue;
+          }
+          // 2) If exporting while the battery can still accept solar charge this slot,
+          //    require saturating solar charge headroom first (or being at 100% SOC).
+          if (gridEnergy < 0) {
+            const socStepsHeadroom = Math.max(0, maxAllowedState - state);
+            const socEnergyHeadroomKwh = socStepsHeadroom * energyPerStep;
+            const solarHeadroomKwh = Math.min(solarChargeLimitKwh, availableSolar, socEnergyHeadroomKwh);
+            // energyChange here is achieved without grid import (export < 0 implies import 0),
+            // so it equals the solar-charged amount this slot.
+            const solarChargedKwh = energyChange > 0 ? energyChange : 0;
+            if (solarHeadroomKwh > solarChargedKwh + 1e-9) {
+              // More solar could be pushed into the battery; exporting now is disallowed.
+              continue;
+            }
           }
         }
         if (energyChange > 0) {
@@ -783,7 +767,8 @@ function simulateOptimalSchedule(
     oracleEntries[oracleEntries.length - 1]?.end_soc_percent ??
     oracleEntries[oracleEntries.length - 1]?.target_soc_percent ??
     null;
-  const recommendedTarget = shouldChargeFromGrid ? 100 : finalTarget;
+  const recommendedTargetRaw = shouldChargeFromGrid ? maxChargeSoc : (finalTarget ?? maxChargeSoc);
+  const recommendedTarget = Math.min(recommendedTargetRaw ?? maxChargeSoc, maxChargeSoc);
   const nextStepSocPercent = firstTarget ?? currentState * percentStep;
   return {
     initial_soc_percent: currentState * percentStep,
@@ -813,19 +798,10 @@ function extractForecastFromState(state: unknown): RawForecastEntry[] {
   }
 }
 
-function extractSolarForecastFromState(state: unknown): RawSolarEntry[] {
-  try {
-    const parsed = parseEvccState(state);
-    return buildSolarForecastFromTimeseries(parsed.solarTimeseries);
-  } catch (error) {
-    void error;
-    return [];
-  }
-}
+// Removed unused helper extractSolarForecastFromState (no external references).
 
 export {
   extractForecastFromState,
-  extractSolarForecastFromState,
   normalizePriceSlots,
   simulateOptimalSchedule,
 };

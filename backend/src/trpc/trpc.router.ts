@@ -20,6 +20,8 @@ const batterySchema = z.object({
   max_charge_power_w: z.number().nonnegative(),
   auto_mode_floor_soc: z.number().min(0).max(100).optional(),
   max_charge_power_solar_w: z.number().nonnegative().optional(),
+  max_discharge_power_w: z.number().nonnegative().optional(),
+  max_charge_soc: z.number().min(0).max(100).optional(),
 });
 
 const priceSchema = z.object({
@@ -31,6 +33,7 @@ const logicSchema = z.object({
   interval_seconds: z.number().positive().optional(),
   min_hold_minutes: z.number().nonnegative().optional(),
   house_load_w: z.number().nonnegative().optional(),
+  allow_battery_export: z.boolean().optional(),
 });
 
 const solarSchema = z

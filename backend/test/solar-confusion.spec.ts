@@ -38,6 +38,8 @@ describe("solar-confusion fixture: project grid power including solar", () => {
         capacity_kwh: 10,
         max_charge_power_w: 500,
         auto_mode_floor_soc: 5,
+        max_discharge_power_w: 4500,
+        max_charge_soc: 95,
       },
       price: {
         // Use snapshot price as grid fee if available (fallback to 0.02 EUR/kWh)
@@ -48,7 +50,9 @@ describe("solar-confusion fixture: project grid power including solar", () => {
         interval_seconds: 300,
         min_hold_minutes: 0,
         house_load_w: 2200,
-        allow_battery_export: true,
+        // Enforce no battery-origin export (regulatory: disabled);
+        // export only allowed from PV when battery cannot accept more this slot or is full.
+        allow_battery_export: false,
       },
       solar: {
         direct_use_ratio: 0.6,
@@ -63,7 +67,7 @@ describe("solar-confusion fixture: project grid power including solar", () => {
         solarGenerationKwhPerSlot: solarKwhPerSlot,
         pvDirectUseRatio: 0.6,
         feedInTariffEurPerKwh: 0.03,
-        allowBatteryExport: true,
+        allowBatteryExport: false,
       },
     );
 
