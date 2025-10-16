@@ -40,10 +40,11 @@ market_data:
     url: https://api.awattar.at/v1/marketdata
     max_hours: 72
   entsoe:
-     priority: 1
-     zone: BZN|10YAT-APG------L
-     tz: CET
-     max_hours: 168
+    priority: 4
+    zone: BZN|10YAT-APG------L
+    tz: CET
+    max_hours: 168
+    aggregate_hourly: false
   from_evcc:
     priority: 3
 

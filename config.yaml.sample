@@ -39,6 +39,7 @@ market_data:
   #   zone: "BZN|10YDE-ENBW-----N"
   #   tz: "CET"
   #   max_hours: 168
+  #   aggregate_hourly: false   # set true to time-weight average 15m prices into hourly
   # Fallback to EVCC-provided price forecast if others are empty
   from_evcc:
     priority: 3

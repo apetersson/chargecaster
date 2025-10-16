@@ -12,6 +12,8 @@ export const entsoeNewConfigSchema = z.object({
   zone: z.string().min(1).optional(),
   tz: z.string().optional().default("CET"),
   max_hours: z.number().int().positive().optional(),
+  // If true, aggregate returned 15-minute slots into hourly prices.
+  aggregate_hourly: z.boolean().optional().default(false),
 }).strip();
 export type EntsoeNewConfig = z.infer<typeof entsoeNewConfigSchema>;
 
@@ -28,7 +30,10 @@ export class EntsoeNewProvider implements MarketProvider {
         const entries = this.parseCurve(payload);
         all = all.concat(entries);
       }
-      const forecast = clampHorizon(all, this.cfg?.max_hours ?? 72);
+      let forecast = clampHorizon(all, this.cfg?.max_hours ?? 72);
+      if (this.cfg?.aggregate_hourly) {
+        forecast = this.aggregateToHourly(forecast);
+      }
       const priceSnapshot = derivePriceSnapshotFromForecast(forecast, ctx.simulationConfig);
       return {forecast, priceSnapshot};
     } catch (error) {
@@ -107,7 +112,7 @@ export class EntsoeNewProvider implements MarketProvider {
         const toZ = Date.parse(period.timeInterval?.to ?? "");
         const resolution = String(period.resolution ?? "PT15M");
         if (!Number.isFinite(fromZ) || !Number.isFinite(toZ)) continue;
-        const stepMs = resolution === "PT15M" ? SLOT_15M_MS : SLOT_15M_MS;
+        const stepMs = this.parseDurationMs(resolution) ?? SLOT_15M_MS;
         const pointMap = period.pointMap ?? {};
         const keys = Object.keys(pointMap).sort((a, b) => Number(a) - Number(b));
         for (const k of keys) {
@@ -135,6 +140,66 @@ export class EntsoeNewProvider implements MarketProvider {
       }
     }
     return out;
+  }
+
+  private parseDurationMs(value: string | null | undefined): number | null {
+    if (!value) return null;
+    const v = value.toUpperCase().trim();
+    // Common ISO-8601 patterns from ENTSO-E: PT15M, PT30M, PT60M, PT1H
+    const m = /^PT(?:(\d+)H)?(?:(\d+)M)?$/.exec(v);
+    if (m) {
+      const hours = m[1] ? Number(m[1]) : 0;
+      const minutes = m[2] ? Number(m[2]) : 0;
+      if (Number.isFinite(hours) && Number.isFinite(minutes)) {
+        return (hours * 60 + minutes) * 60 * 1000;
+      }
+    }
+    return null;
+  }
+
+  private aggregateToHourly(entries: RawForecastEntry[]): RawForecastEntry[] {
+    if (!entries.length) return [];
+    // Group by UTC hour start and compute time-weighted average price
+    const groups = new Map<number, { sumPriceHours: number; sumHours: number }>();
+    for (const e of entries) {
+      const s = Date.parse(String(e.start ?? e.from ?? ""));
+      const en = Date.parse(String(e.end ?? e.to ?? ""));
+      if (!Number.isFinite(s) || !Number.isFinite(en) || en <= s) continue;
+      const hourStart = new Date(s);
+      hourStart.setUTCMinutes(0, 0, 0);
+      const key = hourStart.getTime();
+      const durationHours = (en - s) / 3_600_000;
+      const price = typeof e.price === "number" && Number.isFinite(e.price)
+        ? e.price
+        : typeof e.price_ct_per_kwh === "number" && Number.isFinite(e.price_ct_per_kwh)
+          ? e.price_ct_per_kwh / 100
+          : null;
+      if (price === null || durationHours <= 0) continue;
+      const acc = groups.get(key) ?? {sumPriceHours: 0, sumHours: 0};
+      acc.sumPriceHours += price * durationHours;
+      acc.sumHours += durationHours;
+      groups.set(key, acc);
+    }
+    const result: RawForecastEntry[] = [];
+    const keys = [...groups.keys()].sort((a, b) => a - b);
+    for (const key of keys) {
+      const {sumPriceHours, sumHours} = groups.get(key)!;
+      if (sumHours <= 0) continue;
+      const priceEur = sumPriceHours / sumHours;
+      const startIso = new Date(key).toISOString();
+      const endIso = new Date(key + 3_600_000).toISOString();
+      result.push({
+        start: startIso,
+        end: endIso,
+        price: priceEur,
+        unit: "EUR/kWh",
+        price_ct_per_kwh: priceEur * 100,
+        price_with_fee_ct_per_kwh: null,
+        price_with_fee_eur_per_kwh: null,
+        duration_hours: 1,
+      });
+    }
+    return result;
   }
 
   private describeError(error: unknown): string {
