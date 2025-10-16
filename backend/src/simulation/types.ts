@@ -88,7 +88,6 @@ const solarForecastSourceSchema = z.object({
 });
 
 const forecastSourceSchema = z.union([costForecastSourceSchema, solarForecastSourceSchema]);
-
 export type ForecastSourcePayload = z.infer<typeof forecastSourceSchema>;
 
 export const forecastEraSchema = z.object({
@@ -200,7 +199,6 @@ export const forecastSlotInputSchema = z.object({
   era_id: optionalStringSchema.optional(),
 });
 
-export type ForecastSlotInput = z.infer<typeof forecastSlotInputSchema>;
 
 export const solarSlotInputSchema = z.object({
   start: requiredTimestampSchema,
@@ -208,23 +206,25 @@ export const solarSlotInputSchema = z.object({
   energy_kwh: nullableNumberSchema,
 });
 
-export type SolarSlotInput = z.infer<typeof solarSlotInputSchema>;
 
 export const batteryConfigSchema = z.object({
   capacity_kwh: nullableNumberSchema,
   max_charge_power_w: nullableNumberSchema,
   auto_mode_floor_soc: nullableNumberSchema.optional(),
   max_charge_power_solar_w: nullableNumberSchema.optional(),
+  // Optional discharge power cap (W). If 0, battery cannot discharge at all.
+  max_discharge_power_w: nullableNumberSchema.optional(),
+  // Optional upper bound for charging SOC (percent 0..100). If set, the optimizer
+  // will not target SOC above this limit to avoid 100% calibration cycles.
+  max_charge_soc: nullableNumberSchema.optional(),
 });
 
-export type BatteryConfig = z.infer<typeof batteryConfigSchema>;
 
 export const priceConfigSchema = z.object({
   grid_fee_eur_per_kwh: nullableNumberSchema.optional(),
   feed_in_tariff_eur_per_kwh: nullableNumberSchema.optional(),
 });
 
-export type PriceConfig = z.infer<typeof priceConfigSchema>;
 
 export const logicConfigSchema = z.object({
   interval_seconds: nullableNumberSchema.optional(),
@@ -233,13 +233,11 @@ export const logicConfigSchema = z.object({
   allow_battery_export: optionalBooleanSchema.optional(),
 });
 
-export type LogicConfig = z.infer<typeof logicConfigSchema>;
 
 export const solarConfigSchema = z.object({
   direct_use_ratio: nullableNumberSchema.optional(),
 });
 
-export type SolarConfig = z.infer<typeof solarConfigSchema>;
 
 export const simulationConfigSchema = z.object({
   battery: batteryConfigSchema,
@@ -251,5 +249,3 @@ export const simulationConfigSchema = z.object({
 export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
 
 export type PriceSlot = TariffSlot;
-
-export type ForecastSourceType = "cost" | "solar" | (string & {});
