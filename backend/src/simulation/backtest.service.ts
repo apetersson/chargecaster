@@ -36,6 +36,7 @@ interface ComputationState {
   floorSoc: number;
   maxChargePowerW: number | null;
   maxSolarChargePowerW: number | null;
+  maxDischargePowerW: number | null;
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -107,6 +108,7 @@ export function computeBacktestedSavings(
   const floorSoc = clampSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? 0;
   const maxChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_w) ?? null;
   const maxSolarChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_solar_w) ?? null;
+  const maxDischargePowerW = toFiniteNumber(config?.battery?.max_discharge_power_w) ?? null;
 
   const referenceTimestampMs = resolveTimestampMs(options.referenceTimestamp ?? null);
   const latestTimestampMs = referenceTimestampMs ?? (() => {
@@ -155,6 +157,7 @@ export function computeBacktestedSavings(
     floorSoc,
     maxChargePowerW,
     maxSolarChargePowerW,
+    maxDischargePowerW,
   };
 
   let previous: SortedHistoryPoint | null = null;
@@ -218,6 +221,7 @@ export function computeBacktestedSavings(
       continue;
     }
     const solarPowerW = toFiniteNumber(previous.solar_power_w ?? null) ?? 0;
+    const observedHomePowerW = toFiniteNumber(previous.home_power_w ?? null);
 
     let intervalPriceEur = resolvePriceEur(previous);
     intervalPriceEur ??= resolvePriceEur(entry) ?? state.lastPriceEur;
@@ -234,8 +238,8 @@ export function computeBacktestedSavings(
     actualEndSoc = socCurr;
 
     const batteryPowerW = ((socCurr - socPrev) / 100) * (state.capacityKwh / durationHours) * 1000;
-
-    const houseLoadW = Math.max(0, gridPowerW + solarPowerW - batteryPowerW);
+    const derivedHouseLoadW = Math.max(0, gridPowerW + solarPowerW - batteryPowerW);
+    const houseLoadW = Math.max(0, observedHomePowerW ?? derivedHouseLoadW);
     const houseLoadEnergyKwh = (houseLoadW / 1000) * durationHours;
     const solarEnergyKwh = (Math.max(0, solarPowerW) / 1000) * durationHours;
 
@@ -259,16 +263,13 @@ export function computeBacktestedSavings(
     let remainingLoadKwh = houseLoadEnergyKwh - solarToLoadKwh;
     let solarSurplusKwh = solarEnergyKwh - solarToLoadKwh;
 
-    const chargeLimitW = (() => {
-      const limits = [state.maxChargePowerW, state.maxSolarChargePowerW]
-        .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
-      if (limits.length === 0) {
-        return null;
-      }
-      return Math.min(...limits);
-    })();
-    const chargeLimitKwh = chargeLimitW !== null ? (chargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
-    const dischargeLimitW = state.maxChargePowerW !== null && state.maxChargePowerW > 0 ? state.maxChargePowerW : null;
+    const solarChargeLimitW = typeof state.maxSolarChargePowerW === "number" && state.maxSolarChargePowerW > 0
+      ? state.maxSolarChargePowerW
+      : null;
+    const chargeLimitKwh = solarChargeLimitW !== null ? (solarChargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
+    const dischargeLimitW = typeof state.maxDischargePowerW === "number" && state.maxDischargePowerW > 0
+      ? state.maxDischargePowerW
+      : null;
     const dischargeLimitKwh = dischargeLimitW !== null ? (dischargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
 
     const capacityRemainingKwh = Math.max(0, ((100 - state.dumbSoc) / 100) * state.capacityKwh);
@@ -359,6 +360,7 @@ export function computeBacktestSeries(
   const floorSoc = clampSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? 0;
   const maxChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_w) ?? null;
   const maxSolarChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_solar_w) ?? null;
+  const maxDischargePowerW = toFiniteNumber(config?.battery?.max_discharge_power_w) ?? null;
 
   const referenceTimestampMs = resolveTimestampMs(options.referenceTimestamp ?? null);
   const latestTimestampMs = referenceTimestampMs ?? (() => {
@@ -398,6 +400,7 @@ export function computeBacktestSeries(
     floorSoc,
     maxChargePowerW,
     maxSolarChargePowerW,
+    maxDischargePowerW,
   };
 
   let previous: SortedHistoryPoint | null = null;
@@ -447,6 +450,7 @@ export function computeBacktestSeries(
       continue;
     }
     const solarPowerW = toFiniteNumber(previous.solar_power_w ?? null) ?? 0;
+    const observedHomePowerW = toFiniteNumber(previous.home_power_w ?? null);
 
     let intervalPriceEur = resolvePriceEur(previous);
     intervalPriceEur ??= resolvePriceEur(entry) ?? state.lastPriceEur;
@@ -457,7 +461,8 @@ export function computeBacktestSeries(
     state.lastPriceEur = intervalPriceEur;
 
     const batteryPowerW = ((socCurr - socPrev) / 100) * (state.capacityKwh / durationHours) * 1000;
-    const houseLoadW = Math.max(0, gridPowerW + solarPowerW - batteryPowerW);
+    const derivedHouseLoadW = Math.max(0, gridPowerW + solarPowerW - batteryPowerW);
+    const houseLoadW = Math.max(0, observedHomePowerW ?? derivedHouseLoadW);
     const houseLoadEnergyKwh = (houseLoadW / 1000) * durationHours;
     const solarEnergyKwh = (Math.max(0, solarPowerW) / 1000) * durationHours;
 
@@ -478,13 +483,13 @@ export function computeBacktestSeries(
     let remainingLoadKwh = houseLoadEnergyKwh - solarToLoadKwh;
     let solarSurplusKwh = solarEnergyKwh - solarToLoadKwh;
 
-    const chargeLimitW = (() => {
-      const limits = [state.maxChargePowerW, state.maxSolarChargePowerW]
-        .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
-      return limits.length ? Math.min(...limits) : null;
-    })();
-    const chargeLimitKwh = chargeLimitW !== null ? (chargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
-    const dischargeLimitW = state.maxChargePowerW !== null && state.maxChargePowerW > 0 ? state.maxChargePowerW : null;
+    const solarChargeLimitW = typeof state.maxSolarChargePowerW === "number" && state.maxSolarChargePowerW > 0
+      ? state.maxSolarChargePowerW
+      : null;
+    const chargeLimitKwh = solarChargeLimitW !== null ? (solarChargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
+    const dischargeLimitW = typeof state.maxDischargePowerW === "number" && state.maxDischargePowerW > 0
+      ? state.maxDischargePowerW
+      : null;
     const dischargeLimitKwh = dischargeLimitW !== null ? (dischargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
 
     const capacityRemainingKwh = Math.max(0, ((100 - state.dumbSoc) / 100) * state.capacityKwh);
