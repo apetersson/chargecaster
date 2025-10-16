@@ -59,6 +59,7 @@ export class SimulationSeedService implements OnModuleDestroy {
         observations: {
           gridPowerW: prepared.liveGridPowerW,
           solarPowerW: prepared.liveSolarPowerW,
+          homePowerW: prepared.liveHomePowerW,
         },
       });
       this.logger.log("Seeded snapshot using config data.");

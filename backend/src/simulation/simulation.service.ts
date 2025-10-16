@@ -33,6 +33,7 @@ export interface SimulationInput {
   observations?: {
     gridPowerW?: number | null;
     solarPowerW?: number | null;
+    homePowerW?: number | null;
   };
 }
 
@@ -180,6 +181,7 @@ export class SimulationService {
       timestamp: result.timestamp,
       interval_seconds: input.config.logic?.interval_seconds ?? null,
       house_load_w: input.config.logic?.house_load_w ?? null,
+      solar_direct_use_ratio: directUseRatio,
       current_soc_percent: result.initial_soc_percent,
       next_step_soc_percent: result.next_step_soc_percent,
       recommended_soc_percent: result.recommended_soc_percent,
@@ -212,6 +214,7 @@ export class SimulationService {
       grid_power_w: null,
       solar_power_w: null,
       solar_energy_wh: null,
+      home_power_w: null,
       backtested_savings_eur: null,
     };
 
@@ -243,6 +246,11 @@ export class SimulationService {
       ) {
         historyEntry.solar_energy_wh = 0;
       }
+    }
+
+    const observedHomePower = input.observations?.homePowerW;
+    if (typeof observedHomePower === "number" && Number.isFinite(observedHomePower)) {
+      historyEntry.home_power_w = observedHomePower;
     }
 
     const backtestHistoryCandidates = this.storageRef.listHistory(500);
@@ -614,7 +622,9 @@ function simulateOptimalSchedule(
       let bestCost = Number.POSITIVE_INFINITY;
       let bestNext = state;
 
-      let maxChargeSteps = Math.min(numStates - 1 - state, Math.max(0, maxAllowedState - state));
+      // Allow PV-only charging beyond configured ceiling up to 100% SOC to avoid feed-in.
+      // Grid-charged increments beyond the ceiling remain disallowed (see check below).
+      let maxChargeSteps = numStates - 1 - state;
       if (totalChargeLimitKwh > 0) {
         maxChargeSteps = Math.min(
           maxChargeSteps,
@@ -623,7 +633,7 @@ function simulateOptimalSchedule(
       } else {
         maxChargeSteps = Math.min(maxChargeSteps, 0);
       }
-      const upLimit = Math.min(maxChargeSteps, numStates - 1 - state, Math.max(0, maxAllowedState - state));
+      const upLimit = Math.min(maxChargeSteps, numStates - 1 - state);
 
       let maxDischargeSteps = state;
       if (Number.isFinite(dischargeLimitKwh)) {
@@ -640,38 +650,50 @@ function simulateOptimalSchedule(
         const nextState = state + delta;
         const energyChange = delta * energyPerStep;
         const gridEnergy = loadAfterDirect + energyChange - availableSolar;
-        if (!allowBatteryExport) {
-          // 1) Never allow battery-origin export beyond PV-only baseline.
-          const minGridEnergy = baselineGridEnergy < 0 ? baselineGridEnergy : 0;
-          if (gridEnergy < minGridEnergy - 1e-9) {
-            continue;
-          }
-          // 2) If exporting while the battery can still accept solar charge this slot,
-          //    require saturating solar charge headroom first (or being at 100% SOC).
-          if (gridEnergy < 0) {
-            const socStepsHeadroom = Math.max(0, maxAllowedState - state);
-            const socEnergyHeadroomKwh = socStepsHeadroom * energyPerStep;
-            const solarHeadroomKwh = Math.min(solarChargeLimitKwh, availableSolar, socEnergyHeadroomKwh);
-            // energyChange here is achieved without grid import (export < 0 implies import 0),
-            // so it equals the solar-charged amount this slot.
-            const solarChargedKwh = energyChange > 0 ? energyChange : 0;
-            if (solarHeadroomKwh > solarChargedKwh + 1e-9) {
-              // More solar could be pushed into the battery; exporting now is disallowed.
-              continue;
-            }
-          }
+      // 1) If exporting while the battery can still accept solar charge this slot,
+      //    require saturating solar charge headroom first (or being at SOC ceiling).
+      if (gridEnergy < 0) {
+        // Strict PV-first rule: when SOC < 100%, charge from PV up to the lesser of
+        // (PV surplus needed to eliminate export, PV charge cap, and SOC headroom to 100%).
+        const socStepsToFull = Math.max(0, (numStates - 1) - state);
+        const socHeadroomKwh = socStepsToFull * energyPerStep;
+        const epKwh = loadAfterDirect; // already in kWh
+        const pvAvailKwh = availableSolar;
+        const requiredToAvoidExportKwh = Math.max(0, pvAvailKwh - epKwh);
+        const requiredChargeKwh = Math.min(requiredToAvoidExportKwh, solarChargeLimitKwh, socHeadroomKwh);
+        if (socStepsToFull > 0 && requiredChargeKwh > 1e-9 && energyChange + 1e-9 < requiredChargeKwh) {
+          // We could push more PV into the battery this slot before exporting; reject this candidate.
+          continue;
         }
-        if (energyChange > 0) {
-          const gridImport = Math.max(0, gridEnergy);
-          const additionalGridCharge = Math.max(0, gridImport - baselineGridImport);
-          if (additionalGridCharge > gridChargeLimitKwh + 1e-9) {
-            continue;
-          }
-          const solarChargingKwh = Math.max(0, energyChange - additionalGridCharge);
-          if (solarChargingKwh > solarChargeLimitKwh + 1e-9) {
-            continue;
-          }
+      }
+      if (!allowBatteryExport) {
+        // 2) Never allow battery-origin export beyond PV-only baseline.
+        const minGridEnergy = baselineGridEnergy < 0 ? baselineGridEnergy : 0;
+        if (gridEnergy < minGridEnergy - 1e-9) {
+          continue;
         }
+      }
+    if (energyChange > 0) {
+      const gridImport = Math.max(0, gridEnergy);
+      const additionalGridCharge = Math.max(0, gridImport - baselineGridImport);
+      // Do not allow grid-charged increments to push SOC beyond configured ceiling.
+      if (nextState > maxAllowedState && additionalGridCharge > 1e-9) {
+        continue;
+      }
+      // Solar-first: grid fills only what solar cannot provide for charging.
+      const solarPossibleKwh = Math.min(energyChange, solarChargeLimitKwh, Math.max(0, availableSolar));
+      const maxGridNeededKwh = Math.max(0, energyChange - solarPossibleKwh);
+      if (additionalGridCharge > gridChargeLimitKwh + 1e-9) {
+        continue;
+      }
+      if (additionalGridCharge > maxGridNeededKwh + 1e-9) {
+        continue;
+      }
+      const solarChargingKwh = Math.max(0, energyChange - additionalGridCharge);
+      if (solarChargingKwh > solarChargeLimitKwh + 1e-9) {
+        continue;
+      }
+    }
         const slotCost = computeSlotCost(gridEnergy, priceTotal, feedInTariff);
         const totalCost = slotCost + dp[idx + 1][nextState];
         if (totalCost < bestCost) {
@@ -703,9 +725,9 @@ function simulateOptimalSchedule(
 
   for (let idx = 0; idx < slots.length; idx += 1) {
     const slot = slots[idx];
-    const nextState = policy[idx][stateIter];
-    const delta = nextState - stateIter;
-    const energyChange = delta * energyPerStep;
+    let nextState = policy[idx][stateIter];
+    let delta = nextState - stateIter;
+    let energyChange = delta * energyPerStep;
     const slotDurationHours = slot.durationHours;
     const loadEnergy = (houseLoadWatts / 1000) * slotDurationHours;
     const solarKwh = solarGenerationPerSlot[idx] ?? 0;
@@ -716,7 +738,43 @@ function simulateOptimalSchedule(
     const importPrice = slot.price + networkTariff;
     const baselineGridEnergy = loadAfterDirect - availableSolar;
     baselineCost += computeSlotCost(baselineGridEnergy, importPrice, feedInTariff);
-    const gridEnergy = loadAfterDirect + energyChange - availableSolar;
+    let gridEnergy = loadAfterDirect + energyChange - availableSolar;
+
+    // Hard constraint during rollout: if exporting while SOC < 100% and PV can still be
+    // pushed into the battery this slot, increase PV-only charge to avoid export.
+    if (gridEnergy < 0) {
+      const socStepsToFull = (SOC_STEPS) - stateIter; // steps to 100%
+      const socHeadroomKwh = socStepsToFull * energyPerStep;
+      const requiredToAvoidExportKwh = Math.max(0, availableSolar - loadAfterDirect);
+      const solarCapKwh = (() => {
+        if (availableSolar <= 0) return 0;
+        if (maxSolarChargePowerW != null) return Math.min(availableSolar, (maxSolarChargePowerW / 1000) * slotDurationHours);
+        return availableSolar;
+      })();
+      const requiredKwh = Math.min(requiredToAvoidExportKwh, solarCapKwh, socHeadroomKwh);
+      if (requiredKwh > energyChange + 1e-9 && socHeadroomKwh > 1e-9) {
+        const extraKwh = Math.min(requiredKwh - energyChange, socHeadroomKwh);
+        const extraSteps = Math.max(0, Math.ceil(extraKwh / energyPerStep - 1e-9));
+        if (extraSteps > 0) {
+          nextState = Math.min(SOC_STEPS, nextState + extraSteps);
+          delta = nextState - stateIter;
+          energyChange = delta * energyPerStep;
+          gridEnergy = loadAfterDirect + energyChange - availableSolar;
+        }
+        // If still exporting due to step granularity, snap to the exact required PV-only charge.
+        if (gridEnergy < -1e-9) {
+          const targetKwh = requiredKwh;
+          const targetSteps = Math.max(0, Math.ceil(targetKwh / energyPerStep - 1e-9));
+          if (targetSteps > 0) {
+            nextState = Math.min(SOC_STEPS, stateIter + targetSteps);
+            delta = nextState - stateIter;
+            energyChange = delta * energyPerStep;
+            gridEnergy = loadAfterDirect + energyChange - availableSolar;
+          }
+        }
+      }
+    }
+
     costTotal += computeSlotCost(gridEnergy, importPrice, feedInTariff);
     gridEnergyTotalKwh += gridEnergy;
     const baselineGridImport = Math.max(0, baselineGridEnergy);

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import type { ChartDataset, ChartOptions } from "./chartSetup";
-import { Chart } from "./chartSetup";
+import { Chart, type ChartDataset, type ChartOptions } from "./chartSetup";
 import type { ProjectionPoint } from "./types";
 
 export const useChartInstance = (

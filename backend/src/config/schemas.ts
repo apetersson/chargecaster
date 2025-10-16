@@ -104,6 +104,7 @@ export interface ParsedEvccState {
   priceSnapshot: number | null;
   gridPowerW: number | null;
   solarPowerW: number | null;
+  homePowerW: number | null;
 }
 
 const forecastArraySchema = z.array(rawForecastEntrySchema);
@@ -315,6 +316,11 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     state.pvPower,
   );
 
+  const homePowerW = pickFirstNumber(
+    (site as UnknownRecord)?.homePower,
+    (state as UnknownRecord)?.homePower,
+  );
+
   const priceSnapshot = pickFirstNumber(
       site.tariffGrid,
       site.tariffPriceLoadpoints,
@@ -342,5 +348,6 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     priceSnapshot,
     gridPowerW,
     solarPowerW,
+    homePowerW,
   };
 };

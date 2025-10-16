@@ -8,6 +8,7 @@ export class SummaryService {
       timestamp: snapshot.timestamp,
       interval_seconds: snapshot.interval_seconds,
       house_load_w: snapshot.house_load_w,
+      solar_direct_use_ratio: snapshot.solar_direct_use_ratio ?? null,
       current_soc_percent: snapshot.current_soc_percent,
       next_step_soc_percent: snapshot.next_step_soc_percent,
       recommended_soc_percent: snapshot.recommended_soc_percent,

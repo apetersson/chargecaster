@@ -3,7 +3,11 @@ import type { Plugin } from "chart.js";
 import {
   DEFAULT_SLOT_DURATION_MS,
   PRICE_BORDER,
+  PRICE_BORDER_AUTO,
+  PRICE_BORDER_CHARGE,
   PRICE_FILL,
+  PRICE_FILL_AUTO,
+  PRICE_FILL_CHARGE,
   PRICE_HISTORY_BAR_BG,
   PRICE_HISTORY_BAR_BORDER,
 } from "./constants";
@@ -12,7 +16,7 @@ import type { ProjectionPoint } from "./types";
 
 const priceBarPlugin: Plugin = {
   id: "price-bar-plugin",
-  beforeDatasetsDraw(chart) {
+  beforeDatasetsDraw: function (chart) {
     const ctx = chart.ctx;
     const xScale = chart.scales.x;
     const yScale = chart.scales.price;
@@ -33,11 +37,11 @@ const priceBarPlugin: Plugin = {
       const points = dataset.data as ProjectionPoint[];
       for (const point of points) {
         const value = point.y;
-        if (typeof value !== "number" || Number.isNaN(value)) {
+        if (Number.isNaN(value)) {
           continue;
         }
         const startValue = point.x;
-        if (typeof startValue !== "number" || Number.isNaN(startValue)) {
+        if (Number.isNaN(startValue)) {
           continue;
         }
         const endValue = typeof point.xEnd === "number" && Number.isFinite(point.xEnd)
@@ -53,9 +57,22 @@ const priceBarPlugin: Plugin = {
         const barTop = Math.min(top, base);
         const barHeight = Math.max(1, Math.abs(base - top));
 
+        // Pick forecast color by oracle strategy: auto -> pinkish blue, charge -> greenish blue
+        const forecastFill: string =
+          point.strategy === "charge"
+            ? PRICE_FILL_CHARGE
+            : point.strategy === "auto"
+              ? PRICE_FILL_AUTO
+              : PRICE_FILL;
+        const forecastBorder: string = point.strategy === "charge"
+          ? PRICE_BORDER_CHARGE
+          : point.strategy === "auto"
+            ? PRICE_BORDER_AUTO
+            : PRICE_BORDER;
+
         ctx.save();
-        ctx.fillStyle = resolveBarColors(point, PRICE_FILL, PRICE_HISTORY_BAR_BG);
-        ctx.strokeStyle = resolveBarColors(point, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER);
+        ctx.fillStyle = resolveBarColors(point, forecastFill, PRICE_HISTORY_BAR_BG);
+        ctx.strokeStyle = resolveBarColors(point, forecastBorder, PRICE_HISTORY_BAR_BORDER);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.rect(barLeft, barTop, barWidth, barHeight);

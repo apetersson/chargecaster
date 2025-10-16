@@ -23,6 +23,7 @@ const HistoryTable = ({history}: HistoryTableProps) => {
             <col className="col-time"/>
             <col className="col-price"/>
             <col className="col-solar"/>
+            <col className="col-power"/>
             <col className="col-soc"/>
             <col className="col-power"/>
           </colgroup>
@@ -31,6 +32,7 @@ const HistoryTable = ({history}: HistoryTableProps) => {
             <th className="timestamp">Time</th>
             <th className="numeric">Price (ct/kWh)</th>
             <th className="numeric">Solar (W)</th>
+            <th className="numeric">Demand (W)</th>
             <th className="numeric">Battery SOC %</th>
             <th className="numeric">Grid Power (W)</th>
           </tr>
@@ -41,6 +43,7 @@ const HistoryTable = ({history}: HistoryTableProps) => {
               <td className="timestamp">{formatDate(item.timestamp)}</td>
               <td className="numeric">{formatNumber(item.price_ct_per_kwh, " ct/kWh")}</td>
               <td className="numeric">{formatNumber(item.solar_power_w, " W")}</td>
+              <td className="numeric">{formatNumber(item.home_power_w, " W")}</td>
               <td className="numeric">{formatPercent(item.battery_soc_percent ?? null)}</td>
               <td className="numeric">{formatNumber(item.grid_power_w, " W")}</td>
             </tr>

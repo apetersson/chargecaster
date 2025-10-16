@@ -60,6 +60,7 @@ export const historyPointSchema = z
     grid_power_w: nullableNumberSchema.optional().default(null),
     solar_power_w: nullableNumberSchema.optional().default(null),
     solar_energy_wh: nullableNumberSchema.optional().default(null),
+    home_power_w: nullableNumberSchema.optional().default(null),
     backtested_savings_eur: nullableNumberSchema.optional().default(null),
   })
   .strip();
@@ -115,6 +116,7 @@ export const snapshotPayloadSchema = z.object({
   timestamp: requiredTimestampSchema,
   interval_seconds: nullableNumberSchema,
   house_load_w: nullableNumberSchema,
+  solar_direct_use_ratio: nullableNumberSchema.optional(),
   current_soc_percent: nullableNumberSchema,
   next_step_soc_percent: nullableNumberSchema,
   recommended_soc_percent: nullableNumberSchema,
@@ -144,6 +146,7 @@ export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   timestamp: true,
   interval_seconds: true,
   house_load_w: true,
+  solar_direct_use_ratio: true,
   current_soc_percent: true,
   next_step_soc_percent: true,
   recommended_soc_percent: true,

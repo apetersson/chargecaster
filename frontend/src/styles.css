@@ -33,11 +33,7 @@ h1 {
     font-size: 1.75rem;
 }
 
-.subtitle {
-    margin: 0.25rem 0 0;
-    font-size: 0.95rem;
-    opacity: 0.8;
-}
+/* .subtitle unused */
 
 section.card {
     background: rgba(15, 23, 42, 0.6);

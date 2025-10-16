@@ -125,7 +125,7 @@ const App = () => {
         </div>
       </section>
 
-      <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries}/>
+      <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries} summary={summary}/>
 
       <HistoryTable history={history}/>
 

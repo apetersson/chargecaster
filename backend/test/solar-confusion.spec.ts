@@ -80,6 +80,7 @@ describe("solar-confusion fixture: project grid power including solar", () => {
       const gridPowerW = gridEnergyWh / duration;
       const solarEnergyKwh = solarKwhPerSlot[idx] ?? 0;
       const solarPowerW = (solarEnergyKwh / duration) * 1000;
+      const endSoc = entry.end_soc_percent ?? entry.target_soc_percent ?? null;
       const priceEurPerKwh = slot.price;
       const priceWithFeeEurPerKwh = priceEurPerKwh + (cfg.price.grid_fee_eur_per_kwh ?? 0);
       return {
@@ -89,6 +90,7 @@ describe("solar-confusion fixture: project grid power including solar", () => {
         grid_energy_wh: Math.round(gridEnergyWh * 1000) / 1000,
         grid_power_w: Math.round(gridPowerW * 1000) / 1000,
         solar_power_w: Math.round(solarPowerW * 1000) / 1000,
+        end_soc_percent: endSoc,
         price_ct_per_kwh: Math.round(priceEurPerKwh * 100 * 1000) / 1000,
         price_with_fee_ct_per_kwh: Math.round(priceWithFeeEurPerKwh * 100 * 1000) / 1000,
         strategy: entry.strategy,
@@ -104,6 +106,13 @@ describe("solar-confusion fixture: project grid power including solar", () => {
       grid_power_w: e.grid_power_w,
       strategy: e.strategy,
     })));
+
+    // Logic requirement: while SOC < 99%, there must be no feed-in (grid power < 0)
+    for (const e of entries) {
+      if (typeof e.end_soc_percent === "number" && e.end_soc_percent < 99) {
+        expect(e.grid_power_w).toBeGreaterThanOrEqual(0);
+      }
+    }
 
     // Sanity check: grid power should not spike to implausible 12kW+ imports for this solar profile
     const maxAbsGridPower = Math.max(...entries.map((e) => Math.abs(e.grid_power_w)));

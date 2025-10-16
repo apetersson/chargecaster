@@ -69,15 +69,15 @@ if ! docker buildx inspect >/dev/null 2>&1; then
 fi
 docker buildx inspect --bootstrap >/dev/null
 
-echo "Building and pushing multi-arch images…"
+echo "Building and pushing multi-arch images..."
 docker buildx build \
   --platform "$PLATFORMS" \
   -t "$DOCKER_REPO:$NEW_TAG" \
   -t "$DOCKER_REPO:latest" \
   . --push
 
-echo "Pushing git branch and tags to $GIT_REMOTE…"
-git push "$GIT_REMOTE" "$CURRENT_BRANCH"
-git push "$GIT_REMOTE" "$NEW_TAG"
+echo "Pushing git branch and tags to ${GIT_REMOTE}..."
+git push "${GIT_REMOTE}" "${CURRENT_BRANCH}"
+git push "${GIT_REMOTE}" "${NEW_TAG}"
 
 echo "Done. Released $NEW_TAG"

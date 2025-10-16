@@ -5,20 +5,25 @@ export const SOC_BORDER = "#22c55e";
 export const SOC_FILL = "rgba(34, 197, 94, 0.15)";
 export const GRID_BORDER = "#f97316";
 export const GRID_FILL = "rgba(249, 115, 22, 0.15)";
+export const DEMAND_BORDER = "#f59e0b"; // amber-500 (light orange)
+export const DEMAND_FILL = "rgba(245, 158, 11, 0.15)";
 export const SOLAR_BORDER = "#facc15";
 export const SOLAR_FILL = "rgba(250, 204, 21, 0.2)";
 export const PRICE_BORDER = "#38bdf8";
 export const PRICE_FILL = "rgba(56, 189, 248, 0.15)";
+// Tariff tint variants: slightly pinkish-blue for "auto", slightly greenish-blue for "charge".
+export const PRICE_BORDER_AUTO = "#5aa7f8"; // a touch warmer (pink-ish) blue
+export const PRICE_FILL_AUTO = "rgba(90, 167, 248, 0.18)";
+export const PRICE_BORDER_CHARGE = "#3fdac6"; // green-ish blue
+export const PRICE_FILL_CHARGE = "rgba(63, 218, 198, 0.18)";
 export const GRID_COLOR = "rgba(148, 163, 184, 0.25)";
 export const TICK_COLOR = "#64748b";
 export const LEGEND_COLOR = "#ffffff";
 export const GRID_MARKERS_LABEL = "Grid Power Markers";
-export const TARIFF_LABEL = "Tariff";
 export const PRICE_HISTORY_BAR_BG = "rgba(148, 163, 184, 0.3)";
 export const PRICE_HISTORY_BAR_BORDER = "rgba(100, 116, 139, 1)";
 export const DEFAULT_SLOT_DURATION_MS = 3_600_000;
 export const GAP_THRESHOLD_MS = DEFAULT_SLOT_DURATION_MS * 1.5;
 
-export const DEFAULT_SOC_BOUNDS = {min: 0, max: 100};
 export const DEFAULT_POWER_BOUNDS = {min: -5000, max: 15000};
 export const DEFAULT_PRICE_BOUNDS = {min: 0, max: 50};
