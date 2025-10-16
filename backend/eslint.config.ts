@@ -1,3 +1,4 @@
+import base from "../eslint.base.config";
 import js from "@eslint/js";
 import tseslint from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
@@ -6,7 +7,7 @@ import eslintPluginImport from "eslint-plugin-import";
 import globals from "globals";
 
 export default [
-  js.configs.recommended,
+  ...base,
   {
     files: ["**/*.ts"],
     languageOptions: {

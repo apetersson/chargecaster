@@ -58,19 +58,19 @@ describe("MarketDataService", () => {
     vi.spyOn(global, "fetch").mockResolvedValueOnce(createResponse(fixture));
     const warnings: string[] = [];
 
-    const result = await service.collect({enabled: true, prefer_market: true}, simulationConfig, warnings);
+    const result = await service.collect({awattar: {priority: 1, url: "https://api.awattar.de/v1/marketdata"}}, simulationConfig, warnings);
 
     expect(result.forecast.length).toBeGreaterThan(0);
     expect(result.priceSnapshot).not.toBeNull();
     expect(warnings).not.toContain("Market data fetch disabled in config.");
   });
 
-  it("returns empty set when disabled", async () => {
+  it("returns empty set when no providers are configured", async () => {
     const warnings: string[] = [];
-    const result = await service.collect({enabled: false, prefer_market: true}, simulationConfig, warnings);
+    const result = await service.collect({}, simulationConfig, warnings);
 
     expect(result.forecast).toHaveLength(0);
     expect(result.priceSnapshot).toBeNull();
-    expect(warnings).toContain("Market data fetch disabled in config.");
+    expect(warnings.length === 0 || warnings.includes("Awattar response contained no usable price slots.")).toBe(true);
   });
 });

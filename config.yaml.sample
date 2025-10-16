@@ -29,8 +29,16 @@ logging:
   level: "INFO"            # DEBUG, INFO, WARNING
 
 market_data:
-  enabled: true
-  url: "https://api.awattar.de/v1/marketdata"
-  prefer_market: true        # override EVCC forecast with market data when available
-  max_hours: 72              # limit forecast horizon (hours)
-  source_label: "awattar"    # label reported in logs and API output
+  awattar:
+    priority: 2
+    url: "https://api.awattar.de/v1/marketdata"
+    max_hours: 72
+  # Optional ENTSO-E new-transparency provider (use at your own risk; unofficial API)
+  # entsoe:
+  #   priority: 1
+  #   zone: "BZN|10YDE-ENBW-----N"
+  #   tz: "CET"
+  #   max_hours: 168
+  # Fallback to EVCC-provided price forecast if others are empty
+  from_evcc:
+    priority: 3

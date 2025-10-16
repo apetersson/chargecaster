@@ -121,16 +121,23 @@ export class SimulationService {
     const liveState = {battery_soc: resolvedSoc};
     const slots = normalizePriceSlots(input.forecast);
     const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
-    const solarMap = new Map<number, number>();
-    for (const slot of solarSlots) {
-      const key = Math.floor(slot.start.getTime() / SLOT_DURATION_MS);
-      const energy = Math.max(0, slot.energy_kwh);
-      solarMap.set(key, (solarMap.get(key) ?? 0) + energy);
-    }
 
-    const solarGeneration = slots.map((slot) => {
-      const key = Math.floor(slot.start.getTime() / SLOT_DURATION_MS);
-      return solarMap.get(key) ?? 0;
+    // Distribute solar energy into each price slot proportionally to the time overlap.
+    // This fixes the 1h solar vs 15m tariff slot mismatch (avoids 4x inflation).
+    const solarGeneration = slots.map((priceSlot) => {
+      const eraStart = priceSlot.start.getTime();
+      const eraEnd = priceSlot.end.getTime();
+      let energyKwh = 0;
+      for (const solarSlot of solarSlots) {
+        const solarStart = solarSlot.start.getTime();
+        const solarEnd = solarSlot.end.getTime();
+        const overlapMs = Math.max(0, Math.min(eraEnd, solarEnd) - Math.max(eraStart, solarStart));
+        if (overlapMs <= 0) continue;
+        const solarMs = Math.max(1, solarEnd - solarStart);
+        const fraction = overlapMs / solarMs;
+        energyKwh += Math.max(0, solarSlot.energy_kwh) * fraction;
+      }
+      return energyKwh;
     });
 
     const directUseRatio = clampRatio(input.config.solar?.direct_use_ratio ?? 0);

@@ -35,8 +35,16 @@ logging:
   level: INFO
 
 market_data:
-  enabled: true
-  prefer_market: true
-  url: https://api.awattar.at/v1/marketdata
-  max_hours: 72
-  source_label: awattar
+  awattar:
+    priority: 2
+    url: https://api.awattar.at/v1/marketdata
+    max_hours: 72
+  entsoe:
+     priority: 1
+     zone: BZN|10YAT-APG------L
+     tz: CET
+     max_hours: 168
+  from_evcc:
+    priority: 3
+
+
