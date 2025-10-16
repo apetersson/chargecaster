@@ -31,6 +31,7 @@ describe("computeBacktestedSavings", () => {
         grid_power_w: 1000,
         solar_power_w: 2000,
         solar_energy_wh: null,
+        home_power_w: null,
         backtested_savings_eur: null,
       },
       {
@@ -41,6 +42,7 @@ describe("computeBacktestedSavings", () => {
         grid_power_w: 500,
         solar_power_w: 1500,
         solar_energy_wh: null,
+        home_power_w: null,
         backtested_savings_eur: null,
       },
     ];

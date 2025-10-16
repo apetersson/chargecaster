@@ -9,21 +9,24 @@ export function useIsMobile(breakpointPx = 640): boolean {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia(`(max-width: ${breakpointPx}px)`);
-    const handler = (e: MediaQueryListEvent | MediaQueryList) => {
-      setIsMobile(("matches" in e ? e.matches : (e as MediaQueryList).matches));
-    };
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     // Initial
-    handler(media);
-    // Subscribe
-    media.addEventListener?.("change", handler as (ev: MediaQueryListEvent) => void);
-    // Fallback for older browsers
-    media.addListener?.(handler);
+    setIsMobile(media.matches);
+    // Subscribe (standards)
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", onChange);
+    } else {
+      // Fallback for very old browsers
+      media.onchange = onChange;
+    }
     return () => {
-      media.removeEventListener?.("change", handler as (ev: MediaQueryListEvent) => void);
-      media.removeListener?.(handler);
+      if (typeof media.removeEventListener === "function") {
+        media.removeEventListener("change", onChange);
+      } else {
+        media.onchange = null;
+      }
     };
   }, [breakpointPx]);
 
   return isMobile;
 }
-

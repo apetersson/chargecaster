@@ -36,7 +36,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
   };
   const generateDefaultLabels = (chart: Chart): LegendItem[] => generateLegendLabels(chart);
 
-  const options: ChartOptions<"line"> = {
+  return {
     responsive: true,
     maintainAspectRatio: false,
     interaction: {
@@ -60,7 +60,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
             const template = generateDefaultLabels(chart)[0];
             return groupedLegendEntries.map((group) => {
               const datasetIndex = group.datasetIndices[0];
-              const hidden = group.datasetIndices.every((index) => chart.getDatasetMeta(index).hidden === true);
+              const hidden = group.datasetIndices.every((index) => chart.getDatasetMeta(index).hidden);
               return {
                 text: group.label,
                 fillStyle: group.color,
@@ -104,10 +104,7 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
           },
           label(item) {
             const {dataset, parsed} = item;
-            const value =
-              typeof parsed.y === "number" && Number.isFinite(parsed.y)
-                ? parsed.y
-                : null;
+            const value = Number.isFinite(parsed.y) ? parsed.y : null;
             if (value === null) {
               return "";
             }
@@ -247,7 +244,5 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive}: Buil
         },
       },
     },
-  };
-
-  return options;
+  } as ChartOptions<"line">;
 };

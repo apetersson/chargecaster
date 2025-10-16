@@ -1,12 +1,7 @@
 import type { ForecastEra, HistoryPoint, OracleEntry } from "../../types";
 import { TimeSlot } from "@chargecaster/domain";
 
-import {
-  DEFAULT_POWER_BOUNDS,
-  DEFAULT_PRICE_BOUNDS,
-  DEFAULT_SLOT_DURATION_MS,
-  GAP_THRESHOLD_MS,
-} from "./constants";
+import { DEFAULT_POWER_BOUNDS, DEFAULT_PRICE_BOUNDS, DEFAULT_SLOT_DURATION_MS } from "./constants";
 import type { AxisBounds, DerivedEra, ProjectionPoint, TimeRange } from "./types";
 
 export const isFiniteNumber = (value: unknown): value is number =>
@@ -62,7 +57,7 @@ export const pushGapPoint = (target: ProjectionPoint[], time: number | null | un
 export const buildOracleLookup = (entries: OracleEntry[]): Map<string, OracleEntry> => {
   const lookup = new Map<string, OracleEntry>();
   for (const entry of entries) {
-    if (!entry || typeof entry.era_id !== "string" || entry.era_id.length === 0) {
+    if (!entry || entry.era_id.length === 0) {
       continue;
     }
     lookup.set(entry.era_id, entry);
@@ -78,7 +73,7 @@ export const resolveOracleEntry = (
   era: ForecastEra,
   lookup: Map<string, OracleEntry>,
 ): OracleEntry | undefined => {
-  if (typeof era.era_id === "string" && era.era_id.length > 0) {
+  if (era.era_id.length > 0) {
     const direct = lookup.get(era.era_id);
     if (direct) {
       return direct;
@@ -230,7 +225,7 @@ export const computeBounds = (
 
   for (const point of points) {
     const value = point.y;
-    if (typeof value !== "number" || !Number.isFinite(value)) {
+    if (!Number.isFinite(value)) {
       continue;
     }
     dataMin = dataMin === null ? value : Math.min(dataMin, value);
@@ -305,34 +300,7 @@ export const attachHistoryIntervals = (
   }
 };
 
-export const shouldInsertGap = (
-  lastDataEraEnd: number | null,
-  startMs: number,
-): boolean => {
-  if (lastDataEraEnd === null) {
-    return false;
-  }
-  const gapDuration = startMs - lastDataEraEnd;
-  return gapDuration > GAP_THRESHOLD_MS;
-};
-
-export const deriveDurationHours = (
-  slot: TimeSlot | null,
-  era: ForecastEra,
-): number | null => {
-  if (slot) {
-    return slot.duration.hours;
-  }
-  if (typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)) {
-    return era.duration_hours;
-  }
-  const start = parseTimestamp(era.start);
-  const end = parseTimestamp(era.end);
-  if (typeof start === "number" && typeof end === "number" && end > start) {
-    return (end - start) / DEFAULT_SLOT_DURATION_MS;
-  }
-  return null;
-};
+// (unused helpers removed)
 
 export const resolvePriceValue = (entry: HistoryPoint): number | null => {
   const cents =

@@ -19,6 +19,7 @@ export interface PreparedSimulation {
   forecastEras: ForecastEra[];
   liveGridPowerW: number | null;
   liveSolarPowerW: number | null;
+  liveHomePowerW: number | null;
   intervalSeconds: number | null;
 }
 
@@ -123,6 +124,7 @@ export class SimulationPreparationService {
       forecastEras: forecastErasResult.eras,
       liveGridPowerW: evccResult.gridPowerW,
       liveSolarPowerW: evccResult.solarPowerW,
+      liveHomePowerW: evccResult.homePowerW,
       intervalSeconds: this.configFactory.getIntervalSeconds(simulationConfig),
     };
   }

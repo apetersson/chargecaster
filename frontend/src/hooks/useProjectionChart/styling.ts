@@ -3,30 +3,15 @@ import type {
   ScriptableLineSegmentContext,
 } from "chart.js";
 
-import {
-  GRID_BORDER,
-  GRID_FILL,
-  HISTORY_BORDER,
-  HISTORY_FILL,
-  HISTORY_POINT,
-  PRICE_BORDER,
-  PRICE_FILL,
-  PRICE_HISTORY_BAR_BG,
-  PRICE_HISTORY_BAR_BORDER,
-  SOLAR_BORDER,
-  SOLAR_FILL,
-  SOC_BORDER,
-  SOC_FILL,
-} from "./constants";
+import { HISTORY_BORDER, HISTORY_FILL, HISTORY_POINT } from "./constants";
 import type { ProjectionPoint, SeriesSource } from "./types";
 
-const isProjectionPoint = (value: unknown): value is ProjectionPoint =>
-  Boolean(
-    value &&
-    typeof value === "object" &&
-    "x" in value &&
-    "source" in value,
-  );
+const isProjectionPoint = (value: unknown): value is ProjectionPoint => {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as { x?: unknown; source?: unknown };
+  const validSource = v.source === "history" || v.source === "forecast" || v.source === "gap";
+  return typeof v.x === "number" && Number.isFinite(v.x) && validSource;
+};
 
 export const resolvePointColor = (
   context: ScriptableContext<"line">,
@@ -127,30 +112,4 @@ export const resolveBarColors = (
   return point.source === "history" ? historyColor : forecastColor;
 };
 
-export const seriesStyles = {
-  soc: {
-    border: SOC_BORDER,
-    fill: SOC_FILL,
-  },
-  grid: {
-    border: GRID_BORDER,
-    fill: GRID_FILL,
-  },
-  solar: {
-    border: SOLAR_BORDER,
-    fill: SOLAR_FILL,
-  },
-  price: {
-    border: PRICE_BORDER,
-    fill: PRICE_FILL,
-    history: {
-      fill: PRICE_HISTORY_BAR_BG,
-      border: PRICE_HISTORY_BAR_BORDER,
-    },
-  },
-  history: {
-    border: HISTORY_BORDER,
-    fill: HISTORY_FILL,
-    point: HISTORY_POINT,
-  },
-};
+// (unused seriesStyles removed)

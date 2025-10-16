@@ -21,6 +21,7 @@ export class EvccDataService {
     batterySoc: number | null;
     gridPowerW: number | null;
     solarPowerW: number | null;
+    homePowerW: number | null;
   }> {
     const enabled = config?.enabled ?? true;
     if (!enabled) {
@@ -70,6 +71,7 @@ export class EvccDataService {
         batterySoc: parsed.batterySoc,
         gridPowerW: parsed.gridPowerW,
         solarPowerW: parsed.solarPowerW,
+        homePowerW: parsed.homePowerW,
       };
     } catch (error) {
       const message = `EVCC data fetch failed: ${this.describeError(error)}`;
@@ -86,6 +88,7 @@ export class EvccDataService {
     batterySoc: number | null;
     gridPowerW: number | null;
     solarPowerW: number | null;
+    homePowerW: number | null;
   } {
     return {
       forecast: [],
@@ -94,6 +97,7 @@ export class EvccDataService {
       batterySoc: null,
       gridPowerW: null,
       solarPowerW: null,
+      homePowerW: null,
     };
   }
 

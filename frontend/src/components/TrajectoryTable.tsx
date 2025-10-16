@@ -7,6 +7,7 @@ import { TimeSlot } from "@chargecaster/domain";
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
   oracleEntries: OracleEntry[];
+  summary?: import("../types").SnapshotSummary | null;
 };
 
 const parseTime = (value: string | null | undefined): number | null => {
@@ -89,7 +90,7 @@ const resolveSolar = (era: ForecastEra, slot: TimeSlot | null) => {
   return {energyKwh, averageW};
 };
 
-const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
+const TrajectoryTable = ({forecast, oracleEntries, summary}: TrajectoryTableProps) => {
   const now = Date.now();
   const oracleLookup = useMemo(() => buildOracleLookup(oracleEntries), [oracleEntries]);
 
@@ -111,13 +112,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
       return startA - startB;
     });
 
-  if (!rows.length) {
-    return (
-      <section className="card">
-        <p>No forecast data available.</p>
-      </section>
-    );
-  }
+  if (!rows.length) return (<section className="card"><p>No forecast data available.</p></section>);
 
   return (
     <section className="card">
@@ -128,6 +123,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
             <col className="col-time" />
             <col className="col-price" />
             <col className="col-solar" />
+            <col className="col-power" />
             <col className="col-soc" />
             <col className="col-power" />
           </colgroup>
@@ -136,6 +132,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
             <th className="timestamp">Time</th>
             <th className="numeric">Market Price</th>
             <th className="numeric">Solar (W)</th>
+            <th className="numeric">Demand (W)</th>
             <th className="numeric">End SOC %</th>
             <th className="numeric">Grid Power (W)</th>
           </tr>
@@ -160,6 +157,14 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
                 : solar.energyKwh !== null
                   ? formatNumber(solar.energyKwh, " kWh")
                   : "n/a";
+            const r = typeof summary?.solar_direct_use_ratio === "number" && Number.isFinite(summary.solar_direct_use_ratio)
+              ? summary.solar_direct_use_ratio
+              : 0.6;
+            const bp = typeof summary?.house_load_w === "number" && Number.isFinite(summary.house_load_w)
+              ? summary.house_load_w
+              : 0;
+            const solarAvgForDemand = typeof solar.averageW === "number" && Number.isFinite(solar.averageW) ? (solar.averageW as number) : 0;
+            const demandW = bp + r * solarAvgForDemand;
             const strategy = oracle?.strategy ?? "auto";
             const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);
             const targetLabel = oracle ? `${endSocValue} (${strategy.toUpperCase()})` : "n/a";
@@ -195,6 +200,7 @@ const TrajectoryTable = ({forecast, oracleEntries}: TrajectoryTableProps) => {
                 <td className="timestamp">{timeCell}</td>
                 <td className="numeric">{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
                 <td className="numeric">{solarLabel}</td>
+                <td className="numeric">{formatNumber(demandW, " W")}</td>
                 <td className="numeric">{targetLabel}</td>
                 <td className="numeric">{gridPower}</td>
               </tr>

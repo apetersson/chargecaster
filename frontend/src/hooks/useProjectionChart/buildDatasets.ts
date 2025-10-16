@@ -1,21 +1,7 @@
 import type { ChartDataset } from "./chartSetup";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
 
-import {
-  GRID_BORDER,
-  GRID_FILL,
-  GRID_MARKERS_LABEL,
-  HISTORY_BORDER,
-  HISTORY_POINT,
-  PRICE_BORDER,
-  PRICE_HISTORY_BAR_BORDER,
-  PRICE_FILL,
-  SOC_BORDER,
-  SOC_FILL,
-  SOLAR_BORDER,
-  SOLAR_FILL,
-  GAP_THRESHOLD_MS,
-} from "./constants";
+import { GRID_BORDER, GRID_FILL, GRID_MARKERS_LABEL, HISTORY_BORDER, HISTORY_POINT, PRICE_BORDER, PRICE_FILL, SOC_BORDER, SOC_FILL, SOLAR_BORDER, SOLAR_FILL, GAP_THRESHOLD_MS, DEMAND_BORDER, DEMAND_FILL } from "./constants";
 import {
   addPoint,
   attachHistoryIntervals,
@@ -205,6 +191,32 @@ const buildSolarSeries = (
   return buildCombinedSeries(historyPoints, futurePoints);
 };
 
+const buildDemandSeries = (
+  history: HistoryPoint[],
+  futureEras: DerivedEra[],
+  summary: SnapshotSummary | null,
+): ProjectionPoint[] => {
+  const historyPoints = history
+    .map((entry) => toHistoryPoint(entry.timestamp, entry.home_power_w ?? null))
+    .filter((p): p is ProjectionPoint => p !== null);
+
+  const r = typeof summary?.solar_direct_use_ratio === "number" && Number.isFinite(summary.solar_direct_use_ratio)
+    ? summary.solar_direct_use_ratio
+    : 0.6;
+  const bp = typeof summary?.house_load_w === "number" && Number.isFinite(summary.house_load_w)
+    ? summary.house_load_w
+    : 0;
+
+  const futurePoints: ProjectionPoint[] = [];
+  for (const era of futureEras) {
+    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
+    const solarAvg = isFiniteNumber(era.solarAverageW) ? (era.solarAverageW as number) : 0;
+    const demand = bp + r * solarAvg;
+    futurePoints.push({x: midpoint, y: demand, source: "forecast"});
+  }
+  return buildCombinedSeries(historyPoints, futurePoints);
+};
+
 const buildPriceSeries = (
   history: HistoryPoint[],
   futureEras: DerivedEra[],
@@ -226,6 +238,7 @@ const buildPriceSeries = (
       xEnd: era.endMs,
       y: era.priceCtPerKwh,
       source: "forecast",
+      strategy: era.oracle?.strategy,
     });
   }
 
@@ -250,6 +263,7 @@ const buildLegendGroups = (
     {label: "State of Charge", color: SOC_BORDER, datasetLabels: ["State of Charge"]},
     {label: "Grid Power", color: GRID_BORDER, datasetLabels: ["Grid Power", GRID_MARKERS_LABEL]},
     {label: "Solar Generation", color: SOLAR_BORDER, datasetLabels: ["Solar Generation"]},
+    {label: "House Demand", color: DEMAND_BORDER, datasetLabels: ["House Demand"]},
     {label: "Tariff", color: PRICE_BORDER, datasetLabels: ["Tariff"]},
     {label: "Current SOC", color: SOC_BORDER, datasetLabels: ["Current SOC"]},
   ];
@@ -283,8 +297,9 @@ export const buildDatasets = (
   const {series: socSeries, currentMarker} = buildSocSeries(history, futureEras, summary);
   const gridSeries = buildGridSeries(history, futureEras);
   const solarSeries = buildSolarSeries(history, futureEras);
+  const demandSeries = buildDemandSeries(history, futureEras, summary);
   const priceSeries = buildPriceSeries(history, futureEras);
-  const powerSeries = [...gridSeries, ...solarSeries];
+  const powerSeries = [...gridSeries, ...solarSeries, ...demandSeries];
 
   const datasets: ChartDataset<"line", ProjectionPoint[]>[] = [
     {
@@ -304,6 +319,25 @@ export const buildDatasets = (
       segment: {
         borderColor: (ctx) => resolveSegmentBorder(ctx, SOC_BORDER, SOC_BORDER),
         backgroundColor: (ctx) => resolveSegmentBackground(ctx, SOC_FILL, SOC_FILL),
+      },
+    },
+    {
+      type: "line",
+      label: "House Demand",
+      data: demandSeries,
+      yAxisID: "power",
+      fill: "origin",
+      tension: 0.25,
+      spanGaps: false,
+      borderWidth: 2,
+      pointBorderWidth: 1,
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      pointBackgroundColor: (ctx) => resolvePointColor(ctx, DEMAND_BORDER),
+      pointBorderColor: (ctx) => resolvePointColor(ctx, DEMAND_BORDER),
+      segment: {
+        borderColor: (ctx) => resolveSegmentBorder(ctx, DEMAND_BORDER),
+        backgroundColor: (ctx) => resolveSegmentBackground(ctx, DEMAND_FILL),
       },
     },
     {
@@ -374,10 +408,7 @@ export const buildDatasets = (
         backgroundColor: (ctx) => resolveSegmentBackground(ctx, PRICE_FILL),
       },
       borderColor: PRICE_BORDER,
-      pointHoverBackgroundColor: ({raw}) =>
-        resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
-      pointHoverBorderColor: ({raw}) =>
-        resolveBarColors(raw, PRICE_BORDER, PRICE_HISTORY_BAR_BORDER),
+      // hover styles are not used for price bars (rendered via plugin)
     },
   ];
 
@@ -409,10 +440,8 @@ export const buildDatasets = (
 };
 
 function isProjectionPoint(value: unknown): value is ProjectionPoint {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    "x" in value &&
-    "source" in value,
-  );
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as { x?: unknown; source?: unknown };
+  const validSource = v.source === "history" || v.source === "forecast" || v.source === "gap";
+  return typeof v.x === "number" && Number.isFinite(v.x) && validSource;
 }

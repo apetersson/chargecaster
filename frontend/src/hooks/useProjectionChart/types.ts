@@ -8,6 +8,9 @@ export interface ProjectionPoint extends ScatterDataPoint {
   source: SeriesSource;
   xEnd?: number | null;
   isCurrentMarker?: boolean;
+  // Optional strategy annotation for forecast price bars ("auto" | "charge")
+  // copied from OracleEntry["strategy"].
+  strategy?: OracleEntry["strategy"];
 }
 
 export interface AxisBounds {
