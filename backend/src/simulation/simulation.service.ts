@@ -168,7 +168,14 @@ export class SimulationService {
     this.logger.log(`Simulation result: ${currentMode.toUpperCase()}`);
     if (result.oracle_entries.length) {
       const strategyLog = result.oracle_entries
-        .map((entry) => `${(entry.strategy ?? "auto").toUpperCase()}@${entry.era_id}`)
+        .map((entry) => {
+          const strategyLabel = (entry.strategy ?? "auto").toUpperCase();
+          if (entry.strategy !== "hold") {
+            return `${strategyLabel}@${entry.era_id}`;
+          }
+          const holdLevel = normalizeSocLabel(entry.target_soc_percent ?? entry.start_soc_percent ?? entry.end_soc_percent);
+          return holdLevel ? `${strategyLabel}@${entry.era_id} (SoC ${holdLevel})` : `${strategyLabel}@${entry.era_id}`;
+        })
         .join("\n");
       this.logger.log(`Era strategies: \n${strategyLog}`);
     }
@@ -361,6 +368,18 @@ export class SimulationService {
     }
     return null;
   }
+}
+
+function normalizeSocLabel(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  const bounded = Math.min(100, Math.max(0, value));
+  const rounded = Math.round(bounded * 10) / 10;
+  if (Number.isInteger(rounded)) {
+    return `${Math.trunc(rounded)}%`;
+  }
+  return `${rounded.toFixed(1)}%`;
 }
 
 function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
