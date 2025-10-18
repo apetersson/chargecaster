@@ -4,13 +4,13 @@ import type { AddressInfo } from "node:net";
 
 import cors from "@fastify/cors";
 import type { FastifyInstance } from "fastify";
-import { createReadStream, existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
-import { join, normalize } from "node:path";
+import { existsSync } from "node:fs";
+import { normalize, relative } from "node:path";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
+import fastifyStatic from "@fastify/static";
 
 import { AppModule } from "./app.module";
 import { SimulationService } from "./simulation/simulation.service";
@@ -50,36 +50,32 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   // SERVE_STATIC=true and /public exists (container builds) or when explicitly opted in.
   const serveStatic = (process.env.SERVE_STATIC === "true" || process.env.SERVE_STATIC === "1") && existsSync("/public");
   if (serveStatic) {
-    const publicRoot = "/public";
-    const contentType = (p: string): string => {
-      if (p.endsWith(".js")) return "application/javascript";
-      if (p.endsWith(".css")) return "text/css";
-      if (p.endsWith(".svg")) return "image/svg+xml";
-      if (p.endsWith(".png")) return "image/png";
-      if (p.endsWith(".ico")) return "image/x-icon";
-      if (p.endsWith(".map")) return "application/json";
-      if (p.endsWith(".html")) return "text/html";
-      return "application/octet-stream";
-    };
+    const publicRoot = normalize("/public");
+    await fastify.register(fastifyStatic, {
+      root: publicRoot,
+      prefix: "/",
+      cacheControl: true,
+      wildcard: false,
+      setHeaders(res, filePath) {
+        const relPath = relative(publicRoot, normalize(filePath)).replace(/\\/g, "/");
+        if (relPath.startsWith("assets/")) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else {
+          res.setHeader("Cache-Control", "no-cache");
+        }
+      },
+    });
 
     fastify.get("/*", async (req, reply) => {
-      const url = req.raw.url ?? "/";
-      let target = url.startsWith("/assets/") ? url : "/index.html";
-      const fullPath = normalize(join(publicRoot, target));
-      if (!fullPath.startsWith(publicRoot)) {
-        return reply.code(403).send("Forbidden");
+      if (req.raw.method && req.raw.method !== "GET") {
+        return reply.callNotFound();
       }
-      try {
-        await stat(fullPath);
-        reply.header("Cache-Control", target.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache");
-        reply.type(contentType(fullPath));
-        return reply.send(createReadStream(fullPath));
-      } catch {
-        // Fallback to SPA index
-        const indexPath = join(publicRoot, "index.html");
-        reply.type("text/html");
-        return reply.send(createReadStream(indexPath));
+      const accept = req.headers.accept ?? "";
+      if (!accept.includes("text/html") && accept.length > 0) {
+        return reply.callNotFound();
       }
+
+      return reply.type("text/html").sendFile("index.html");
     });
   }
 
