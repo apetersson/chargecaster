@@ -21,6 +21,7 @@ battery:
   max_charge_power_w: 500
   max_charge_power_solar_w: 4500
   auto_mode_floor_soc: 5
+  max_charge_soc_percent: 96
 
 logic:
   min_hold_minutes: 0
