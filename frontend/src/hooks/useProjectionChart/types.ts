@@ -1,6 +1,6 @@
 import type { ScatterDataPoint } from "chart.js";
 import type { ForecastEra, OracleEntry } from "../../types";
-import { TimeSlot } from "@chargecaster/domain/time-slot";
+import { TimeSlot } from "@chargecaster/domain";
 
 export type SeriesSource = "history" | "forecast" | "gap";
 
@@ -8,7 +8,7 @@ export interface ProjectionPoint extends ScatterDataPoint {
   source: SeriesSource;
   xEnd?: number | null;
   isCurrentMarker?: boolean;
-  // Optional strategy annotation for forecast price bars ("auto" | "charge")
+  // Optional strategy annotation for forecast price bars ("auto" | "charge" | "hold")
   // copied from OracleEntry["strategy"].
   strategy?: OracleEntry["strategy"];
 }

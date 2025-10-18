@@ -8,7 +8,7 @@ import {
   normaliseSolarTimeseries,
   toSolarForecastSlots,
   type RawSolarTimeseriesPoint,
-} from "@chargecaster/domain/solar-timeseries";
+} from "@chargecaster/domain";
 
 interface SolarForecastSource {
   provider: string;

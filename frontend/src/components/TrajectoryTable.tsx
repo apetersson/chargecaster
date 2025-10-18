@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import type { ForecastEra, OracleEntry } from "../types";
 import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
-import { TimeSlot } from "@chargecaster/domain/time-slot";
+import { TimeSlot } from "@chargecaster/domain";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];

@@ -1,6 +1,6 @@
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import type { RawForecastEntry } from "../../simulation/types";
-import { entsoeNewConfigSchema, type EntsoeNewConfig } from "../schemas";
+import type { EntsoeNewConfig } from "../schemas";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
 
 const BASE_URL = "https://newtransparency.entsoe.eu/market/energyPrices/load";

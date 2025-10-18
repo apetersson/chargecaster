@@ -24,11 +24,14 @@ export interface FroniusApplyResult {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+type FroniusMode = "charge" | "auto" | "hold";
+
 @Injectable()
+
 export class FroniusService {
   private readonly logger = new Logger(FroniusService.name);
   private lastAppliedTarget: number | null = null;
-  private lastAppliedMode: "charge" | "auto" | null = null;
+  private lastAppliedMode: FroniusMode | null = null;
 
   async applyOptimization(config: ConfigDocument, snapshot: SnapshotPayload): Promise<FroniusApplyResult> {
     const froniusConfig = this.extractConfig(config);
@@ -45,6 +48,12 @@ export class FroniusService {
       // const currentMode = this.extractCurrentMode(currentConfig);
       if (this.lastAppliedMode === desiredMode) {
         this.logger.log(`Fronius already in ${desiredMode} mode; skipping update.`);
+        return {errorMessage: null};
+      }
+
+      if (desiredMode === "hold") {
+        this.logger.log("Fronius hold strategy requested; leaving inverter settings unchanged.");
+        this.lastAppliedMode = "hold";
         return {errorMessage: null};
       }
 
@@ -108,14 +117,17 @@ export class FroniusService {
     } satisfies FroniusConfig;
   }
 
-  private resolveDesiredMode(snapshot: SnapshotPayload): "charge" | "auto" {
-    if (snapshot.current_mode === "charge" || snapshot.current_mode === "auto") {
+  private resolveDesiredMode(snapshot: SnapshotPayload): FroniusMode {
+    if (snapshot.current_mode === "charge" || snapshot.current_mode === "auto" || snapshot.current_mode === "hold") {
       return snapshot.current_mode;
     }
     const currentSoCPercent = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
     const nextSoCPercent = typeof snapshot.next_step_soc_percent === "number" ? snapshot.next_step_soc_percent : null;
     if (currentSoCPercent !== null && nextSoCPercent !== null && nextSoCPercent > currentSoCPercent + 0.5) {
       return "charge";
+    }
+    if (currentSoCPercent !== null && nextSoCPercent !== null && Math.abs(nextSoCPercent - currentSoCPercent) <= 0.5) {
+      return "hold";
     }
     return "auto";
   }
@@ -139,7 +151,7 @@ export class FroniusService {
     return null;
   }
 
-  private extractCurrentMode(payload: unknown): "charge" | "auto" | null {
+  private extractCurrentMode(payload: unknown): FroniusMode | null {
     if (!isRecord(payload)) {
       return null;
     }
@@ -156,13 +168,16 @@ export class FroniusService {
     return null;
   }
 
-  private normaliseMode(value: unknown): "charge" | "auto" | null {
+  private normaliseMode(value: unknown): FroniusMode | null {
     if (typeof value !== "string") {
       return null;
     }
     const lowered = value.trim().toLowerCase();
     if (lowered === "manual" || lowered === "charge") {
       return "charge";
+    }
+    if (lowered === "hold") {
+      return "hold";
     }
     if (lowered === "auto") {
       return "auto";
@@ -173,11 +188,21 @@ export class FroniusService {
   private buildPayload(
     config: ConfigDocument,
     snapshot: SnapshotPayload,
-    mode: "charge" | "auto",
+    mode: FroniusMode,
   ): Record<string, unknown> | null {
-    if (mode === "charge") {
-      return {BAT_M0_SOC_MIN: 100, BAT_M0_SOC_MODE: "manual"};
+    const currentSocRaw = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
+
+    if (mode === "charge" || mode === "hold") {
+      const target = currentSocRaw ?? 100;
+      if (!Number.isFinite(target)) {
+        return null;
+      }
+      return {
+        BAT_M0_SOC_MIN: this.clampSoc(target),
+        BAT_M0_SOC_MODE: "manual",
+      };
     }
+
     const floorSoc = this.resolveAutoFloor(config, snapshot);
     return {BAT_M0_SOC_MIN: floorSoc, BAT_M0_SOC_MODE: "auto"};
   }
