@@ -5,6 +5,7 @@ __pycache__/
 /data/
 node_modules/
 dist/
+backend/dist-bundle/
 /.idea/
 .env
 .env.*
