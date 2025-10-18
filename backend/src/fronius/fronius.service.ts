@@ -192,8 +192,23 @@ export class FroniusService {
   ): Record<string, unknown> | null {
     const currentSocRaw = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
 
-    if (mode === "charge" || mode === "hold") {
-      const target = currentSocRaw ?? 100;
+    const maxCharge = this.resolveMaxCharge(config);
+
+    if (mode === "charge") {
+      const target = maxCharge ?? 100;
+      return {
+        BAT_M0_SOC_MIN: this.clampSoc(target),
+        BAT_M0_SOC_MODE: "manual",
+      };
+    }
+
+    if (mode === "hold") {
+      const floor = this.resolveAutoFloor(config, snapshot);
+      const fallbackTarget = currentSocRaw ?? this.lastAppliedTarget ?? (maxCharge ?? 100);
+      let target = Math.max(floor, fallbackTarget);
+      if (maxCharge !== null && maxCharge !== undefined) {
+        target = Math.min(target, maxCharge);
+      }
       if (!Number.isFinite(target)) {
         return null;
       }
@@ -217,6 +232,14 @@ export class FroniusService {
       return this.clampSoc(Math.max(0, Math.min(snapshotNext, 100)));
     }
     return 5;
+  }
+
+  private resolveMaxCharge(config: ConfigDocument): number | null {
+    const maxCharge = config.battery?.max_charge_soc_percent;
+    if (typeof maxCharge !== "number" || !Number.isFinite(maxCharge)) {
+      return null;
+    }
+    return this.clampSoc(maxCharge);
   }
 
   private clampSoc(value: number): number {
