@@ -5,9 +5,11 @@ import {
   PRICE_BORDER,
   PRICE_BORDER_AUTO,
   PRICE_BORDER_CHARGE,
+  PRICE_BORDER_HOLD,
   PRICE_FILL,
   PRICE_FILL_AUTO,
   PRICE_FILL_CHARGE,
+  PRICE_FILL_HOLD,
   PRICE_HISTORY_BAR_BG,
   PRICE_HISTORY_BAR_BORDER,
 } from "./constants";
@@ -63,12 +65,16 @@ const priceBarPlugin: Plugin = {
             ? PRICE_FILL_CHARGE
             : point.strategy === "auto"
               ? PRICE_FILL_AUTO
-              : PRICE_FILL;
+              : point.strategy === "hold"
+                ? PRICE_FILL_HOLD
+                : PRICE_FILL;
         const forecastBorder: string = point.strategy === "charge"
           ? PRICE_BORDER_CHARGE
           : point.strategy === "auto"
             ? PRICE_BORDER_AUTO
-            : PRICE_BORDER;
+            : point.strategy === "hold"
+              ? PRICE_BORDER_HOLD
+              : PRICE_BORDER;
 
         ctx.save();
         ctx.fillStyle = resolveBarColors(point, forecastFill, PRICE_HISTORY_BAR_BG);

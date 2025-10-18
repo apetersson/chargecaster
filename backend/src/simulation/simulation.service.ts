@@ -15,8 +15,7 @@ import { StorageService } from "../storage/storage.service";
 import { BacktestSavingsService } from "./backtest.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { parseEvccState } from "../config/schemas";
-import { EnergyPrice } from "@chargecaster/domain/price";
-import { TariffSlot } from "@chargecaster/domain/tariff-slot";
+import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
 import { clampRatio, gridFee, simulateOptimalSchedule } from "./optimal-schedule";
 
 const SLOT_DURATION_MS = 3_600_000;
@@ -156,11 +155,13 @@ export class SimulationService {
     const initialSoCPercent = result.initial_soc_percent;
     const nextSoCPercent = result.next_step_soc_percent ?? initialSoCPercent;
     const firstStrategy = result.oracle_entries[0]?.strategy ?? null;
-    let currentMode: "charge" | "auto";
+    let currentMode: "charge" | "auto" | "hold";
     if (firstStrategy) {
       currentMode = firstStrategy;
     } else if (nextSoCPercent > initialSoCPercent + 0.5) {
       currentMode = "charge";
+    } else if (Math.abs(nextSoCPercent - initialSoCPercent) <= 0.5) {
+      currentMode = "hold";
     } else {
       currentMode = "auto";
     }

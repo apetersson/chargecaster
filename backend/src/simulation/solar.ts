@@ -2,7 +2,7 @@ import {
   normaliseSolarTimeseries,
   parseTemporal,
   type RawSolarTimeseriesPoint,
-} from "@chargecaster/domain/solar-timeseries";
+} from "@chargecaster/domain";
 
 import type { RawSolarEntry } from "./types";
 

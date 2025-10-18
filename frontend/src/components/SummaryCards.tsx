@@ -15,7 +15,10 @@ const SummaryCards = ({data}: { data: SnapshotSummary | null }) => {
     if (currentMode === "auto") {
       return "Auto";
     }
-    return ""
+    if (currentMode === "hold") {
+      return "Hold";
+    }
+    return "";
   })();
 
   return (

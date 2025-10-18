@@ -6,7 +6,7 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "paths": {
-      "@chargecaster/domain/*": ["../packages/domain/src/*"]
+      "@chargecaster/domain": ["../packages/domain/src/index.ts"]
     }
   },
   "exclude": ["test", "dist", "node_modules"]

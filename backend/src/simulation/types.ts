@@ -7,7 +7,7 @@ import {
   optionalTimestampSchema,
   requiredTimestampSchema,
 } from "../common/parsing";
-import type { TariffSlot } from "@chargecaster/domain/tariff-slot";
+import type { TariffSlot } from "@chargecaster/domain";
 
 export const rawForecastEntrySchema = z
   .object({
@@ -107,7 +107,7 @@ const oracleEntrySchema = z.object({
   end_soc_percent: nullableNumberSchema,
   target_soc_percent: nullableNumberSchema.optional(),
   grid_energy_wh: nullableNumberSchema,
-  strategy: z.union([z.literal("charge"), z.literal("auto")]),
+  strategy: z.union([z.literal("charge"), z.literal("auto"), z.literal("hold")]),
 });
 
 export type OracleEntry = z.infer<typeof oracleEntrySchema>;
@@ -121,7 +121,7 @@ export const snapshotPayloadSchema = z.object({
   next_step_soc_percent: nullableNumberSchema,
   recommended_soc_percent: nullableNumberSchema,
   recommended_final_soc_percent: nullableNumberSchema,
-  current_mode: z.union([z.literal("charge"), z.literal("auto")]).optional(),
+  current_mode: z.union([z.literal("charge"), z.literal("auto"), z.literal("hold")]).optional(),
   price_snapshot_ct_per_kwh: nullableNumberSchema.optional(),
   price_snapshot_eur_per_kwh: nullableNumberSchema,
   projected_cost_eur: nullableNumberSchema,

@@ -4,6 +4,7 @@ const SOC_STEPS = 100;
 const EPSILON = 1e-9;
 const WATTS_PER_KW = 1000;
 const GRID_CHARGE_STRATEGY_THRESHOLD_KWH = 0.05;
+const HOLD_ENERGY_THRESHOLD_KWH = 0.02;
 
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
@@ -583,7 +584,15 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     const startSocPercent = socStepIter * context.socPercentStep;
     const endSocPercent = nextSoCStep * context.socPercentStep;
     const normalizedGridEnergyWh = Number.isFinite(gridEnergyKwh) ? gridEnergyKwh * WATTS_PER_KW : null;
-    const strategy: OracleEntry["strategy"] = additionalGridChargeKwh > 0 ? "charge" : "auto";
+    const isHoldTransition =
+      Math.abs(deltaSoCSteps) === 0 &&
+      Math.abs(energyChangeKwh) <= HOLD_ENERGY_THRESHOLD_KWH &&
+      additionalGridChargeKwh <= GRID_CHARGE_STRATEGY_THRESHOLD_KWH;
+    const strategy: OracleEntry["strategy"] = additionalGridChargeKwh > 0
+      ? "charge"
+      : isHoldTransition
+        ? "hold"
+        : "auto";
     oracleEntries.push({
       era_id: eraId,
       start_soc_percent: Number.isFinite(startSocPercent) ? startSocPercent : null,

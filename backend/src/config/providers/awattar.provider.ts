@@ -1,6 +1,6 @@
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import type { RawForecastEntry } from "../../simulation/types";
-import { awattarConfigSchema, type AwattarConfig, parseMarketForecast } from "../schemas";
+import { parseMarketForecast, type AwattarConfig } from "../schemas";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
 
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
