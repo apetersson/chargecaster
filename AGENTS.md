@@ -14,6 +14,7 @@
 - IntelliJ MCP file tools are fast for reads but flaky for new writes; editing via `shell` (heredoc + `cat`/`apply_patch`) has proven more reliable for file creation and updates.
 - `yarn` and other package scripts may emit cache warnings in the sandbox; they are harmless, but expect missing global folders on macOS runners.
 - Backend config now loads once on startup; if `config.local.yaml` is missing or invalid the process aborts, so confirm the file before booting instead of trying to hot-reload it.
+- When the user asks to "validate the build", run the full script set (`lint`, `typecheck`, `build`, `test`) defined in the affected package's `package.json` (e.g. `yarn workspace <pkg> lint/typecheck/build/test`) before replying.
 
 ## General Debugging Habits
 - When chart markers or gauges should mirror a live summary metric, source the marker from the latest summary payload first and treat historical samples as a fallback so the visual stays anchored to the freshest reading.
