@@ -101,11 +101,13 @@ interface SimulationContext {
   energyPerStepKwh: number;
   numSoCStates: number;
   maxAllowedSoCStep: number;
+  minAllowedSoCStep: number;
   horizon: number;
   avgPriceEurPerKwh: number;
   totalDurationHours: number;
   currentSoCStep: number;
   currentSoCPercent: number;
+  minAllowedSocPercent: number;
   maxChargeSoC: number;
   networkTariffEurPerKwh: number;
   houseLoadW: number;
@@ -192,6 +194,13 @@ function prepareSimulationContext(
 
   const socPercentStep = 100 / SOC_STEPS;
   const energyPerStepKwh = capacityKwh / SOC_STEPS;
+  const minAllowedSocPercent = (() => {
+    const v = cfg.battery?.auto_mode_floor_soc;
+    if (typeof v === "number" && Number.isFinite(v)) {
+      return Math.min(Math.max(v, 0), 100);
+    }
+    return 0;
+  })();
   const maxChargeSoC = (() => {
     const v = cfg.battery?.max_charge_soc_percent;
     if (typeof v === "number" && Number.isFinite(v)) {
@@ -199,6 +208,13 @@ function prepareSimulationContext(
     }
     return 100;
   })();
+
+  let minAllowedSoCStep = Math.max(0, Math.ceil(minAllowedSocPercent / socPercentStep - EPSILON));
+  const maxPossibleStep = Math.round(100 / socPercentStep);
+  if (minAllowedSoCStep > maxPossibleStep) {
+    minAllowedSoCStep = maxPossibleStep;
+  }
+  minAllowedSoCStep = Math.min(minAllowedSoCStep, Math.round(maxChargeSoC / socPercentStep));
 
   const totalDurationHours = slots.reduce((acc, item) => acc + item.durationHours, 0);
   if (totalDurationHours <= 0) {
@@ -239,11 +255,13 @@ function prepareSimulationContext(
     energyPerStepKwh,
     numSoCStates,
     maxAllowedSoCStep,
+    minAllowedSoCStep,
     horizon,
     avgPriceEurPerKwh,
     totalDurationHours,
     currentSoCStep,
     currentSoCPercent,
+    minAllowedSocPercent,
     maxChargeSoC,
     networkTariffEurPerKwh,
     houseLoadW,
@@ -360,6 +378,7 @@ function evaluateStateTransitions(
     energyPerStepKwh,
     numSoCStates,
     maxAllowedSoCStep,
+    minAllowedSoCStep,
     allowBatteryExport,
     feedInTariff,
   } = context;
@@ -386,14 +405,15 @@ function evaluateStateTransitions(
   }
   const upLimit = Math.min(maxChargeSteps, numSoCStates - 1 - currentSoCStep);
 
-  let maxDischargeSteps = currentSoCStep;
+  let maxDischargeStepsByPower = currentSoCStep;
   if (Number.isFinite(dischargeLimitKwh)) {
-    maxDischargeSteps = Math.min(
-      maxDischargeSteps,
+    maxDischargeStepsByPower = Math.min(
+      maxDischargeStepsByPower,
       Math.floor(dischargeLimitKwh / energyPerStepKwh + EPSILON),
     );
   }
-  const downLimit = Math.max(0, Math.min(currentSoCStep, maxDischargeSteps));
+  const allowedDischargeSteps = Math.max(0, currentSoCStep - minAllowedSoCStep);
+  const downLimit = Math.max(0, Math.min(maxDischargeStepsByPower, allowedDischargeSteps));
 
   let bestCost = Number.POSITIVE_INFINITY;
   let bestTransition: PolicyTransition | null = null;
@@ -402,6 +422,10 @@ function evaluateStateTransitions(
     const nextSoCStep = currentSoCStep + deltaSoCSteps;
     const energyChangeKwh = deltaSoCSteps * energyPerStepKwh;
     const gridEnergyKwh = loadAfterDirectUseKwh + energyChangeKwh - availableSolarKwh;
+
+    if (nextSoCStep < minAllowedSoCStep) {
+      continue;
+    }
 
     if (
       !pvCanExportUnderState(context, profile, currentSoCStep, energyChangeKwh, gridEnergyKwh)
@@ -512,11 +536,15 @@ function buildSimulationOutput(
   const lastEntry = oracleEntries[oracleEntries.length - 1];
   const finalTarget = lastEntry?.end_soc_percent ?? lastEntry?.target_soc_percent ?? null;
   const recommendedTargetRaw = shouldChargeFromGrid ? context.maxChargeSoC : (finalTarget ?? context.maxChargeSoC);
-  const recommendedTarget = Math.min(recommendedTargetRaw ?? context.maxChargeSoC, context.maxChargeSoC);
-  const nextStepSocPercent = firstTarget ?? context.currentSoCStep * context.socPercentStep;
+  const recommendedTarget = Math.max(
+    context.minAllowedSocPercent,
+    Math.min(recommendedTargetRaw ?? context.maxChargeSoC, context.maxChargeSoC),
+  );
+  const nextStepSocPercentRaw = firstTarget ?? context.currentSoCStep * context.socPercentStep;
+  const nextStepSocPercent = Math.max(context.minAllowedSocPercent, nextStepSocPercentRaw);
 
   return {
-    initial_soc_percent: context.currentSoCStep * context.socPercentStep,
+    initial_soc_percent: Math.max(context.minAllowedSocPercent, context.currentSoCStep * context.socPercentStep),
     next_step_soc_percent: nextStepSocPercent,
     recommended_soc_percent: recommendedTarget,
     recommended_final_soc_percent: recommendedTarget,
@@ -560,6 +588,13 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       socStepIter,
       {nextSoCStep, deltaSoCSteps, energyChangeKwh, gridEnergyKwh},
     ));
+
+    if (nextSoCStep < context.minAllowedSoCStep) {
+      nextSoCStep = context.minAllowedSoCStep;
+      deltaSoCSteps = nextSoCStep - socStepIter;
+      energyChangeKwh = deltaSoCSteps * context.energyPerStepKwh;
+      gridEnergyKwh = profile.loadAfterDirectUseKwh + energyChangeKwh - profile.availableSolarKwh;
+    }
 
     if (Math.abs(gridEnergyKwh) < GRID_CHARGE_STRATEGY_THRESHOLD_KWH) {
       gridEnergyKwh = 0;
