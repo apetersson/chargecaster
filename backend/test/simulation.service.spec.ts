@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
+import { EnergyPrice } from "@chargecaster/domain/price";
+import { TariffSlot } from "@chargecaster/domain/tariff-slot";
 
 import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
 import type { PriceSlot, SimulationConfig } from "../src/simulation/types";
@@ -88,14 +89,14 @@ describe("simulateOptimalSchedule oracle output", () => {
     };
 
     const slots: PriceSlot[] = [createSlot(2, 0.32), createSlot(3, 0.35)];
-    const solar = [1.8, 0.2];
+    const solarGenerationPerSlotKwh = [1.8, 0.2];
 
     const result = simulateOptimalSchedule(
       config,
       { battery_soc: 80 },
       slots,
       {
-        solarGenerationKwhPerSlot: solar,
+        solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
         pvDirectUseRatio: 0.2,
       },
     );

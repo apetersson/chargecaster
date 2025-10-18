@@ -3,7 +3,7 @@ import type { ChartDataset, ChartOptions } from "../useProjectionChart/chartSetu
 import { buildOptions } from "../useProjectionChart/buildOptions";
 import { useChartInstance } from "../useProjectionChart/useChartInstance";
 import type { BacktestSeriesPoint, BacktestSeriesResponse } from "../../types";
-import type { AxisBounds, LegendGroup, ProjectionPoint } from "../useProjectionChart";
+import type { AxisBounds, LegendGroup, ProjectionPoint } from "../useProjectionChart/types";
 import { GRID_BORDER, GRID_FILL, HISTORY_BORDER, SOC_BORDER, SOC_FILL } from "../useProjectionChart/constants";
 
 const toMs = (ts: string): number => new Date(ts).getTime();
@@ -11,7 +11,7 @@ const toMs = (ts: string): number => new Date(ts).getTime();
 interface BuildResult {
   datasets: ChartDataset<"line", ProjectionPoint[]>[];
   bounds: { power: AxisBounds; price: AxisBounds };
-  timeRange: { min: number | null; max: number | null };
+  timeRangeMs: { min: number | null; max: number | null };
   legendGroups: LegendGroup[];
 }
 
@@ -24,19 +24,19 @@ function buildDatasets(series: BacktestSeriesResponse): BuildResult {
   const gridDumb: ProjectionPoint[] = [];
   const savingsPoints: ProjectionPoint[] = [];
 
-  let powerMin = Number.POSITIVE_INFINITY;
-  let powerMax = Number.NEGATIVE_INFINITY;
-  let eurMin = Number.POSITIVE_INFINITY; // in cents
-  let eurMax = Number.NEGATIVE_INFINITY;
-  let minTime: number | null = null;
-  let maxTime: number | null = null;
+  let powerMinW = Number.POSITIVE_INFINITY;
+  let powerMaxW = Number.NEGATIVE_INFINITY;
+  let savingsMinCt = Number.POSITIVE_INFINITY;
+  let savingsMaxCt = Number.NEGATIVE_INFINITY;
+  let minTimestampMs: number | null = null;
+  let maxTimestampMs: number | null = null;
 
   for (const p of points) {
     const start = toMs(p.start);
     const end = toMs(p.end);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
-    minTime = minTime == null ? start : Math.min(minTime, start);
-    maxTime = maxTime == null ? end : Math.max(maxTime, end);
+    minTimestampMs = minTimestampMs == null ? start : Math.min(minTimestampMs, start);
+    maxTimestampMs = maxTimestampMs == null ? end : Math.max(maxTimestampMs, end);
 
     const baseSavingsEur: number | null = typeof p.savings_cum_eur === "number" && Number.isFinite(p.savings_cum_eur)
       ? p.savings_cum_eur
@@ -47,22 +47,22 @@ function buildDatasets(series: BacktestSeriesResponse): BuildResult {
     if (typeof savingsCt === "number" && Number.isFinite(savingsCt)) {
       savingsPoints.push({x: start, y: savingsCt, source: "history"});
       savingsPoints.push({x: end, y: savingsCt, source: "history"});
-      eurMin = Math.min(eurMin, savingsCt);
-      eurMax = Math.max(eurMax, savingsCt);
+      savingsMinCt = Math.min(savingsMinCt, savingsCt);
+      savingsMaxCt = Math.max(savingsMaxCt, savingsCt);
     }
 
     if (typeof p.grid_power_smart_w === "number" && Number.isFinite(p.grid_power_smart_w)) {
       gridSmart.push({x: start, y: p.grid_power_smart_w, source: "history"});
       gridSmart.push({x: end, y: p.grid_power_smart_w, source: "history"});
-      powerMin = Math.min(powerMin, p.grid_power_smart_w);
-      powerMax = Math.max(powerMax, p.grid_power_smart_w);
+      powerMinW = Math.min(powerMinW, p.grid_power_smart_w);
+      powerMaxW = Math.max(powerMaxW, p.grid_power_smart_w);
     }
 
     if (typeof p.grid_power_dumb_w === "number" && Number.isFinite(p.grid_power_dumb_w)) {
       gridDumb.push({x: start, y: p.grid_power_dumb_w, source: "history"});
       gridDumb.push({x: end, y: p.grid_power_dumb_w, source: "history"});
-      powerMin = Math.min(powerMin, p.grid_power_dumb_w);
-      powerMax = Math.max(powerMax, p.grid_power_dumb_w);
+      powerMinW = Math.min(powerMinW, p.grid_power_dumb_w);
+      powerMaxW = Math.max(powerMaxW, p.grid_power_dumb_w);
     }
 
     if (typeof p.soc_smart_percent === "number" && Number.isFinite(p.soc_smart_percent)) {
@@ -73,18 +73,18 @@ function buildDatasets(series: BacktestSeriesResponse): BuildResult {
     }
   }
 
-  if (!Number.isFinite(powerMin)) powerMin = 0;
-  if (!Number.isFinite(powerMax)) powerMax = 0;
-  if (!Number.isFinite(eurMin)) eurMin = 0;
-  if (!Number.isFinite(eurMax)) eurMax = 0;
+  if (!Number.isFinite(powerMinW)) powerMinW = 0;
+  if (!Number.isFinite(powerMaxW)) powerMaxW = 0;
+  if (!Number.isFinite(savingsMinCt)) savingsMinCt = 0;
+  if (!Number.isFinite(savingsMaxCt)) savingsMaxCt = 0;
 
   // Padding for nicer visuals
-  const pad = Math.max(100, Math.round((powerMax - powerMin) * 0.05));
-  powerMin = Math.floor((powerMin - pad) / 100) * 100;
-  powerMax = Math.ceil((powerMax + pad) / 100) * 100;
-  const pricePad = Math.max(1, Math.round((eurMax - eurMin) * 0.05));
-  eurMin = Math.floor(eurMin - pricePad);
-  eurMax = Math.ceil(eurMax + pricePad);
+  const padW = Math.max(100, Math.round((powerMaxW - powerMinW) * 0.05));
+  powerMinW = Math.floor((powerMinW - padW) / 100) * 100;
+  powerMaxW = Math.ceil((powerMaxW + padW) / 100) * 100;
+  const pricePadCt = Math.max(1, Math.round((savingsMaxCt - savingsMinCt) * 0.05));
+  savingsMinCt = Math.floor(savingsMinCt - pricePadCt);
+  savingsMaxCt = Math.ceil(savingsMaxCt + pricePadCt);
 
   const datasets: ChartDataset<"line", ProjectionPoint[]>[] = [
     {
@@ -157,10 +157,10 @@ function buildDatasets(series: BacktestSeriesResponse): BuildResult {
   return {
     datasets,
     bounds: {
-      power: {min: powerMin, max: powerMax, dataMin: null, dataMax: null},
-      price: {min: eurMin, max: eurMax, dataMin: null, dataMax: null}
+      power: {min: powerMinW, max: powerMaxW, dataMin: null, dataMax: null},
+      price: {min: savingsMinCt, max: savingsMaxCt, dataMin: null, dataMax: null}
     },
-    timeRange: {min: minTime, max: maxTime},
+    timeRangeMs: {min: minTimestampMs, max: maxTimestampMs},
     legendGroups,
   };
 }
@@ -174,7 +174,7 @@ export const useBacktestChart = (
     focus?: "smart" | "dumb"
   },
 ) => {
-  const {datasets, bounds, timeRange, legendGroups} = useMemo(() => {
+  const {datasets, bounds, timeRangeMs, legendGroups} = useMemo(() => {
     if (!series) {
       return {
         datasets: [] as ChartDataset<"line", ProjectionPoint[]>[],
@@ -182,7 +182,7 @@ export const useBacktestChart = (
           power: {min: 0, max: 0, dataMin: null, dataMax: null},
           price: {min: 0, max: 0, dataMin: null, dataMax: null}
         },
-        timeRange: {min: null, max: null},
+        timeRangeMs: {min: null, max: null},
         legendGroups: [] as LegendGroup[],
       };
     }
@@ -221,13 +221,13 @@ export const useBacktestChart = (
 
   const chartOptions: ChartOptions<"line"> = useMemo(() => buildOptions({
     bounds,
-    timeRange,
+    timeRangeMs,
     legendGroups,
     responsive: options,
     valueAxisUnit: "ct"
-  }), [bounds, timeRange, legendGroups, options?.isMobile, options?.showPowerAxisLabels, options?.showPriceAxisLabels]);
+  }), [bounds, timeRangeMs, legendGroups, options?.isMobile, options?.showPowerAxisLabels, options?.showPriceAxisLabels]);
 
   return useChartInstance(styledDatasets, chartOptions);
 };
 
-export type { ProjectionPoint } from "../useProjectionChart";
+export type { ProjectionPoint } from "../useProjectionChart/types";

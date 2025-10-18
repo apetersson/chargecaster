@@ -7,7 +7,7 @@ import {
   attachHistoryIntervals,
   buildCombinedSeries,
   buildFutureEras,
-  computeTimeRange,
+  computeTimeRangeMs,
   derivePowerFromEnergy,
   ensureBounds,
   isFiniteNumber,
@@ -29,10 +29,10 @@ import type {
   DerivedEra,
   LegendGroup,
   ProjectionPoint,
-  TimeRange,
+  TimeRangeMs,
 } from "./types";
 
-const resolveInitialSoc = (
+const resolveInitialSoCPercent = (
   summary: SnapshotSummary | null,
   historyPoints: ProjectionPoint[],
 ): number => {
@@ -49,7 +49,7 @@ const resolveInitialSoc = (
   return 0;
 };
 
-const buildSocSeries = (
+const buildSoCSeries = (
   history: HistoryPoint[],
   futureEras: DerivedEra[],
   summary: SnapshotSummary | null,
@@ -58,14 +58,14 @@ const buildSocSeries = (
     .map((entry) => toHistoryPoint(entry.timestamp, entry.battery_soc_percent))
     .filter((point): point is ProjectionPoint => point !== null);
 
-  const summarySoc = summary && isFiniteNumber(summary.current_soc_percent)
+  const summarySoCPercent = summary && isFiniteNumber(summary.current_soc_percent)
     ? summary.current_soc_percent
     : null;
   const summaryTimestamp = summary?.timestamp ? parseTimestamp(summary.timestamp) : null;
-  if (summarySoc !== null && summaryTimestamp !== null) {
+  if (summarySoCPercent !== null && summaryTimestamp !== null) {
     const summaryPoint: ProjectionPoint = {
       x: summaryTimestamp,
-      y: summarySoc,
+      y: summarySoCPercent,
       source: "history",
     };
     const last = historyPoints[historyPoints.length - 1];
@@ -76,23 +76,23 @@ const buildSocSeries = (
     }
   }
 
-  let currentSoc = resolveInitialSoc(summary, historyPoints);
+  let currentSoCPercent = resolveInitialSoCPercent(summary, historyPoints);
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    addPoint(futurePoints, {x: era.startMs, y: currentSoc, source: "forecast"});
-    const targetSoc = era.oracle?.end_soc_percent ?? era.oracle?.target_soc_percent ?? null;
-    const endSoc = isFiniteNumber(targetSoc) ? targetSoc : currentSoc;
-    addPoint(futurePoints, {x: era.endMs, y: endSoc, source: "forecast"});
-    currentSoc = endSoc;
+    addPoint(futurePoints, {x: era.startMs, y: currentSoCPercent, source: "forecast"});
+    const targetSoCPercent = era.oracle?.end_soc_percent ?? era.oracle?.target_soc_percent ?? null;
+    const endSoCPercent = isFiniteNumber(targetSoCPercent) ? targetSoCPercent : currentSoCPercent;
+    addPoint(futurePoints, {x: era.endMs, y: endSoCPercent, source: "forecast"});
+    currentSoCPercent = endSoCPercent;
   }
 
   const combined = buildCombinedSeries(historyPoints, futurePoints);
 
   let currentMarker: ProjectionPoint | null = null;
-  if (summarySoc !== null && summaryTimestamp !== null) {
+  if (summarySoCPercent !== null && summaryTimestamp !== null) {
     currentMarker = {
       x: summaryTimestamp,
-      y: summarySoc,
+      y: summarySoCPercent,
       source: "history",
       isCurrentMarker: true,
     };
@@ -290,11 +290,11 @@ export const buildDatasets = (
     power: AxisBounds;
     price: AxisBounds;
   };
-  timeRange: TimeRange;
+  timeRangeMs: TimeRangeMs;
   legendGroups: LegendGroup[];
 } => {
   const futureEras = buildFutureEras(forecast, oracleEntries);
-  const {series: socSeries, currentMarker} = buildSocSeries(history, futureEras, summary);
+  const {series: socSeries, currentMarker} = buildSoCSeries(history, futureEras, summary);
   const gridSeries = buildGridSeries(history, futureEras);
   const solarSeries = buildSolarSeries(history, futureEras);
   const demandSeries = buildDemandSeries(history, futureEras, summary);
@@ -428,13 +428,13 @@ export const buildDatasets = (
   }
 
   const bounds = ensureBounds(powerSeries, priceSeries);
-  const timeRange: TimeRange = computeTimeRange(socSeries, gridSeries, solarSeries, priceSeries);
+  const timeRangeMs: TimeRangeMs = computeTimeRangeMs(socSeries, gridSeries, solarSeries, priceSeries);
   const legendGroups = buildLegendGroups(datasets);
 
   return {
     datasets,
     bounds,
-    timeRange,
+    timeRangeMs,
     legendGroups,
   };
 };

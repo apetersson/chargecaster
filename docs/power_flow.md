@@ -36,15 +36,15 @@ This document defines how Chargecaster models electrical power flows between the
   - From PV: `battery.max_charge_power_solar_w` (W).
   - Total: we do not configure an explicit total cap; instead, the simulator enforces “solar‑first” and then allows the grid to fill only the shortfall, each within its own cap.
 - SOC floor in auto mode: `battery.auto_mode_floor_soc` (%).
-- SOC charging ceiling: `battery.max_charge_soc` (%) (optional; defaults to 100 if not set).
+- SOC charging ceiling: `battery.max_charge_soc_percent` (%) (optional; defaults to 100 if not set).
   - Product intent: avoid calibration losses near 100% by capping routine charging (e.g., 95%).
 
 ## PV‑First Before Feed‑In (Export)
 - Rule (hard constraint): If a candidate plan would export energy (FI > 0), export is suppressed whenever the battery can still accept additional solar charge in the current slot.
   - “Can still accept” means BOTH:
-    - SOC headroom remains relative to 100% SOC (the routine ceiling `max_charge_soc` does NOT prevent PV-only charging for the purpose of avoiding feed‑in), AND
+    - SOC headroom remains relative to 100% SOC (the routine ceiling `max_charge_soc_percent` does NOT prevent PV-only charging for the purpose of avoiding feed‑in), AND
     - PV charging headroom exists this slot (bounded by `max_charge_power_solar_w`, available PV, and slot duration).
-- The simulator enforces this by increasing PV-only charging (ignoring `max_charge_soc` up to 100%) so that grid power is non‑negative in those slots.
+- The simulator enforces this by increasing PV-only charging (ignoring `max_charge_soc_percent` up to 100%) so that grid power is non‑negative in those slots.
 - Only after this PV headroom is saturated or the battery reaches 100% may export occur (PV-only export).
 - The above rule applies in both “auto” and “charge” strategies.
 
@@ -85,7 +85,7 @@ This document defines how Chargecaster models electrical power flows between the
 ## Special Cases & Invariants
 - No battery‑origin export to grid when `allow_battery_export = false`.
 - PV-only export allowed only after PV charging headroom is saturated for the slot (or battery considered full for charging).
-- With `max_charge_soc` set below 100%, export may appear once SOC reaches that configured ceiling; set it to 100% to fully suppress export prior to full charge.
+- With `max_charge_soc_percent` set below 100%, export may appear once SOC reaches that configured ceiling; set it to 100% to fully suppress export prior to full charge.
 - Simulator sanity guardrails (tests) ensure grid power magnitudes remain within realistic bounds.
 
 ## Frontend Visualisation Conventions
@@ -110,7 +110,7 @@ This document defines how Chargecaster models electrical power flows between the
   - `max_charge_power_solar_w` (PV charge cap)
   - `max_discharge_power_w` (0 disables discharge)
   - `auto_mode_floor_soc` (auto mode floor %)
-  - `max_charge_soc` (routine charge ceiling %, optional; default 100)
+  - `max_charge_soc_percent` (routine charge ceiling %, optional; default 100)
 - price
   - `grid_fee_eur_per_kwh`
   - `feed_in_tariff_eur_per_kwh`
@@ -123,5 +123,5 @@ This document defines how Chargecaster models electrical power flows between the
 
 ## Product Notes / Decisions
 - PV-first before feed‑in is a hard rule driven by regulation and homeowner priority on self‑consumption.
-- Configurable `max_charge_soc` enables avoiding 100% calibration cycles; consider pairing with a policy toggle if you want feed‑in gating tied strictly to 100% SOC regardless of the configured charging ceiling.
+- Configurable `max_charge_soc_percent` enables avoiding 100% calibration cycles; consider pairing with a policy toggle if you want feed‑in gating tied strictly to 100% SOC regardless of the configured charging ceiling.
 - No explicit total charge cap is modeled; instead, PV and grid caps are applied with solar‑first sourcing and export gating.

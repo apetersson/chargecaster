@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "../simulation/types";
 import { normalizePriceSlots } from "../simulation/simulation.service";
 import { parseTimestamp } from "../simulation/solar";
-import { EnergyPrice, TimeSlot } from "@chargecaster/domain";
+import { EnergyPrice } from "@chargecaster/domain/price";
+import { TimeSlot } from "@chargecaster/domain/time-slot";
 
 const SLOT_DURATION_MS = 3_600_000;
 

@@ -1,12 +1,7 @@
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
-import { z } from "zod";
 import type { RawForecastEntry } from "../../simulation/types";
+import { fromEvccConfigSchema, type FromEvccConfig } from "../schemas";
 import { derivePriceSnapshotFromForecast } from "./provider.utils";
-
-export const fromEvccConfigSchema = z.object({
-  priority: z.number().int().nonnegative(),
-}).strip();
-export type FromEvccConfig = z.infer<typeof fromEvccConfigSchema>;
 
 export class FromEvccProvider implements MarketProvider {
   readonly key = "from_evcc";

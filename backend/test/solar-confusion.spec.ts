@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { buildSolarForecastFromTimeseries } from "../src/simulation/solar";
@@ -10,7 +10,10 @@ import { parseEvccState } from "../src/config/schemas";
 describe("solar-confusion fixture: project grid power including solar", () => {
   it("prints solar + grid power per slot (W)", () => {
     const fixtureName = process.env.FIXTURE ?? "solar-confusion.json";
-    const fixturePath = join(process.cwd(), "fixtures", fixtureName);
+    const projectRoot = process.cwd();
+    const primaryPath = join(projectRoot, "fixtures", fixtureName);
+    const fallbackPath = join(projectRoot, "backend", "fixtures", fixtureName);
+    const fixturePath = existsSync(primaryPath) ? primaryPath : fallbackPath;
     const raw: unknown = JSON.parse(readFileSync(fixturePath, "utf-8"));
     const parsed = parseEvccState(raw);
 
@@ -39,7 +42,7 @@ describe("solar-confusion fixture: project grid power including solar", () => {
         max_charge_power_w: 500,
         auto_mode_floor_soc: 5,
         max_discharge_power_w: 4500,
-        max_charge_soc: 95,
+        max_charge_soc_percent: 95,
       },
       price: {
         // Use snapshot price as grid fee if available (fallback to 0.02 EUR/kWh)

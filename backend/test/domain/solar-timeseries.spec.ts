@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { normaliseSolarTimeseries, toSolarForecastSlots, type RawSolarTimeseriesPoint } from "@chargecaster/domain";
+import {
+  normaliseSolarTimeseries,
+  toSolarForecastSlots,
+  type RawSolarTimeseriesPoint,
+} from "@chargecaster/domain/solar-timeseries";
 
 interface SolarForecastSource {
   provider: string;

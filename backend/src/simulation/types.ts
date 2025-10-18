@@ -7,7 +7,7 @@ import {
   optionalTimestampSchema,
   requiredTimestampSchema,
 } from "../common/parsing";
-import type { TariffSlot } from "@chargecaster/domain";
+import type { TariffSlot } from "@chargecaster/domain/tariff-slot";
 
 export const rawForecastEntrySchema = z
   .object({
@@ -219,7 +219,7 @@ export const batteryConfigSchema = z.object({
   max_discharge_power_w: nullableNumberSchema.optional(),
   // Optional upper bound for charging SOC (percent 0..100). If set, the optimizer
   // will not target SOC above this limit to avoid 100% calibration cycles.
-  max_charge_soc: nullableNumberSchema.optional(),
+  max_charge_soc_percent: nullableNumberSchema.optional(),
 });
 
 

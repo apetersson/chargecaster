@@ -31,9 +31,9 @@ interface SortedHistoryPoint extends HistoryPoint {
 
 interface ComputationState {
   lastPriceEur: number | null;
-  dumbSoc: number | null;
+  dumbSocPercent: number | null;
   capacityKwh: number;
-  floorSoc: number;
+  floorSoCPercent: number;
   maxChargePowerW: number | null;
   maxSolarChargePowerW: number | null;
   maxDischargePowerW: number | null;
@@ -105,7 +105,7 @@ export function computeBacktestedSavings(
   if (capacityKwh === null || capacityKwh <= 0) {
     return null;
   }
-  const floorSoc = clampSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? 0;
+  const floorSoCPercent = clampSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? 0;
   const maxChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_w) ?? null;
   const maxSolarChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_solar_w) ?? null;
   const maxDischargePowerW = toFiniteNumber(config?.battery?.max_discharge_power_w) ?? null;
@@ -152,9 +152,9 @@ export function computeBacktestedSavings(
 
   const state: ComputationState = {
     lastPriceEur: importPriceFallback,
-    dumbSoc: null,
+    dumbSocPercent: null,
     capacityKwh,
-    floorSoc,
+    floorSoCPercent,
     maxChargePowerW,
     maxSolarChargePowerW,
     maxDischargePowerW,
@@ -175,7 +175,7 @@ export function computeBacktestedSavings(
       previous = entry;
       const entrySoc = clampSoc(entry.battery_soc_percent ?? null);
       if (entrySoc !== null) {
-        state.dumbSoc = entrySoc;
+        state.dumbSocPercent = entrySoc;
       }
       const entryPrice = resolvePriceEur(entry);
       if (entryPrice !== null) {
@@ -188,7 +188,7 @@ export function computeBacktestedSavings(
       previous = entry;
       const entrySoc = clampSoc(entry.battery_soc_percent ?? null);
       if (entrySoc !== null) {
-        state.dumbSoc = entrySoc;
+        state.dumbSocPercent = entrySoc;
       }
       const entryPrice = resolvePriceEur(entry);
       if (entryPrice !== null) {
@@ -250,14 +250,14 @@ export function computeBacktestedSavings(
       actualCostEur += gridEnergyKwh * feedInTariff;
     }
 
-    state.dumbSoc ??= socPrev;
-    if (state.dumbSoc === null) {
+    state.dumbSocPercent ??= socPrev;
+    if (state.dumbSocPercent === null) {
       previous = entry;
       continue;
     }
 
     // Track baseline (dumb) start SoC once we have it
-    dumbStartSoc ??= state.dumbSoc;
+    dumbStartSoc ??= state.dumbSocPercent;
 
     const solarToLoadKwh = Math.min(houseLoadEnergyKwh, solarEnergyKwh);
     let remainingLoadKwh = houseLoadEnergyKwh - solarToLoadKwh;
@@ -272,19 +272,19 @@ export function computeBacktestedSavings(
       : null;
     const dischargeLimitKwh = dischargeLimitW !== null ? (dischargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
 
-    const capacityRemainingKwh = Math.max(0, ((100 - state.dumbSoc) / 100) * state.capacityKwh);
+    const capacityRemainingKwh = Math.max(0, ((100 - state.dumbSocPercent) / 100) * state.capacityKwh);
     const chargeEnergyKwh = Math.min(solarSurplusKwh, capacityRemainingKwh, chargeLimitKwh);
     solarSurplusKwh -= chargeEnergyKwh;
 
-    let interimSoc = state.dumbSoc + (chargeEnergyKwh / state.capacityKwh) * 100;
+    let interimSoc = state.dumbSocPercent + (chargeEnergyKwh / state.capacityKwh) * 100;
     if (!Number.isFinite(interimSoc)) {
-      interimSoc = state.dumbSoc;
+      interimSoc = state.dumbSocPercent;
     }
     if (interimSoc > 100) {
       interimSoc = 100;
     }
 
-    const availableDischargeKwh = Math.max(0, ((interimSoc - state.floorSoc) / 100) * state.capacityKwh);
+    const availableDischargeKwh = Math.max(0, ((interimSoc - state.floorSoCPercent) / 100) * state.capacityKwh);
     const dischargeEnergyKwh = Math.min(remainingLoadKwh, availableDischargeKwh, dischargeLimitKwh);
     remainingLoadKwh -= dischargeEnergyKwh;
 
@@ -292,14 +292,14 @@ export function computeBacktestedSavings(
     if (!Number.isFinite(finalSoc)) {
       finalSoc = interimSoc;
     }
-    if (finalSoc < state.floorSoc) {
-      finalSoc = state.floorSoc;
+    if (finalSoc < state.floorSoCPercent) {
+      finalSoc = state.floorSoCPercent;
     }
     if (finalSoc > 100) {
       finalSoc = 100;
     }
-    state.dumbSoc = finalSoc;
-    dumbEndSoc = state.dumbSoc;
+    state.dumbSocPercent = finalSoc;
+    dumbEndSoc = state.dumbSocPercent;
 
     const importEnergyKwh = Math.max(0, remainingLoadKwh);
     const exportEnergyKwh = Math.max(0, solarSurplusKwh);
@@ -357,7 +357,7 @@ export function computeBacktestSeries(
   if (capacityKwh === null || capacityKwh <= 0) {
     return null;
   }
-  const floorSoc = clampSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? 0;
+  const floorSoCPercent = clampSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? 0;
   const maxChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_w) ?? null;
   const maxSolarChargePowerW = toFiniteNumber(config?.battery?.max_charge_power_solar_w) ?? null;
   const maxDischargePowerW = toFiniteNumber(config?.battery?.max_discharge_power_w) ?? null;
@@ -395,9 +395,9 @@ export function computeBacktestSeries(
 
   const state: ComputationState = {
     lastPriceEur: importPriceFallback,
-    dumbSoc: null,
+    dumbSocPercent: null,
     capacityKwh,
-    floorSoc,
+    floorSoCPercent,
     maxChargePowerW,
     maxSolarChargePowerW,
     maxDischargePowerW,
@@ -412,7 +412,7 @@ export function computeBacktestSeries(
     if (entry.__ts < windowStartMs) {
       previous = entry;
       const entrySoc = clampSoc(entry.battery_soc_percent ?? null);
-      if (entrySoc !== null) state.dumbSoc = entrySoc;
+      if (entrySoc !== null) state.dumbSocPercent = entrySoc;
       const entryPrice = resolvePriceEur(entry);
       if (entryPrice !== null) state.lastPriceEur = entryPrice;
       continue;
@@ -421,7 +421,7 @@ export function computeBacktestSeries(
     if (!previous || previous.__ts < windowStartMs) {
       previous = entry;
       const entrySoc = clampSoc(entry.battery_soc_percent ?? null);
-      if (entrySoc !== null) state.dumbSoc = entrySoc;
+      if (entrySoc !== null) state.dumbSocPercent = entrySoc;
       const entryPrice = resolvePriceEur(entry);
       if (entryPrice !== null) state.lastPriceEur = entryPrice;
       continue;
@@ -473,8 +473,8 @@ export function computeBacktestSeries(
       : gridEnergySmartKwh * feedInTariff;
 
     // Dumb baseline: PV-first, no grid-charging, respect floor SOC & power caps
-    state.dumbSoc ??= socPrev;
-    if (state.dumbSoc === null) {
+    state.dumbSocPercent ??= socPrev;
+    if (state.dumbSocPercent === null) {
       previous = entry;
       continue;
     }
@@ -492,22 +492,22 @@ export function computeBacktestSeries(
       : null;
     const dischargeLimitKwh = dischargeLimitW !== null ? (dischargeLimitW / 1000) * durationHours : Number.POSITIVE_INFINITY;
 
-    const capacityRemainingKwh = Math.max(0, ((100 - state.dumbSoc) / 100) * state.capacityKwh);
+    const capacityRemainingKwh = Math.max(0, ((100 - state.dumbSocPercent) / 100) * state.capacityKwh);
     const chargeEnergyKwh = Math.min(solarSurplusKwh, capacityRemainingKwh, chargeLimitKwh);
     solarSurplusKwh -= chargeEnergyKwh;
-    let interimSoc = state.dumbSoc + (chargeEnergyKwh / state.capacityKwh) * 100;
-    if (!Number.isFinite(interimSoc)) interimSoc = state.dumbSoc;
+    let interimSoc = state.dumbSocPercent + (chargeEnergyKwh / state.capacityKwh) * 100;
+    if (!Number.isFinite(interimSoc)) interimSoc = state.dumbSocPercent;
     if (interimSoc > 100) interimSoc = 100;
 
-    const availableDischargeKwh = Math.max(0, ((interimSoc - state.floorSoc) / 100) * state.capacityKwh);
+    const availableDischargeKwh = Math.max(0, ((interimSoc - state.floorSoCPercent) / 100) * state.capacityKwh);
     const dischargeEnergyKwh = Math.min(remainingLoadKwh, availableDischargeKwh, dischargeLimitKwh);
     remainingLoadKwh -= dischargeEnergyKwh;
 
     let finalSoc = interimSoc - (dischargeEnergyKwh / state.capacityKwh) * 100;
     if (!Number.isFinite(finalSoc)) finalSoc = interimSoc;
-    if (finalSoc < state.floorSoc) finalSoc = state.floorSoc;
+    if (finalSoc < state.floorSoCPercent) finalSoc = state.floorSoCPercent;
     if (finalSoc > 100) finalSoc = 100;
-    state.dumbSoc = finalSoc;
+    state.dumbSocPercent = finalSoc;
 
     const importEnergyKwh = Math.max(0, remainingLoadKwh);
     const exportEnergyKwh = Math.max(0, solarSurplusKwh);
@@ -517,7 +517,7 @@ export function computeBacktestSeries(
     cumulativeCostSavingsEur += (costDumb - costSmart);
 
     // Mark-to-market valuation for remaining inventory difference (smart vs dumb) at interval end.
-    const energyDeltaKwh = ((socCurr - state.dumbSoc) / 100) * state.capacityKwh;
+    const energyDeltaKwh = ((socCurr - state.dumbSocPercent) / 100) * state.capacityKwh;
     const m2mAdjustmentEur = energyDeltaKwh * intervalPriceEur;
     const cumulativeSavingsEur = cumulativeCostSavingsEur + m2mAdjustmentEur;
 
@@ -529,7 +529,7 @@ export function computeBacktestSeries(
       grid_power_smart_w: gridPowerW,
       grid_power_dumb_w: (gridEnergyDumbKwh / durationHours) * 1000,
       soc_smart_percent: socCurr,
-      soc_dumb_percent: state.dumbSoc,
+      soc_dumb_percent: state.dumbSocPercent,
       cost_smart_eur: costSmart,
       cost_dumb_eur: costDumb,
       savings_eur: costDumb - costSmart,

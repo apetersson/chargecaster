@@ -10,7 +10,7 @@ export const useProjectionChart = (
   summary: SnapshotSummary | null,
   options?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean },
 ) => {
-  const {datasets, bounds, timeRange, legendGroups} = useProjectionDatasets(
+  const {datasets, bounds, timeRangeMs, legendGroups} = useProjectionDatasets(
     history,
     forecast,
     oracleEntries,
@@ -19,7 +19,7 @@ export const useProjectionChart = (
 
   const chartOptions = useProjectionChartOptions(
     bounds,
-    timeRange,
+    timeRangeMs,
     legendGroups,
     options,
   );

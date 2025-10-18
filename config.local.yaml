@@ -47,5 +47,3 @@ market_data:
     aggregate_hourly: false
   from_evcc:
     priority: 3
-
-

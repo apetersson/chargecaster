@@ -3,14 +3,54 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/price.js",
+  "module": "dist/price.js",
+  "types": "dist/price.d.ts",
   "exports": {
-    "types": "./dist/index.d.ts",
-    "import": "./dist/index.js",
-    "require": "./dist-cjs/index.js",
-    "default": "./dist/index.js"
+    ".": null,
+    "./price": {
+      "types": "./dist/price.d.ts",
+      "import": "./dist/price.js",
+      "require": "./dist-cjs/price.js",
+      "default": "./dist/price.js"
+    },
+    "./power": {
+      "types": "./dist/power.d.ts",
+      "import": "./dist/power.js",
+      "require": "./dist-cjs/power.js",
+      "default": "./dist/power.js"
+    },
+    "./energy": {
+      "types": "./dist/energy.d.ts",
+      "import": "./dist/energy.js",
+      "require": "./dist-cjs/energy.js",
+      "default": "./dist/energy.js"
+    },
+    "./duration": {
+      "types": "./dist/duration.d.ts",
+      "import": "./dist/duration.js",
+      "require": "./dist-cjs/duration.js",
+      "default": "./dist/duration.js"
+    },
+    "./time-slot": {
+      "types": "./dist/time-slot.d.ts",
+      "import": "./dist/time-slot.js",
+      "require": "./dist-cjs/time-slot.js",
+      "default": "./dist/time-slot.js"
+    },
+    "./solar-timeseries": {
+      "types": "./dist/solar-timeseries.d.ts",
+      "import": "./dist/solar-timeseries.js",
+      "require": "./dist-cjs/solar-timeseries.js",
+      "default": "./dist/solar-timeseries.js"
+    },
+    "./tariff-slot": {
+      "types": "./dist/tariff-slot.d.ts",
+      "import": "./dist/tariff-slot.js",
+      "require": "./dist-cjs/tariff-slot.js",
+      "default": "./dist/tariff-slot.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",

@@ -11,6 +11,27 @@ import {
 } from "../common/parsing";
 import { RawForecastEntry, rawForecastEntrySchema, RawSolarEntry, rawSolarEntrySchema, } from "../simulation/types";
 
+export const awattarConfigSchema = z.object({
+  priority: z.number().int().nonnegative(),
+  url: optionalStringSchema.optional(),
+  max_hours: optionalNumberSchema.optional(),
+}).strip();
+export type AwattarConfig = z.infer<typeof awattarConfigSchema>;
+
+export const entsoeNewConfigSchema = z.object({
+  priority: z.number().int().nonnegative(),
+  zone: optionalStringSchema.optional(),
+  tz: optionalStringSchema.optional().default("CET"),
+  max_hours: optionalNumberSchema.optional(),
+  aggregate_hourly: optionalBooleanSchema.optional().default(false),
+}).strip();
+export type EntsoeNewConfig = z.infer<typeof entsoeNewConfigSchema>;
+
+export const fromEvccConfigSchema = z.object({
+  priority: z.number().int().nonnegative(),
+}).strip();
+export type FromEvccConfig = z.infer<typeof fromEvccConfigSchema>;
+
 const configSectionSchema = z.object({
   enabled: optionalBooleanSchema.optional().default(true),
 });
@@ -33,7 +54,7 @@ const batteryConfigSchema = z
     auto_mode_floor_soc: optionalNumberSchema.optional(),
     max_charge_power_solar_w: optionalNumberSchema.optional(),
     max_discharge_power_w: optionalNumberSchema.optional(),
-    max_charge_soc: optionalNumberSchema.optional(),
+    max_charge_soc_percent: optionalNumberSchema.optional(),
   })
   .strip();
 
@@ -350,6 +371,3 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     homePowerW,
   };
 };
-import { awattarConfigSchema } from "./providers/awattar.provider";
-import { entsoeNewConfigSchema } from "./providers/entsoe_new.provider";
-import { fromEvccConfigSchema } from "./providers/from_evcc.provider";

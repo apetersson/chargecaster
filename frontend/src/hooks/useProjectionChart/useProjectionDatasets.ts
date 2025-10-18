@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
 import { buildDatasets } from "./buildDatasets";
-import type { AxisBounds, LegendGroup, ProjectionPoint, TimeRange } from "./types";
+import type { AxisBounds, LegendGroup, ProjectionPoint, TimeRangeMs } from "./types";
 import type { ChartDataset } from "./chartSetup";
 
 interface ProjectionDatasetResult {
@@ -11,7 +11,7 @@ interface ProjectionDatasetResult {
     power: AxisBounds;
     price: AxisBounds;
   };
-  timeRange: TimeRange;
+  timeRangeMs: TimeRangeMs;
   legendGroups: LegendGroup[];
 }
 

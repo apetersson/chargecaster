@@ -1,5 +1,8 @@
-import { normaliseSolarTimeseries, parseTemporal } from "@chargecaster/domain";
-import type { RawSolarTimeseriesPoint } from "@chargecaster/domain";
+import {
+  normaliseSolarTimeseries,
+  parseTemporal,
+  type RawSolarTimeseriesPoint,
+} from "@chargecaster/domain/solar-timeseries";
 
 import type { RawSolarEntry } from "./types";
 
