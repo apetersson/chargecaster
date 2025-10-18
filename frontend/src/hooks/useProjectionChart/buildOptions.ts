@@ -7,21 +7,21 @@ import {
   TICK_COLOR,
 } from "./constants";
 import { Chart, type ChartOptions, type LegendItem } from "./chartSetup";
-import type { LegendGroup, AxisBounds, TimeRange } from "./types";
+import type { LegendGroup, AxisBounds, TimeRangeMs } from "./types";
 
 interface BuildOptionsConfig {
   bounds: {
     power: AxisBounds;
     price: AxisBounds;
   };
-  timeRange: TimeRange;
+  timeRangeMs: TimeRangeMs;
   legendGroups: LegendGroup[];
   responsive?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean };
   // Label for the right-hand value axis. Defaults to 'ct/kWh' (tariff). For backtest savings, pass 'ct'.
   valueAxisUnit?: string;
 }
 
-export const buildOptions = ({bounds, timeRange, legendGroups, responsive, valueAxisUnit}: BuildOptionsConfig): ChartOptions<"line"> => {
+export const buildOptions = ({bounds, timeRangeMs, legendGroups, responsive, valueAxisUnit}: BuildOptionsConfig): ChartOptions<"line"> => {
   const isMobile = Boolean(responsive?.isMobile);
   const showPowerAxisLabels = responsive?.showPowerAxisLabels ?? !isMobile;
   const showPriceAxisLabels = responsive?.showPriceAxisLabels ?? !isMobile;
@@ -129,8 +129,8 @@ export const buildOptions = ({bounds, timeRange, legendGroups, responsive, value
     scales: {
       x: {
         type: "time",
-        min: timeRange.min ?? undefined,
-        max: timeRange.max ?? undefined,
+        min: timeRangeMs.min ?? undefined,
+        max: timeRangeMs.max ?? undefined,
         time: {
           unit: "hour",
           displayFormats: isMobile

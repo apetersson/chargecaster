@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ command }) => {
   const alias = command === "build"
-    ? { "@chargecaster/domain": new URL("../packages/domain/dist/index.js", import.meta.url).pathname }
+    ? { "@chargecaster/domain": new URL("../packages/domain/dist", import.meta.url).pathname }
     : {};
 
   return {

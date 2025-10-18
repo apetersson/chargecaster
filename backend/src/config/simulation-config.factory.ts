@@ -15,7 +15,7 @@ export class SimulationConfigFactory {
     const chargePower = this.numberOrZero(battery.max_charge_power_w);
     const floorSoc = this.numberOrUndefined(battery.auto_mode_floor_soc);
     const maxDischargePower = this.numberOrUndefined(battery.max_discharge_power_w, 0);
-    const maxChargeSocRaw = this.numberOrUndefined(battery.max_charge_soc, 0);
+    const maxChargeSocRaw = this.numberOrUndefined(battery.max_charge_soc_percent, 0);
     const maxChargeSoc = typeof maxChargeSocRaw === 'number' && Number.isFinite(maxChargeSocRaw)
       ? Math.min(Math.max(maxChargeSocRaw, 0), 100)
       : undefined;
@@ -38,7 +38,7 @@ export class SimulationConfigFactory {
         auto_mode_floor_soc: floorSoc,
         max_charge_power_solar_w: maxSolarChargePower,
         max_discharge_power_w: maxDischargePower,
-        max_charge_soc: maxChargeSoc,
+        max_charge_soc_percent: maxChargeSoc,
       },
       price: {
         grid_fee_eur_per_kwh: gridFee,

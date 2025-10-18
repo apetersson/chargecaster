@@ -1,21 +1,11 @@
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
-import { z } from "zod";
 import type { RawForecastEntry } from "../../simulation/types";
+import { entsoeNewConfigSchema, type EntsoeNewConfig } from "../schemas";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
 
 const BASE_URL = "https://newtransparency.entsoe.eu/market/energyPrices/load";
 const REQUEST_TIMEOUT_MS = 15000;
 const SLOT_15M_MS = 15 * 60 * 1000;
-
-export const entsoeNewConfigSchema = z.object({
-  priority: z.number().int().nonnegative(),
-  zone: z.string().min(1).optional(),
-  tz: z.string().optional().default("CET"),
-  max_hours: z.number().int().positive().optional(),
-  // If true, aggregate returned 15-minute slots into hourly prices.
-  aggregate_hourly: z.boolean().optional().default(false),
-}).strip();
-export type EntsoeNewConfig = z.infer<typeof entsoeNewConfigSchema>;
 
 export class EntsoeNewProvider implements MarketProvider {
   readonly key = "entsoe";

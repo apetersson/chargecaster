@@ -1,18 +1,10 @@
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
-import { z } from "zod";
 import type { RawForecastEntry } from "../../simulation/types";
-import { parseMarketForecast } from "../schemas";
+import { awattarConfigSchema, type AwattarConfig, parseMarketForecast } from "../schemas";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
 
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
 const REQUEST_TIMEOUT_MS = 15000;
-
-export const awattarConfigSchema = z.object({
-  priority: z.number().int().nonnegative(),
-  url: z.string().url().optional(),
-  max_hours: z.number().int().positive().optional(),
-}).strip();
-export type AwattarConfig = z.infer<typeof awattarConfigSchema>;
 
 export class AwattarProvider implements MarketProvider {
   readonly key = "awattar";

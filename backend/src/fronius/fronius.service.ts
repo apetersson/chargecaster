@@ -112,9 +112,9 @@ export class FroniusService {
     if (snapshot.current_mode === "charge" || snapshot.current_mode === "auto") {
       return snapshot.current_mode;
     }
-    const currentSoc = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
-    const nextSoc = typeof snapshot.next_step_soc_percent === "number" ? snapshot.next_step_soc_percent : null;
-    if (currentSoc !== null && nextSoc !== null && nextSoc > currentSoc + 0.5) {
+    const currentSoCPercent = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
+    const nextSoCPercent = typeof snapshot.next_step_soc_percent === "number" ? snapshot.next_step_soc_percent : null;
+    if (currentSoCPercent !== null && nextSoCPercent !== null && nextSoCPercent > currentSoCPercent + 0.5) {
       return "charge";
     }
     return "auto";

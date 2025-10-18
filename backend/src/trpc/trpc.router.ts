@@ -25,7 +25,7 @@ const batterySchema = z.object({
   auto_mode_floor_soc: z.number().min(0).max(100).optional(),
   max_charge_power_solar_w: z.number().nonnegative().optional(),
   max_discharge_power_w: z.number().nonnegative().optional(),
-  max_charge_soc: z.number().min(0).max(100).optional(),
+  max_charge_soc_percent: z.number().min(0).max(100).optional(),
 });
 
 const priceSchema = z.object({

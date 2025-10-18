@@ -1,6 +1,6 @@
 import type { ScatterDataPoint } from "chart.js";
 import type { ForecastEra, OracleEntry } from "../../types";
-import { TimeSlot } from "@chargecaster/domain";
+import { TimeSlot } from "@chargecaster/domain/time-slot";
 
 export type SeriesSource = "history" | "forecast" | "gap";
 
@@ -36,7 +36,7 @@ export interface LegendGroup {
   datasetIndices: number[];
 }
 
-export interface TimeRange {
+export interface TimeRangeMs {
   min: number | null;
   max: number | null;
 }

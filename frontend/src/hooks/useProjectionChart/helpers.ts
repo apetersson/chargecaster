@@ -1,8 +1,8 @@
 import type { ForecastEra, HistoryPoint, OracleEntry } from "../../types";
-import { TimeSlot } from "@chargecaster/domain";
+import { TimeSlot } from "@chargecaster/domain/time-slot";
 
 import { DEFAULT_POWER_BOUNDS, DEFAULT_PRICE_BOUNDS, DEFAULT_SLOT_DURATION_MS } from "./constants";
-import type { AxisBounds, DerivedEra, ProjectionPoint, TimeRange } from "./types";
+import type { AxisBounds, DerivedEra, ProjectionPoint, TimeRangeMs } from "./types";
 
 export const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -198,9 +198,9 @@ export const buildCombinedSeries = (
   return combined;
 };
 
-export const findTimeRange = (
+export const findTimeRangeMs = (
   ...series: ProjectionPoint[][]
-): TimeRange => {
+): TimeRangeMs => {
   let min: number | null = null;
   let max: number | null = null;
   for (const points of series) {
@@ -278,12 +278,12 @@ export const ensureBounds = (
   return {power, price};
 };
 
-export const computeTimeRange = (
+export const computeTimeRangeMs = (
   socSeries: ProjectionPoint[],
   gridSeries: ProjectionPoint[],
   solarSeries: ProjectionPoint[],
   priceSeries: ProjectionPoint[],
-): TimeRange => findTimeRange(socSeries, gridSeries, solarSeries, priceSeries);
+): TimeRangeMs => findTimeRangeMs(socSeries, gridSeries, solarSeries, priceSeries);
 
 export const attachHistoryIntervals = (
   historyPoints: ProjectionPoint[],

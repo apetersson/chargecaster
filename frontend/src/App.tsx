@@ -6,8 +6,8 @@ import MessageList from "./components/MessageList";
 import SummaryCards from "./components/SummaryCards";
 import TrajectoryTable from "./components/TrajectoryTable";
 import { trpcClient } from "./api/trpc";
-import { useProjectionChart } from "./hooks/useProjectionChart";
-import { useBacktestChart } from "./hooks/useBacktestChart";
+import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChart";
+import { useBacktestChart } from "./hooks/useBacktestChart/useBacktestChart";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary, BacktestSeriesResponse } from "./types";
 import { useIsMobile } from "./hooks/useIsMobile";
 
