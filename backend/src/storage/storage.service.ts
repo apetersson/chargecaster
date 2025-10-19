@@ -4,8 +4,8 @@ import DatabaseConstructor from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import type { HistoryPoint, SnapshotPayload } from "../simulation/types";
-import { historyPointSchema, snapshotPayloadSchema } from "../simulation/types";
+import type { HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
+import { historyPointSchema, snapshotPayloadSchema } from "@chargecaster/domain";
 
 export interface SnapshotRecord {
   id: number;

@@ -12,11 +12,12 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
     "resolveJsonModule": true,
     "paths": {
-      "@backend/trpc": ["../backend/src/trpc/trpc.router"],
-      "@backend/trpc-types": ["../backend/src/trpc/trpc.router"],
-      "@backend/simulation-types": ["../backend/src/simulation/types"]
+      "@backend/trpc": ["../backend/dist/backend/src/trpc/trpc.router.d.ts"],
+      "@backend/trpc-types": ["../backend/dist/backend/src/trpc/trpc.router.d.ts"],
+      "@chargecaster/domain": ["../packages/domain/src/index.ts"]
     },
     "isolatedModules": true,
     "noEmit": true,

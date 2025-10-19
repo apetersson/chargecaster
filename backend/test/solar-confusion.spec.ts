@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { buildSolarForecastFromTimeseries } from "../src/simulation/solar";
 import { normalizePriceSlots, simulateOptimalSchedule } from "../src/simulation/simulation.service";
-import type { SimulationConfig } from "../src/simulation/types";
+import type { SimulationConfig } from "@chargecaster/domain";
 import { parseEvccState } from "../src/config/schemas";
 
 describe("solar-confusion fixture: project grid power including solar", () => {

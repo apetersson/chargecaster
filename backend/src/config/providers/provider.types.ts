@@ -1,4 +1,4 @@
-import type { RawForecastEntry, SimulationConfig } from "../../simulation/types";
+import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
 
 export interface MarketProviderContext {
   simulationConfig: SimulationConfig;
@@ -14,4 +14,3 @@ export interface MarketProvider {
   readonly key: string;
   collect(ctx: MarketProviderContext): Promise<MarketProviderResult>;
 }
-

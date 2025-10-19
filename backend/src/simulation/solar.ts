@@ -4,7 +4,7 @@ import {
   type RawSolarTimeseriesPoint,
 } from "@chargecaster/domain";
 
-import type { RawSolarEntry } from "./types";
+import type { RawSolarEntry } from "@chargecaster/domain";
 
 export const parseTimestamp = (value: unknown): Date | null => {
   const parsed = parseTemporal(value as string | number | Date | null | undefined);

@@ -1,13 +1,13 @@
 import { useMemo } from "react";
 
-import type { ForecastEra, OracleEntry } from "../types";
+import type { ForecastEra, ForecastSourcePayload, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
 import { TimeSlot } from "@chargecaster/domain";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
   oracleEntries: OracleEntry[];
-  summary?: import("../types").SnapshotSummary | null;
+  summary?: SnapshotSummary | null;
 };
 
 const parseTime = (value: string | null | undefined): number | null => {
@@ -64,8 +64,11 @@ const findOracleForEra = (
 };
 
 const resolveCost = (era: ForecastEra, provider: string) => {
-  const match = era.sources.find((source) => source.type === "cost" && source.provider.toLowerCase() === provider);
-  if (!match || match.type !== "cost") {
+  const match = era.sources.find(
+    (source): source is Extract<ForecastSourcePayload, { type: "cost" }> =>
+      source.type === "cost" && source.provider.toLowerCase() === provider,
+  );
+  if (!match) {
     return null;
   }
   const payload = match.payload;
@@ -74,8 +77,10 @@ const resolveCost = (era: ForecastEra, provider: string) => {
 };
 
 const resolveSolar = (era: ForecastEra, slot: TimeSlot | null) => {
-  const match = era.sources.find((source) => source.type === "solar");
-  if (!match || match.type !== "solar") {
+  const match = era.sources.find(
+    (source): source is Extract<ForecastSourcePayload, { type: "solar" }> => source.type === "solar",
+  );
+  if (!match) {
     return {energyKwh: null, averageW: null};
   }
   const energyWh = match.payload.energy_wh;

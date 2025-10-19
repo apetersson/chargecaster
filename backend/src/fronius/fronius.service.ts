@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 
 import type { ConfigDocument } from "../config/schemas";
-import type { SnapshotPayload } from "../simulation/types";
+import type { SnapshotPayload } from "@chargecaster/domain";
 
 interface FroniusConfig {
   host: string;

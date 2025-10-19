@@ -1,3 +1,5 @@
+import { Scalar } from "./scalar";
+
 export class Duration {
   private readonly _milliseconds: number;
 
@@ -59,5 +61,25 @@ export class Duration {
   subtract(other: Duration): Duration {
     const result = this._milliseconds - other._milliseconds;
     return new Duration(result >= 0 ? result : 0);
+  }
+
+  scale(factor: number | Scalar): Duration {
+    const numeric = factor instanceof Scalar ? factor.value : factor;
+    return new Duration(this._milliseconds * numeric);
+  }
+
+  divide(factor: number | Scalar): Duration {
+    const numeric = factor instanceof Scalar ? factor.value : factor;
+    if (numeric === 0) {
+      throw new RangeError("Cannot divide duration by zero");
+    }
+    return new Duration(this._milliseconds / numeric);
+  }
+
+  ratioOf(other: Duration): Scalar {
+    if (other._milliseconds === 0) {
+      throw new RangeError("Cannot derive ratio against zero duration");
+    }
+    return Scalar.of(this._milliseconds / other._milliseconds);
   }
 }

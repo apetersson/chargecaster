@@ -1,9 +1,14 @@
 import { Injectable } from "@nestjs/common";
-import type { SnapshotPayload, SnapshotSummary } from "./types";
+import { EnergyPrice } from "@chargecaster/domain";
+import type { SnapshotPayload, SnapshotSummary } from "@chargecaster/domain";
 
 @Injectable()
 export class SummaryService {
   toSummary(snapshot: SnapshotPayload): SnapshotSummary {
+    const snapshotPrice = typeof snapshot.price_snapshot_eur_per_kwh === "number"
+      ? EnergyPrice.fromEurPerKwh(snapshot.price_snapshot_eur_per_kwh)
+      : null;
+
     return {
       timestamp: snapshot.timestamp,
       interval_seconds: snapshot.interval_seconds,
@@ -15,9 +20,7 @@ export class SummaryService {
       recommended_final_soc_percent: snapshot.recommended_final_soc_percent,
       current_mode: snapshot.current_mode ?? undefined,
       price_snapshot_ct_per_kwh: snapshot.price_snapshot_ct_per_kwh ??
-        (typeof snapshot.price_snapshot_eur_per_kwh === "number"
-          ? snapshot.price_snapshot_eur_per_kwh * 100
-          : null),
+        (snapshotPrice ? snapshotPrice.ctPerKwh : null),
       price_snapshot_eur_per_kwh: snapshot.price_snapshot_eur_per_kwh,
       projected_cost_eur: snapshot.projected_cost_eur,
       baseline_cost_eur: snapshot.baseline_cost_eur,

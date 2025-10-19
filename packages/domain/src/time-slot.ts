@@ -1,4 +1,5 @@
-import { Duration } from "./duration.js";
+import { Duration } from "./duration";
+import { Percentage } from "./percentage";
 
 export class TimeSlot {
   private readonly _start: Date;
@@ -26,6 +27,10 @@ export class TimeSlot {
     return new TimeSlot(new Date(start), new Date(end));
   }
 
+  static fromStartAndDuration(start: Date, duration: Duration): TimeSlot {
+    return new TimeSlot(start, new Date(start.getTime() + duration.milliseconds));
+  }
+
   get start(): Date {
     return new Date(this._start.getTime());
   }
@@ -41,6 +46,24 @@ export class TimeSlot {
   midpoint(): Date {
     const durationMs = this.duration.milliseconds;
     return new Date(this._start.getTime() + durationMs / 2);
+  }
+
+  overlapDuration(other: TimeSlot): Duration {
+    const start = Math.max(this._start.getTime(), other._start.getTime());
+    const end = Math.min(this._end.getTime(), other._end.getTime());
+    if (end <= start) {
+      return Duration.zero();
+    }
+    return Duration.fromMilliseconds(end - start);
+  }
+
+  overlapPercentage(other: TimeSlot): Percentage {
+    const overlap = this.overlapDuration(other);
+    const baseMs = this.duration.milliseconds;
+    if (baseMs === 0) {
+      return Percentage.zero();
+    }
+    return Percentage.fromRatio(overlap.milliseconds / baseMs);
   }
 
   toJSON(): { start: string; end: string } {

@@ -2,7 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { initTRPC, type AnyProcedure, type AnyRouter, type ProcedureType } from "@trpc/server";
 import { z } from "zod";
 
-import type { RawForecastEntry, SimulationConfig } from "../simulation/types";
+import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
 import { SimulationService } from "../simulation/simulation.service";
 import { ForecastService } from "../simulation/forecast.service";
 import { HistoryService } from "../simulation/history.service";
@@ -11,7 +11,7 @@ import { OracleService } from "../simulation/oracle.service";
 import { BacktestSavingsService } from "../simulation/backtest.service";
 import { ConfigFileService } from "../config/config-file.service";
 import { SimulationConfigFactory } from "../config/simulation-config.factory";
-import type { BacktestSeriesResponse } from "../simulation/types";
+import type { BacktestSeriesResponse } from "@chargecaster/domain";
 
 interface TrpcContext {
   simulationService?: SimulationService;
