@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { ForecastEra, ForecastResponse, PriceSlot, RawForecastEntry } from "./types";
+import type { ForecastEra, ForecastResponse, PriceSlot, RawForecastEntry } from "@chargecaster/domain";
 import { normalizePriceSlots } from "./simulation.service";
 
 @Injectable()

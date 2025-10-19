@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 
-import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "../simulation/types";
+import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
 import { normalizePriceSlots } from "../simulation/simulation.service";
 import { parseTimestamp } from "../simulation/solar";
 import { EnergyPrice, TimeSlot } from "@chargecaster/domain";
@@ -120,7 +120,7 @@ export class ForecastAssemblyService {
         start: value.slot.startIso ?? undefined,
         end: value.slot.endIso ?? undefined,
         duration_hours: value.slot.durationHours,
-        sources: value.sources.map((source) =>
+        sources: value.sources.map((source: CostSource | SolarSource) =>
           source.type === "cost"
             ? {
                 provider: source.provider,
@@ -156,7 +156,7 @@ export class ForecastAssemblyService {
   }
 
   private addSource(entry: EraEntry, source: CostSource | SolarSource): void {
-    const exists = entry.sources.some((item) => item.provider === source.provider && item.type === source.type);
+    const exists = entry.sources.some((item: CostSource | SolarSource) => item.provider === source.provider && item.type === source.type);
     if (!exists) {
       if (source.type === "cost") {
         entry.sources.push({

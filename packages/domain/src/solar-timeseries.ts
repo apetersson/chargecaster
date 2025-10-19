@@ -1,7 +1,7 @@
-import { Duration } from "./duration.js";
-import { Energy } from "./energy.js";
-import { Power } from "./power.js";
-import { TimeSlot } from "./time-slot.js";
+import { Duration } from "./duration";
+import { Energy } from "./energy";
+import { Power } from "./power";
+import { TimeSlot } from "./time-slot";
 
 export interface RawSolarTimeseriesPoint {
   ts?: string | number | Date | null;
@@ -57,7 +57,7 @@ export function normaliseSolarTimeseries(points: RawSolarTimeseriesPoint[]): Nor
     return samples;
   }
 
-  let previousDurationMs: number | null = null;
+    let previousDurationMs: number | null = null;
 
   for (let index = 0; index < points.length; index += 1) {
     const current = points[index] ?? {};

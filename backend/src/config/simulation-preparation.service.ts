@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
-import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "../simulation/types";
+import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
 import type { ConfigDocument } from "./schemas";
 import { parseTimestamp } from "../simulation/solar";
 import { SimulationConfigFactory } from "./simulation-config.factory";

@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 
-import type { SimulationConfig } from "../simulation/types";
+import type { SimulationConfig } from "@chargecaster/domain";
 import type { ConfigDocument } from "./schemas";
 
 @Injectable()

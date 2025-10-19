@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { HistoryPoint, HistoryResponse } from "./types";
+import type { HistoryPoint, HistoryResponse } from "@chargecaster/domain";
 import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
 

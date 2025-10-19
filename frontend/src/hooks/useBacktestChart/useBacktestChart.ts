@@ -16,7 +16,7 @@ interface BuildResult {
 }
 
 function buildDatasets(series: BacktestSeriesResponse): BuildResult {
-  const points: BacktestSeriesPoint[] = Array.isArray(series?.points) ? series!.points : [];
+  const points: BacktestSeriesPoint[] = series.points;
 
   const socSmart: ProjectionPoint[] = [];
   const socDumb: ProjectionPoint[] = [];

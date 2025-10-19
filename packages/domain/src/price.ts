@@ -1,3 +1,5 @@
+import { Energy } from "./energy";
+
 export class EnergyPrice {
   private readonly eurPerKwhValue: number;
 
@@ -58,5 +60,13 @@ export class EnergyPrice {
 
   withAdditionalFee(eurPerKwh: number): EnergyPrice {
     return new EnergyPrice(this.eurPerKwhValue + eurPerKwh);
+  }
+
+  costFor(energy: Energy): number {
+    return energy.kilowattHours * this.eurPerKwhValue;
+  }
+
+  withMultiplier(factor: number): EnergyPrice {
+    return new EnergyPrice(this.eurPerKwhValue * factor);
   }
 }

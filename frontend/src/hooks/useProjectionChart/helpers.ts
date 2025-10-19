@@ -1,4 +1,9 @@
-import type { ForecastEra, HistoryPoint, OracleEntry } from "../../types";
+import type {
+  ForecastEra,
+  ForecastSourcePayload,
+  HistoryPoint,
+  OracleEntry,
+} from "../../types";
 import { TimeSlot } from "@chargecaster/domain";
 
 import { DEFAULT_POWER_BOUNDS, DEFAULT_PRICE_BOUNDS, DEFAULT_SLOT_DURATION_MS } from "./constants";
@@ -114,16 +119,20 @@ export const derivePowerFromEnergy = (
 };
 
 export const extractCostPrice = (era: ForecastEra): number | null => {
-  const costSource = era.sources.find((source) => source.type === "cost");
-  if (!costSource || costSource.type !== "cost") {
+  const costSource = era.sources.find(
+    (source): source is Extract<ForecastSourcePayload, { type: "cost" }> => source.type === "cost",
+  );
+  if (!costSource) {
     return null;
   }
   return costSource.payload.price_with_fee_ct_per_kwh ?? costSource.payload.price_ct_per_kwh ?? null;
 };
 
 export const extractSolarAverageWatts = (era: ForecastEra, slot: TimeSlot | null): number | null => {
-  const solarSource = era.sources.find((source) => source.type === "solar");
-  if (!solarSource || solarSource.type !== "solar") {
+  const solarSource = era.sources.find(
+    (source): source is Extract<ForecastSourcePayload, { type: "solar" }> => source.type === "solar",
+  );
+  if (!solarSource) {
     return null;
   }
   const energyWh = solarSource.payload.energy_wh;

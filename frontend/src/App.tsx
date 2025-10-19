@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 
-
 import HistoryTable from "./components/HistoryTable";
 import MessageList from "./components/MessageList";
 import SummaryCards from "./components/SummaryCards";
@@ -8,7 +7,13 @@ import TrajectoryTable from "./components/TrajectoryTable";
 import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChart";
 import { useBacktestChart } from "./hooks/useBacktestChart/useBacktestChart";
-import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary, BacktestSeriesResponse } from "./types";
+import type {
+  ForecastEra,
+  HistoryPoint,
+  OracleEntry,
+  BacktestSeriesResponse,
+  DashboardOutputs,
+} from "./types";
 import { useIsMobile } from "./hooks/useIsMobile";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -31,7 +36,7 @@ const getErrorMessage = (error: unknown): string => {
 
 
 const App = () => {
-  const [summary, setSummary] = useState<SnapshotSummary | null>(null);
+  const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastEra[]>([]);
   const [oracleEntries, setOracleEntries] = useState<OracleEntry[]>([]);
@@ -52,7 +57,7 @@ const App = () => {
   const fetchBacktest = useCallback(async (): Promise<void> => {
     try {
       const data = await trpcClient.dashboard.backtest24h.query();
-      setBacktest(data ?? null);
+      setBacktest(data);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -62,22 +67,31 @@ const App = () => {
     const execute = async () => {
       try {
         setLoading(true);
-        const [summaryData, historyData, forecastData, oracleData, backtestData] = await Promise.all([
+        const [
+          summaryData,
+          historyData,
+          forecastData,
+          oracleData,
+          backtestData,
+        ] = await Promise.all([
           trpcClient.dashboard.summary.query(),
           trpcClient.dashboard.history.query(),
           trpcClient.dashboard.forecast.query(),
           trpcClient.dashboard.oracle.query(),
           trpcClient.dashboard.backtest24h.query(),
-        ]);
+        ]) as [
+          DashboardOutputs["summary"],
+          DashboardOutputs["history"],
+          DashboardOutputs["forecast"],
+          DashboardOutputs["oracle"],
+          DashboardOutputs["backtest24h"],
+        ];
 
         setSummary(summaryData);
-
-        const entries = Array.isArray(historyData.entries) ? historyData.entries : [];
-        setHistory(entries);
-
-        setForecast(Array.isArray(forecastData.eras) ? forecastData.eras : []);
-        setOracleEntries(Array.isArray(oracleData.entries) ? oracleData.entries : []);
-        setBacktest(backtestData ?? null);
+        setHistory(historyData.entries);
+        setForecast(forecastData.eras);
+        setOracleEntries(oracleData.entries);
+        setBacktest(backtestData);
         setError(null);
       } catch (err) {
         setError(getErrorMessage(err));

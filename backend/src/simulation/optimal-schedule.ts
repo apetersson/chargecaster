@@ -1,4 +1,4 @@
-import type { OracleEntry, PriceSlot, SimulationConfig } from "./types";
+import type { OracleEntry, PriceSlot, SimulationConfig } from "@chargecaster/domain";
 
 const SOC_STEPS = 100;
 const EPSILON = 1e-9;

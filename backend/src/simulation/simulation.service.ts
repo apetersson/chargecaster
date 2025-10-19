@@ -9,16 +9,16 @@ import type {
   RawSolarEntry,
   SimulationConfig,
   SnapshotPayload,
-} from "./types";
+} from "@chargecaster/domain";
 import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
 import { BacktestSavingsService } from "./backtest.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { parseEvccState } from "../config/schemas";
-import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
+import { Duration, Energy, EnergyPrice, Percentage, TimeSlot, TariffSlot } from "@chargecaster/domain";
 import { clampRatio, gridFee, simulateOptimalSchedule } from "./optimal-schedule";
 
-const SLOT_DURATION_MS = 3_600_000;
+const DEFAULT_SLOT_DURATION = Duration.fromHours(1);
 
 export interface SimulationInput {
   config: SimulationConfig;
@@ -126,29 +126,27 @@ export class SimulationService {
     // Distribute solar energy into each price slot proportionally to the time overlap.
     // This fixes the 1h solar vs 15m tariff slot mismatch (avoids 4x inflation).
     // Bucket the solar forecast onto the pricing cadence so the optimiser sees consistent inputs
-    const solarGenerationPerSlotKwh = slots.map((priceSlot) => {
-      const eraStart = priceSlot.start.getTime();
-      const eraEnd = priceSlot.end.getTime();
-      let energyKwh = 0;
-      for (const solarSlot of solarSlots) {
-        const solarStart = solarSlot.start.getTime();
-        const solarEnd = solarSlot.end.getTime();
-        const overlapMs = Math.max(0, Math.min(eraEnd, solarEnd) - Math.max(eraStart, solarStart));
-        if (overlapMs <= 0) continue;
-        const solarMs = Math.max(1, solarEnd - solarStart);
-        const fraction = overlapMs / solarMs;
-        energyKwh += Math.max(0, solarSlot.energy_kwh) * fraction;
-      }
-      return energyKwh;
+    const solarEnergyPerSlot = slots.map((priceSlot) => {
+      const priceSlotWindow = TimeSlot.fromDates(priceSlot.start, priceSlot.end);
+      return solarSlots.reduce((total, sample) => {
+        const overlap = priceSlotWindow.overlapDuration(sample.slot);
+        if (overlap.milliseconds === 0) {
+          return total;
+        }
+        const fraction = overlap.ratioOf(sample.slot.duration);
+        return total.add(sample.energy.scale(fraction));
+      }, Energy.zero());
     });
 
-    const directUseRatio = clampRatio(input.config.solar?.direct_use_ratio ?? 0);
+    const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
+
+    const directUseRatio = Percentage.fromRatio(clampRatio(input.config.solar?.direct_use_ratio ?? 0));
     const feedInTariff = Math.max(0, Number(input.config.price?.feed_in_tariff_eur_per_kwh ?? 0));
 
     // Run the DP-based optimiser with the caller's grid and export preferences
     const result = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
-      pvDirectUseRatio: directUseRatio,
+      pvDirectUseRatio: directUseRatio.ratio,
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic?.allow_battery_export ?? true,
     });
@@ -179,12 +177,14 @@ export class SimulationService {
         .join("\n");
       this.logger.log(`Era strategies: \n${strategyLog}`);
     }
-    const fallbackPriceEur = slots.length
-      ? slots[0].price + gridFee(input.config)
+    const fallbackPrice = slots.length
+      ? EnergyPrice.fromEurPerKwh(slots[0].price).withAdditionalFee(gridFee(input.config))
       : null;
-    const priceSnapshotEur =
-      input.priceSnapshotEurPerKwh ?? (fallbackPriceEur ?? null);
-    const priceSnapshotCt = priceSnapshotEur !== null ? priceSnapshotEur * 100 : null;
+    const priceSnapshot = typeof input.priceSnapshotEurPerKwh === "number"
+      ? EnergyPrice.fromEurPerKwh(input.priceSnapshotEurPerKwh)
+      : fallbackPrice;
+    const priceSnapshotEur = priceSnapshot?.eurPerKwh ?? null;
+    const priceSnapshotCt = priceSnapshot?.ctPerKwh ?? null;
     const warnings = Array.isArray(input.warnings) ? [...input.warnings] : [];
     const errors = Array.isArray(input.errors) ? [...input.errors] : [];
     const fallbackEras = buildErasFromSlots(slots);
@@ -192,7 +192,7 @@ export class SimulationService {
     // Run a second pass that mimics "auto" mode (no active grid charging) for comparison
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
-      pvDirectUseRatio: directUseRatio,
+      pvDirectUseRatio: directUseRatio.ratio,
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic?.allow_battery_export ?? true,
       allowGridChargeFromGrid: false,
@@ -202,7 +202,7 @@ export class SimulationService {
       timestamp: result.timestamp,
       interval_seconds: input.config.logic?.interval_seconds ?? null,
       house_load_w: input.config.logic?.house_load_w ?? null,
-      solar_direct_use_ratio: directUseRatio,
+      solar_direct_use_ratio: directUseRatio.ratio,
       current_soc_percent: result.initial_soc_percent,
       next_step_soc_percent: result.next_step_soc_percent,
       recommended_soc_percent: result.recommended_soc_percent,
@@ -244,17 +244,18 @@ export class SimulationService {
       historyEntry.grid_power_w = observedGridPower;
     }
 
-    const firstSolarKwh = solarGenerationPerSlotKwh[0];
+    const firstSolarEnergy = solarEnergyPerSlot[0] ?? Energy.zero();
+    const firstSolarWh = firstSolarEnergy.wattHours;
     const firstSlot = slots[0];
     const observedSolarPower = input.observations?.solarPowerW;
-    if (Number.isFinite(firstSolarKwh) && firstSlot) {
-      const durationHours = firstSlot.durationHours ?? 0;
-      if (firstSolarKwh > 0) {
-        historyEntry.solar_energy_wh = firstSolarKwh * 1000;
-        if (durationHours > 0) {
-          historyEntry.solar_power_w = (firstSolarKwh / durationHours) * 1000;
+    if (firstSlot) {
+      if (firstSolarWh > 0) {
+        historyEntry.solar_energy_wh = firstSolarWh;
+        const slotDuration = firstSlot.duration;
+        if (slotDuration.hours > 0) {
+          historyEntry.solar_power_w = firstSolarEnergy.per(slotDuration).watts;
         }
-      } else if (firstSolarKwh === 0) {
+      } else if (firstSolarWh === 0) {
         historyEntry.solar_energy_wh = historyEntry.solar_energy_wh ?? 0;
         historyEntry.solar_power_w = historyEntry.solar_power_w ?? 0;
       }
@@ -262,8 +263,8 @@ export class SimulationService {
     if (typeof observedSolarPower === "number" && Number.isFinite(observedSolarPower)) {
       historyEntry.solar_power_w = observedSolarPower;
       if (
-        historyEntry.solar_energy_wh === null && Number.isFinite(firstSolarKwh) &&
-        firstSolarKwh === 0
+        historyEntry.solar_energy_wh === null &&
+        firstSolarWh === 0
       ) {
         historyEntry.solar_energy_wh = 0;
       }
@@ -395,19 +396,24 @@ function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
       continue;
     }
 
-    let end = parseTimestamp(entry.end ?? entry.to);
-    if (!end) {
-      const durationHours = Number(entry.duration_hours ?? entry.durationHours ?? 1);
-      const durationMinutes = Number(entry.duration_minutes ?? entry.durationMinutes ?? 0);
-      if (!Number.isNaN(durationHours) && durationHours > 0) {
-        end = new Date(start.getTime() + durationHours * 3_600_000);
-      } else if (!Number.isNaN(durationMinutes) && durationMinutes > 0) {
-        end = new Date(start.getTime() + durationMinutes * 60_000);
-      } else {
-        end = new Date(start.getTime() + 3_600_000);
-      }
+    const explicitEnd = parseTimestamp(entry.end ?? entry.to);
+    const durationHours = Number(entry.duration_hours ?? entry.durationHours ?? NaN);
+    const durationMinutes = Number(entry.duration_minutes ?? entry.durationMinutes ?? NaN);
+
+    let slotDuration: Duration | null = null;
+    if (explicitEnd && explicitEnd.getTime() > start.getTime()) {
+      const between = Duration.between(start, explicitEnd);
+      slotDuration = between.milliseconds > 0 ? between : null;
     }
-    if (end.getTime() <= start.getTime()) {
+    if (!slotDuration && Number.isFinite(durationHours) && durationHours > 0) {
+      slotDuration = Duration.fromHours(durationHours);
+    }
+    if (!slotDuration && Number.isFinite(durationMinutes) && durationMinutes > 0) {
+      slotDuration = Duration.fromMinutes(durationMinutes);
+    }
+    slotDuration ??= DEFAULT_SLOT_DURATION;
+
+    if (slotDuration.milliseconds === 0) {
       continue;
     }
 
@@ -420,7 +426,8 @@ function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
 
     const rawEraId = entry.era_id ?? entry.eraId;
     const eraId = typeof rawEraId === "string" && rawEraId.length > 0 ? rawEraId : undefined;
-    const slot = TariffSlot.fromDates(start, end, energyPrice, eraId);
+    const slotTime = TimeSlot.fromStartAndDuration(start, slotDuration);
+    const slot = TariffSlot.fromTimeSlot(slotTime, energyPrice, eraId);
     const key = slot.start.getTime();
     const existing = slotsByStart.get(key);
     if (!existing || slot.price < existing.price) {
@@ -431,9 +438,8 @@ function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
 }
 
 interface SolarSlot {
-  start: Date;
-  end: Date;
-  energy_kwh: number;
+  slot: TimeSlot;
+  energy: Energy;
 }
 
 function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
@@ -444,15 +450,30 @@ function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
     if (!start) {
       continue;
     }
-    const end = parseTimestamp(entry.end) ?? new Date(start.getTime() + SLOT_DURATION_MS);
-    const energy = Number(entry.energy_kwh ?? 0);
+    const end = parseTimestamp(entry.end);
+    const slotTime = end && end.getTime() > start.getTime()
+      ? TimeSlot.fromDates(start, end)
+      : TimeSlot.fromStartAndDuration(start, DEFAULT_SLOT_DURATION);
+    const rawEnergyKwh = (() => {
+      if (typeof entry.energy_kwh === "number") {
+        return entry.energy_kwh;
+      }
+      if (typeof entry.energy_wh === "number") {
+        return entry.energy_wh / 1000;
+      }
+      return null;
+    })();
+    if (rawEnergyKwh == null) {
+      continue;
+    }
+    const energy = Number(rawEnergyKwh);
     if (!Number.isFinite(energy) || energy <= 0) {
       continue;
     }
-    slots.push({start, end, energy_kwh: energy});
+    slots.push({slot: slotTime, energy: Energy.fromKilowattHours(energy)});
   }
 
-  return slots.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return slots.sort((a, b) => a.slot.start.getTime() - b.slot.start.getTime());
 }
 
 function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {

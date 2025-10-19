@@ -1,5 +1,5 @@
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
-import type { RawForecastEntry } from "../../simulation/types";
+import type { RawForecastEntry } from "@chargecaster/domain";
 import type { FromEvccConfig } from "../schemas";
 import { derivePriceSnapshotFromForecast } from "./provider.utils";
 

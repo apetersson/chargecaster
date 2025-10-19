@@ -8,8 +8,11 @@ import {
   optionalTimestampSchema,
   type UnknownRecord,
   unknownRecordSchema,
-} from "../common/parsing";
-import { RawForecastEntry, rawForecastEntrySchema, RawSolarEntry, rawSolarEntrySchema, } from "../simulation/types";
+  RawForecastEntry,
+  rawForecastEntrySchema,
+  RawSolarEntry,
+  rawSolarEntrySchema,
+} from "@chargecaster/domain";
 
 export const awattarConfigSchema = z.object({
   priority: z.number().int().nonnegative(),

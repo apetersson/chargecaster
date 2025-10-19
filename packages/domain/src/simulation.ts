@@ -6,8 +6,8 @@ import {
   optionalStringSchema,
   optionalTimestampSchema,
   requiredTimestampSchema,
-} from "../common/parsing";
-import type { TariffSlot } from "@chargecaster/domain";
+} from "./parsing";
+import { TariffSlot } from "./tariff-slot";
 
 export const rawForecastEntrySchema = z
   .object({
@@ -202,32 +202,25 @@ export const forecastSlotInputSchema = z.object({
   era_id: optionalStringSchema.optional(),
 });
 
-
 export const solarSlotInputSchema = z.object({
   start: requiredTimestampSchema,
   end: optionalTimestampSchema.optional(),
   energy_kwh: nullableNumberSchema,
 });
 
-
 export const batteryConfigSchema = z.object({
   capacity_kwh: nullableNumberSchema,
   max_charge_power_w: nullableNumberSchema,
   auto_mode_floor_soc: nullableNumberSchema.optional(),
   max_charge_power_solar_w: nullableNumberSchema.optional(),
-  // Optional discharge power cap (W). If 0, battery cannot discharge at all.
   max_discharge_power_w: nullableNumberSchema.optional(),
-  // Optional upper bound for charging SOC (percent 0..100). If set, the optimizer
-  // will not target SOC above this limit to avoid 100% calibration cycles.
   max_charge_soc_percent: nullableNumberSchema.optional(),
 });
-
 
 export const priceConfigSchema = z.object({
   grid_fee_eur_per_kwh: nullableNumberSchema.optional(),
   feed_in_tariff_eur_per_kwh: nullableNumberSchema.optional(),
 });
-
 
 export const logicConfigSchema = z.object({
   interval_seconds: nullableNumberSchema.optional(),
@@ -236,11 +229,9 @@ export const logicConfigSchema = z.object({
   allow_battery_export: optionalBooleanSchema.optional(),
 });
 
-
 export const solarConfigSchema = z.object({
   direct_use_ratio: nullableNumberSchema.optional(),
 });
-
 
 export const simulationConfigSchema = z.object({
   battery: batteryConfigSchema,
@@ -253,8 +244,6 @@ export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
 
 export type PriceSlot = TariffSlot;
 
-// Backtest 24h series response for UI graphing
-// Each point represents one interval between two history samples inside the 24h window.
 export const backtestSeriesPointSchema = z.object({
   start: requiredTimestampSchema,
   end: requiredTimestampSchema,

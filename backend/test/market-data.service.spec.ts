@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { MarketDataService } from "../src/config/market-data.service";
-import type { SimulationConfig } from "../src/simulation/types";
+import type { SimulationConfig } from "@chargecaster/domain";
 
 const fixturePath = join(process.cwd(), "fixtures", "awattar-market-sample.json");
 

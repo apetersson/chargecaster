@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
 
 import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
-import type { PriceSlot, SimulationConfig } from "../src/simulation/types";
+import type { PriceSlot, SimulationConfig } from "@chargecaster/domain";
 
 function createSlot(hour: number, price: number): PriceSlot {
   const start = new Date(Date.UTC(2025, 0, 1, hour, 0, 0));

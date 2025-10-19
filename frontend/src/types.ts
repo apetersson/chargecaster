@@ -1,25 +1,18 @@
-import type {
-  ForecastEra,
-  ForecastResponse,
-  ForecastSourcePayload,
-  HistoryPoint,
-  HistoryResponse,
-  OracleEntry,
-  OracleResponse,
-  SnapshotSummary as BackendSnapshotSummary,
-  BacktestSeriesResponse,
-  BacktestSeriesPoint,
-} from "@backend/simulation-types";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@backend/trpc";
 
-export type SnapshotSummary = BackendSnapshotSummary;
 export type {
   HistoryPoint,
   HistoryResponse,
   ForecastEra,
   ForecastResponse,
+  ForecastSourcePayload,
   OracleEntry,
   OracleResponse,
-  ForecastSourcePayload,
+  SnapshotSummary,
   BacktestSeriesResponse,
   BacktestSeriesPoint,
-};
+} from "@chargecaster/domain";
+
+export type RouterOutputs = inferRouterOutputs<AppRouter>;
+export type DashboardOutputs = RouterOutputs["dashboard"];

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 
-import type { RawForecastEntry, RawSolarEntry } from "../simulation/types";
+import type { RawForecastEntry, RawSolarEntry } from "@chargecaster/domain";
 import { buildSolarForecastFromTimeseries } from "../simulation/solar";
 import { parseEvccState } from "./schemas";
 import type { ConfigDocument } from "./schemas";

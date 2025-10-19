@@ -1,5 +1,5 @@
-import type { HistoryPoint, HistoryRawEntry } from "./types";
-import { historyPointSchema } from "./types";
+import type { HistoryPoint, HistoryRawEntry } from "@chargecaster/domain";
+import { historyPointSchema } from "@chargecaster/domain";
 
 function toHistoryPoint(entry: HistoryPoint | HistoryRawEntry): HistoryPoint {
   return historyPointSchema.parse(entry as HistoryRawEntry);

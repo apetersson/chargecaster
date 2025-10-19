@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 
-import type { RawForecastEntry, SimulationConfig } from "../simulation/types";
+import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
 import { parseTimestamp } from "../simulation/solar";
 import type { ConfigDocument } from "./schemas";
 import { AwattarProvider } from "./providers/awattar.provider";

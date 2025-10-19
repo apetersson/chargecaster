@@ -1,6 +1,6 @@
-import { Duration } from "./duration.js";
-import { EnergyPrice } from "./price.js";
-import { TimeSlot } from "./time-slot.js";
+import { Duration } from "./duration";
+import { EnergyPrice } from "./price";
+import { TimeSlot } from "./time-slot";
 
 export class TariffSlot {
   private readonly slot: TimeSlot;
