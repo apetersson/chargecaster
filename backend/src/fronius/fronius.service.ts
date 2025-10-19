@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 
 import type { ConfigDocument } from "../config/schemas";
+import { Percentage } from "@chargecaster/domain";
 import type { SnapshotPayload } from "@chargecaster/domain";
 
 interface FroniusConfig {
@@ -30,7 +31,7 @@ type FroniusMode = "charge" | "auto" | "hold";
 
 export class FroniusService {
   private readonly logger = new Logger(FroniusService.name);
-  private lastAppliedTarget: number | null = null;
+  private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
 
   async applyOptimization(config: ConfigDocument, snapshot: SnapshotPayload): Promise<FroniusApplyResult> {
@@ -64,13 +65,11 @@ export class FroniusService {
       }
 
       this.logger.log(
-        `Issuing Fronius command ${JSON.stringify(payload)} (mode=${desiredMode}) to ${url}`,
+        `Issuing Fronius command ${JSON.stringify(payload.body)} (mode=${desiredMode}) to ${url}`,
       );
-      await this.requestJson("POST", url, froniusConfig, payload);
+      await this.requestJson("POST", url, froniusConfig, payload.body);
       this.lastAppliedMode = desiredMode;
-      if (typeof payload.BAT_M0_SOC_MIN === "number") {
-        this.lastAppliedTarget = payload.BAT_M0_SOC_MIN;
-      }
+      this.lastAppliedTarget = payload.target;
       this.logger.log("Fronius command applied successfully.");
       await this.logoutFroniusSession(froniusConfig);
       return {errorMessage: null};
@@ -121,12 +120,12 @@ export class FroniusService {
     if (snapshot.current_mode === "charge" || snapshot.current_mode === "auto" || snapshot.current_mode === "hold") {
       return snapshot.current_mode;
     }
-    const currentSoCPercent = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
-    const nextSoCPercent = typeof snapshot.next_step_soc_percent === "number" ? snapshot.next_step_soc_percent : null;
-    if (currentSoCPercent !== null && nextSoCPercent !== null && nextSoCPercent > currentSoCPercent + 0.5) {
+    const currentSoc = this.parsePercentage(snapshot.current_soc_percent);
+    const nextSoc = this.parsePercentage(snapshot.next_step_soc_percent);
+    if (currentSoc && nextSoc && nextSoc.percent > currentSoc.percent + 0.5) {
       return "charge";
     }
-    if (currentSoCPercent !== null && nextSoCPercent !== null && Math.abs(nextSoCPercent - currentSoCPercent) <= 0.5) {
+    if (currentSoc && nextSoc && Math.abs(nextSoc.percent - currentSoc.percent) <= 0.5) {
       return "hold";
     }
     return "auto";
@@ -189,70 +188,85 @@ export class FroniusService {
     config: ConfigDocument,
     snapshot: SnapshotPayload,
     mode: FroniusMode,
-  ): Record<string, unknown> | null {
-    const currentSocRaw = typeof snapshot.current_soc_percent === "number" ? snapshot.current_soc_percent : null;
+  ): { body: Record<string, unknown>; target: Percentage | null } | null {
+    const currentSoc = this.parsePercentage(snapshot.current_soc_percent);
 
     const maxCharge = this.resolveMaxCharge(config);
 
     if (mode === "charge") {
-      const target = maxCharge ?? 100;
+      const target = maxCharge ?? Percentage.full();
       return {
-        BAT_M0_SOC_MIN: this.clampSoc(target),
-        BAT_M0_SOC_MODE: "manual",
+        body: this.serializeManualTarget(target),
+        target,
       };
     }
 
     if (mode === "hold") {
       const floor = this.resolveAutoFloor(config, snapshot);
-      const fallbackTarget = currentSocRaw ?? this.lastAppliedTarget ?? (maxCharge ?? 100);
-      let target = Math.max(floor, fallbackTarget);
-      if (maxCharge !== null && maxCharge !== undefined) {
-        target = Math.min(target, maxCharge);
+      let target = currentSoc ?? this.lastAppliedTarget ?? maxCharge ?? Percentage.full();
+      if (target.ratio < floor.ratio) {
+        target = floor;
       }
-      if (!Number.isFinite(target)) {
-        return null;
+      if (maxCharge && target.ratio > maxCharge.ratio) {
+        target = maxCharge;
       }
       return {
-        BAT_M0_SOC_MIN: this.clampSoc(target),
-        BAT_M0_SOC_MODE: "manual",
+        body: this.serializeManualTarget(target),
+        target,
       };
     }
 
     const floorSoc = this.resolveAutoFloor(config, snapshot);
-    return {BAT_M0_SOC_MIN: floorSoc, BAT_M0_SOC_MODE: "auto"};
+    return {
+      body: {
+        BAT_M0_SOC_MIN: this.toPercentInteger(floorSoc),
+        BAT_M0_SOC_MODE: "auto",
+      },
+      target: floorSoc,
+    };
   }
 
-  private resolveAutoFloor(config: ConfigDocument, snapshot: SnapshotPayload): number {
-    const configFloor = config.battery?.auto_mode_floor_soc ?? null;
-    if (typeof configFloor === "number" && Number.isFinite(configFloor)) {
-      return this.clampSoc(configFloor);
+  private resolveAutoFloor(config: ConfigDocument, snapshot: SnapshotPayload): Percentage {
+    const configFloor = this.parsePercentage(config.battery?.auto_mode_floor_soc ?? null);
+    if (configFloor) {
+      return configFloor;
     }
-    const snapshotNext = snapshot.next_step_soc_percent;
-    if (typeof snapshotNext === "number" && Number.isFinite(snapshotNext)) {
-      return this.clampSoc(Math.max(0, Math.min(snapshotNext, 100)));
+    const snapshotNext = this.parsePercentage(snapshot.next_step_soc_percent);
+    if (snapshotNext) {
+      return snapshotNext;
     }
-    return 5;
+    return Percentage.fromPercent(5);
   }
 
-  private resolveMaxCharge(config: ConfigDocument): number | null {
-    const maxCharge = config.battery?.max_charge_soc_percent;
-    if (typeof maxCharge !== "number" || !Number.isFinite(maxCharge)) {
-      return null;
-    }
-    return this.clampSoc(maxCharge);
+  private resolveMaxCharge(config: ConfigDocument): Percentage | null {
+    return this.parsePercentage(config.battery?.max_charge_soc_percent ?? null);
   }
 
-  private clampSoc(value: number): number {
-    if (!Number.isFinite(value)) {
-      return 5;
+  private serializeManualTarget(target: Percentage): Record<string, unknown> {
+    return {
+      BAT_M0_SOC_MIN: this.toPercentInteger(target),
+      BAT_M0_SOC_MODE: "manual",
+    };
+  }
+
+  private parsePercentage(value: unknown): Percentage | null {
+    if (value instanceof Percentage) {
+      return value;
     }
-    if (value < 0) {
-      return 0;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return Percentage.fromPercent(value);
     }
-    if (value > 100) {
-      return 100;
+    if (typeof value === "string" && value.trim().length > 0) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        return Percentage.fromPercent(numeric);
+      }
     }
-    return Math.round(value);
+    return null;
+  }
+
+  private toPercentInteger(value: Percentage): number {
+    return Math.round(value.percent);
   }
 
   private buildUrl(host: string, path: string): string {
