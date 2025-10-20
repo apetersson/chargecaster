@@ -20,11 +20,11 @@ const priceBarPlugin: Plugin = {
   id: "price-bar-plugin",
   beforeDatasetsDraw: function (chart) {
     const ctx = chart.ctx;
-    const xScale = chart.scales.x;
-    const yScale = chart.scales.price;
-    if (!xScale || !yScale) {
+    if (!("x" in chart.scales) || !("price" in chart.scales)) {
       return;
     }
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.price;
 
     chart.data.datasets.forEach((dataset, datasetIndex) => {
       if (dataset.label !== "Tariff") {

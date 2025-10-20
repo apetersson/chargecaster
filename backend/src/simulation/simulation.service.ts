@@ -113,23 +113,23 @@ export class SimulationService {
   // Dedicated services now handle these responsibilities (SummaryService, HistoryService, ForecastService, OracleService).
 
   runSimulation(input: SimulationInput): SnapshotPayload {
-    if (!this.storageRef) {
-      throw new Error("Storage service not initialised");
-    }
     // Normalise live telemetry so downstream optimisers always receive a concrete SoC
     // Ensure the optimiser always receives a deterministic SoC input
-    const resolvedSoCPercent = this.resolveLiveSoCPercent(input.liveState?.battery_soc);
+    const resolvedSoCPercent = this.resolveLiveSoCPercent(input.liveState.battery_soc);
     const liveState = {battery_soc: resolvedSoCPercent};
     const slots = normalizePriceSlots(input.forecast);
     const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
+    const warningCount = Array.isArray(input.warnings) ? input.warnings.length : 0;
+    const errorCount = Array.isArray(input.errors) ? input.errors.length : 0;
+    const forecastEraCount = Array.isArray(input.forecastEras) ? input.forecastEras.length : 0;
     this.logger.log(
       `Running simulation with forecast_slots=${slots.length}, solar_slots=${solarSlots.length}, live_soc=${
         liveState.battery_soc ?? "n/a"
       }`,
     );
     this.logger.verbose(
-      `Simulation inputs: warnings=${input.warnings?.length ?? 0}, errors=${input.errors?.length ?? 0}, ` +
-      `price_snapshot=${input.priceSnapshotEurPerKwh ?? "n/a"}, forecast_eras=${input.forecastEras?.length ?? 0}`,
+      `Simulation inputs: warnings=${warningCount}, errors=${errorCount}, ` +
+      `price_snapshot=${input.priceSnapshotEurPerKwh ?? "n/a"}, forecast_eras=${forecastEraCount}`,
     );
 
     // Distribute solar energy into each price slot proportionally to the time overlap.
@@ -150,18 +150,19 @@ export class SimulationService {
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
 
     const directUseRatio = Percentage.fromRatio(clampRatio(input.config.solar?.direct_use_ratio ?? 0));
-    const feedInTariff = Math.max(0, Number(input.config.price?.feed_in_tariff_eur_per_kwh ?? 0));
+    const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
 
     // Run the DP-based optimiser with the caller's grid and export preferences
     const result = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       pvDirectUseRatio: directUseRatio.ratio,
       feedInTariffEurPerKwh: feedInTariff,
-      allowBatteryExport: input.config.logic?.allow_battery_export ?? true,
+      allowBatteryExport: input.config.logic.allow_battery_export ?? true,
     });
     const initialSoCPercent = result.initial_soc_percent;
     const nextSoCPercent = result.next_step_soc_percent ?? initialSoCPercent;
-    const firstStrategy = result.oracle_entries[0]?.strategy ?? null;
+    const firstEntry = result.oracle_entries.length > 0 ? result.oracle_entries[0] : null;
+    const firstStrategy = firstEntry?.strategy ?? null;
     let currentMode: "charge" | "auto" | "hold";
     if (firstStrategy) {
       currentMode = firstStrategy;
@@ -176,7 +177,7 @@ export class SimulationService {
     if (result.oracle_entries.length) {
       const strategyLog = result.oracle_entries
         .map((entry) => {
-          const strategyLabel = (entry.strategy ?? "auto").toUpperCase();
+          const strategyLabel = entry.strategy.toUpperCase();
           if (entry.strategy !== "hold") {
             return `${strategyLabel}@${entry.era_id}`;
           }
@@ -197,20 +198,21 @@ export class SimulationService {
     const warnings = Array.isArray(input.warnings) ? [...input.warnings] : [];
     const errors = Array.isArray(input.errors) ? [...input.errors] : [];
     const fallbackEras = buildErasFromSlots(slots);
-    const hasProvidedEras = (input.forecastEras?.length ?? 0) > 0;
+    const providedEras = Array.isArray(input.forecastEras) ? input.forecastEras : null;
+    const forecastEras = providedEras?.length ? providedEras : fallbackEras;
     // Run a second pass that mimics "auto" mode (no active grid charging) for comparison
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       pvDirectUseRatio: directUseRatio.ratio,
       feedInTariffEurPerKwh: feedInTariff,
-      allowBatteryExport: input.config.logic?.allow_battery_export ?? true,
+      allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: false,
     });
     // Assemble the API snapshot expected by the frontend and storage layers
     const snapshot: SnapshotPayload = {
       timestamp: result.timestamp,
-      interval_seconds: input.config.logic?.interval_seconds ?? null,
-      house_load_w: input.config.logic?.house_load_w ?? null,
+      interval_seconds: input.config.logic.interval_seconds ?? null,
+      house_load_w: input.config.logic.house_load_w ?? null,
       solar_direct_use_ratio: directUseRatio.ratio,
       current_soc_percent: result.initial_soc_percent,
       next_step_soc_percent: result.next_step_soc_percent,
@@ -223,14 +225,14 @@ export class SimulationService {
       baseline_cost_eur: result.baseline_cost_eur,
       basic_battery_cost_eur: autoResult.projected_cost_eur,
       projected_savings_eur: result.projected_savings_eur,
-      active_control_savings_eur: autoResult.projected_cost_eur !== null && result.projected_cost_eur !== null
+      active_control_savings_eur: Number.isFinite(autoResult.projected_cost_eur) && Number.isFinite(result.projected_cost_eur)
         ? autoResult.projected_cost_eur - result.projected_cost_eur
         : null,
       backtested_savings_eur: null,
       projected_grid_power_w: result.projected_grid_power_w,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
-      forecast_eras: hasProvidedEras ? input.forecastEras! : fallbackEras,
+      forecast_eras: forecastEras,
       oracle_entries: result.oracle_entries,
       history: [],
       warnings,
@@ -255,7 +257,7 @@ export class SimulationService {
 
     const firstSolarEnergy = solarEnergyPerSlot[0] ?? Energy.zero();
     const firstSolarWh = firstSolarEnergy.wattHours;
-    const firstSlot = slots[0];
+    const firstSlot = slots.length > 0 ? slots[0] : null;
     const observedSolarPower = input.observations?.solarPowerW;
     if (firstSlot) {
       if (firstSolarWh > 0) {
@@ -395,7 +397,6 @@ function normalizeSocLabel(value: number | null | undefined): string | null {
 function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
   const slotsByStart = new Map<number, TariffSlot>();
   for (const entry of raw) {
-    if (!entry) continue;
     const startValue = entry.start ?? entry.from;
     if (!startValue) {
       continue;
@@ -454,7 +455,6 @@ interface SolarSlot {
 function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
   const slots: SolarSlot[] = [];
   for (const entry of raw) {
-    if (!entry) continue;
     const start = parseTimestamp(entry.start);
     if (!start) {
       continue;

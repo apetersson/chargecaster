@@ -22,7 +22,7 @@ const parseTime = (value: string | null | undefined): number | null => {
 const buildOracleLookup = (entries: OracleEntry[]): Map<string, OracleEntry> => {
   const map = new Map<string, OracleEntry>();
   entries.forEach((entry) => {
-    if (!entry || typeof entry.era_id !== "string" || entry.era_id.length === 0) {
+    if (entry.era_id.length === 0) {
       return;
     }
     map.set(entry.era_id, entry);
@@ -71,9 +71,12 @@ const resolveCost = (era: ForecastEra, provider: string): { priceCt: number | nu
   if (!match) {
     return null;
   }
-  const payload = match.payload;
-  const priceCt = payload.price_with_fee_ct_per_kwh ?? payload.price_ct_per_kwh;
-  return {priceCt};
+  const priceWithFee = match.payload.price_with_fee_ct_per_kwh;
+  if (Number.isFinite(priceWithFee)) {
+    return {priceCt: priceWithFee};
+  }
+  const fallbackPrice = match.payload.price_ct_per_kwh;
+  return {priceCt: Number.isFinite(fallbackPrice) ? fallbackPrice : null};
 };
 
 const resolveSolar = (
@@ -98,7 +101,7 @@ const resolveSolar = (
   return {energyKwh, averageW};
 };
 
-const TrajectoryTable = ({forecast, oracleEntries, summary}: TrajectoryTableProps): JSX.Element => {
+function TrajectoryTable({forecast, oracleEntries, summary}: TrajectoryTableProps): JSX.Element {
   const now = Date.now();
   const oracleLookup = useMemo(() => buildOracleLookup(oracleEntries), [oracleEntries]);
 
@@ -221,6 +224,6 @@ const TrajectoryTable = ({forecast, oracleEntries, summary}: TrajectoryTableProp
       </div>
     </section>
   );
-};
+}
 
 export default TrajectoryTable;

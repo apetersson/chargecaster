@@ -216,21 +216,22 @@ function resolveLogLevels(level: unknown): { levels: LogLevel[]; normalized: str
   };
   const canonical = aliasMap[normalizedInput] ?? normalizedInput;
 
-  const mapping: Record<string, LogLevel[]> = {
-    fatal: ["fatal"],
-    error: ["fatal", "error"],
-    warn: ["fatal", "error", "warn"],
-    info: ["fatal", "error", "warn", "log"],
-    debug: ["fatal", "error", "warn", "log", "debug"],
-    verbose: ["fatal", "error", "warn", "log", "debug", "verbose"],
-  };
-
-  const resolved = mapping[canonical];
-  if (resolved) {
-    return {levels: resolved, normalized: canonical, fallbackUsed: false};
+  switch (canonical) {
+    case "fatal":
+      return {levels: ["fatal"], normalized: "fatal", fallbackUsed: false};
+    case "error":
+      return {levels: ["fatal", "error"], normalized: "error", fallbackUsed: false};
+    case "warn":
+      return {levels: ["fatal", "error", "warn"], normalized: "warn", fallbackUsed: false};
+    case "info":
+      return {levels: ["fatal", "error", "warn", "log"], normalized: "info", fallbackUsed: false};
+    case "debug":
+      return {levels: ["fatal", "error", "warn", "log", "debug"], normalized: "debug", fallbackUsed: false};
+    case "verbose":
+      return {levels: ["fatal", "error", "warn", "log", "debug", "verbose"], normalized: "verbose", fallbackUsed: false};
+    default:
+      return {levels: ["fatal", "error", "warn", "log"], normalized: "info", fallbackUsed: true};
   }
-
-  return {levels: mapping.info, normalized: "info", fallbackUsed: true};
 }
 
 function describeError(error: unknown): string {

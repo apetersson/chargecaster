@@ -68,8 +68,8 @@ describe("dashboard tRPC", () => {
               requestUrl = input;
             } else if (input instanceof URL) {
               requestUrl = input.toString();
-            } else if (typeof input === "object" && input !== null && "url" in input) {
-              requestUrl = String((input as { url: string }).url);
+            } else if (input instanceof Request) {
+              requestUrl = input.url;
             }
             if (!requestUrl) {
               throw new Error("Unsupported request input for tRPC client");
@@ -104,16 +104,14 @@ describe("dashboard tRPC", () => {
             });
 
             const headerEntries: [string, string][] = [];
-            if (response.headers && typeof response.headers === "object") {
-              const headerRecord = response.headers as Record<string, string | string[]>;
-              for (const key in headerRecord) {
-                if (!Object.hasOwn(headerRecord, key)) {
-                  continue;
-                }
-                const rawValue = headerRecord[key];
-                const normalized = Array.isArray(rawValue) ? rawValue.join(",") : String(rawValue);
-                headerEntries.push([key, normalized]);
+            const headerRecord = response.headers as Record<string, string | string[]>;
+            for (const key in headerRecord) {
+              if (!Object.hasOwn(headerRecord, key)) {
+                continue;
               }
+              const rawValue = headerRecord[key];
+              const normalized = Array.isArray(rawValue) ? rawValue.join(",") : String(rawValue);
+              headerEntries.push([key, normalized]);
             }
 
             const normalizedHeaders = Object.fromEntries(headerEntries);
@@ -160,7 +158,10 @@ describe("dashboard tRPC", () => {
     const history = await client.dashboard.history.query({ limit: 24 });
     expect(history.generated_at).toEqual(snapshot.timestamp);
     expect(history.entries.length).toBeGreaterThan(0);
-    expect(history.entries[0]?.timestamp).toBeDefined();
+    if (history.entries.length === 0) {
+      throw new Error("History entries should not be empty");
+    }
+    expect(history.entries[0].timestamp).toBeDefined();
 
     const forecastResponse = await client.dashboard.forecast.query();
     expect(forecastResponse.generated_at).toEqual(snapshot.timestamp);

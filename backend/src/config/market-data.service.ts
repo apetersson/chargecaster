@@ -43,13 +43,12 @@ export class MarketDataService {
           throw new Error("market_data.entsoe is referenced by priority but missing in config");
         }
         impl = new EntsoeNewProvider(entsoeCfg);
-      } else if (p.key === "from_evcc") {
+      } else {
         if (!fromEvccCfg) {
           throw new Error("market_data.from_evcc is referenced by priority but missing in config");
         }
         impl = new FromEvccProvider(Array.isArray(evccFallback) ? evccFallback : [], fromEvccCfg);
       }
-      if (!impl) continue;
       const ctx: MarketProviderContext = {simulationConfig, warnings};
       const {forecast, priceSnapshot} = await impl.collect(ctx);
       this.logger.verbose(
@@ -71,7 +70,6 @@ export class MarketDataService {
 
     const now = Date.now();
     for (const entry of entries) {
-      if (!entry) continue;
       const startTimestamp = parseTimestamp(entry.start ?? entry.from ?? null);
       const endTimestamp = parseTimestamp(entry.end ?? entry.to ?? null);
       if (!startTimestamp || !endTimestamp) {

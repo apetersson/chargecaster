@@ -35,7 +35,7 @@ const getErrorMessage = (error: unknown): string => {
 };
 
 
-const App = (): JSX.Element => {
+function App(): JSX.Element {
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastEra[]>([]);
@@ -235,6 +235,6 @@ const App = (): JSX.Element => {
       </section>
     </>
   );
-};
+}
 
 export default App;

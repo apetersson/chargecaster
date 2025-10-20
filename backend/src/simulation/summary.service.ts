@@ -37,8 +37,8 @@ export class SummaryService {
       projected_grid_power_w: snapshot.projected_grid_power_w,
       forecast_hours: snapshot.forecast_hours,
       forecast_samples: snapshot.forecast_samples,
-      warnings: snapshot.warnings ?? [],
-      errors: snapshot.errors ?? [],
+      warnings: snapshot.warnings,
+      errors: snapshot.errors,
     };
   }
 }

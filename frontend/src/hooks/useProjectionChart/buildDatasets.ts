@@ -68,8 +68,8 @@ const buildSoCSeries = (
       y: summarySoCPercent,
       source: "history",
     };
-    const last = historyPoints[historyPoints.length - 1];
-    if (last && last.x === summaryPoint.x) {
+    const last = historyPoints.at(-1);
+    if (last?.x === summaryPoint.x) {
       historyPoints[historyPoints.length - 1] = summaryPoint;
     } else {
       historyPoints.push(summaryPoint);

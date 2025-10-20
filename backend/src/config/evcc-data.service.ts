@@ -23,14 +23,23 @@ export class EvccDataService {
     solarPowerW: number | null;
     homePowerW: number | null;
   }> {
-    const enabled = config?.enabled !== false;
-    if (!enabled) {
+    const {
+      enabled = true,
+      base_url: baseUrl,
+      timeout_ms: timeoutMsOverride,
+      token,
+    } = config ?? {};
+
+    const enabledFlag = enabled !== false;
+    const timeoutMs = timeoutMsOverride ?? REQUEST_TIMEOUT_MS;
+    const tokenValue = typeof token === "string" && token.length > 0 ? token : null;
+
+    if (!enabledFlag) {
       warnings.push("EVCC data fetch disabled in config.");
       this.logger.warn("EVCC data fetch disabled in config.");
       return this.emptyResult();
     }
 
-    const baseUrl = config?.base_url;
     if (!baseUrl) {
       const message = "EVCC base_url not configured; skipping EVCC forecast.";
       warnings.push(message);
@@ -48,11 +57,9 @@ export class EvccDataService {
       return this.emptyResult();
     }
 
-    const timeoutMs = config?.timeout_ms ?? REQUEST_TIMEOUT_MS;
-    const token = config?.token ?? null;
     const headers: Record<string, string> = {};
-    if (typeof token === "string" && token.length > 0) {
-      headers.Authorization = `Bearer ${token}`;
+    if (tokenValue) {
+      headers.Authorization = `Bearer ${tokenValue}`;
     }
 
     try {

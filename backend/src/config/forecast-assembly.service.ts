@@ -151,7 +151,7 @@ export class ForecastAssemblyService {
     if (typeof basePrice !== "number" || Number.isNaN(basePrice)) {
       return null;
     }
-    const gridFee = config.price?.grid_fee_eur_per_kwh ?? 0;
+    const gridFee = config.price.grid_fee_eur_per_kwh ?? 0;
     return basePrice + gridFee;
   }
 

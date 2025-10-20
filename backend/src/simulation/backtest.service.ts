@@ -108,23 +108,24 @@ export function computeBacktestedSavings(
   rawHistory: HistoryPoint[],
   options: BacktestSavingsOptions = {},
 ): BacktestSavingsResult | null {
-  const capacityValue = toFiniteNumber(config?.battery?.capacity_kwh) ?? null;
+  const {battery, price} = config;
+  const capacityValue = toFiniteNumber(battery.capacity_kwh) ?? null;
   if (capacityValue === null || capacityValue <= 0) {
     computationLogger.warn("Backtest savings aborted: missing or invalid battery capacity");
     return null;
   }
   const capacity = Energy.fromKilowattHours(capacityValue);
 
-  const floorSoc = parseSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? Percentage.zero();
-  const maxChargePower = parsePower(config?.battery?.max_charge_power_w ?? null);
-  const maxSolarChargePower = parsePower(config?.battery?.max_charge_power_solar_w ?? null);
-  const maxDischargePower = parsePower(config?.battery?.max_discharge_power_w ?? null);
+  const floorSoc = parseSoc(battery.auto_mode_floor_soc ?? 0) ?? Percentage.zero();
+  const maxChargePower = parsePower(battery.max_charge_power_w ?? null);
+  const maxSolarChargePower = parsePower(battery.max_charge_power_solar_w ?? null);
+  const maxDischargePower = parsePower(battery.max_discharge_power_w ?? null);
 
-  const referenceTimestampMs = resolveTimestampMs(options.referenceTimestamp ?? null);
+  const referenceTimestampMs = resolveTimestampMs(options.referenceTimestamp);
   const latestTimestampMs = referenceTimestampMs ?? (() => {
     let maxMs = Number.NEGATIVE_INFINITY;
     for (const entry of rawHistory) {
-      const ts = resolveTimestampMs(entry?.timestamp ?? null);
+      const ts = resolveTimestampMs(entry.timestamp);
       if (ts !== null && ts > maxMs) {
         maxMs = ts;
       }
@@ -143,7 +144,6 @@ export function computeBacktestedSavings(
   const windowStartMs = latestTimestampMs - windowHours * 3_600_000;
 
   const combined = rawHistory
-    .filter((entry) => entry && typeof entry === "object")
     .map<SortedHistoryPoint>((entry) => {
       const ts = resolveTimestampMs(entry.timestamp) ?? Number.NaN;
       return {
@@ -165,9 +165,9 @@ export function computeBacktestedSavings(
     `Backtest savings computation started (windowHours=${windowHours}, points=${combined.length})`,
   );
 
-  const feedInTariffValue = Math.max(0, toFiniteNumber(config?.price?.feed_in_tariff_eur_per_kwh) ?? 0);
+  const feedInTariffValue = Math.max(0, toFiniteNumber(price.feed_in_tariff_eur_per_kwh) ?? 0);
   const feedInPrice = EnergyPrice.fromEurPerKwh(feedInTariffValue);
-  const importPriceFallbackValue = toFiniteNumber(options.importPriceFallbackEurPerKwh ?? null);
+  const importPriceFallbackValue = toFiniteNumber(options.importPriceFallbackEurPerKwh);
   const fallbackPrice = importPriceFallbackValue !== null
     ? EnergyPrice.fromEurPerKwh(importPriceFallbackValue)
     : null;
@@ -195,7 +195,7 @@ export function computeBacktestedSavings(
   for (const entry of combined) {
     if (entry.__ts < windowStartMs) {
       previous = entry;
-      const entrySoc = parseSoc(entry.battery_soc_percent ?? null);
+      const entrySoc = parseSoc(entry.battery_soc_percent);
       if (entrySoc) {
         state.dumbSoc = entrySoc;
       }
@@ -208,7 +208,7 @@ export function computeBacktestedSavings(
 
     if (!previous || previous.__ts < windowStartMs) {
       previous = entry;
-      const entrySoc = parseSoc(entry.battery_soc_percent ?? null);
+      const entrySoc = parseSoc(entry.battery_soc_percent);
       if (entrySoc) {
         state.dumbSoc = entrySoc;
       }
@@ -230,20 +230,20 @@ export function computeBacktestedSavings(
       continue;
     }
 
-    const socPrev = parseSoc(previous.battery_soc_percent ?? null);
-    const socCurr = parseSoc(entry.battery_soc_percent ?? null);
+    const socPrev = parseSoc(previous.battery_soc_percent);
+    const socCurr = parseSoc(entry.battery_soc_percent);
     if (!socPrev || !socCurr) {
       previous = entry;
       continue;
     }
 
-    const gridPowerW = toFiniteNumber(previous.grid_power_w ?? null);
+    const gridPowerW = toFiniteNumber(previous.grid_power_w);
     if (gridPowerW === null) {
       previous = entry;
       continue;
     }
-    const solarPowerW = toFiniteNumber(previous.solar_power_w ?? null) ?? 0;
-    const observedHomePowerW = toFiniteNumber(previous.home_power_w ?? null);
+    const solarPowerW = toFiniteNumber(previous.solar_power_w) ?? 0;
+    const observedHomePowerW = toFiniteNumber(previous.home_power_w);
 
     let intervalPrice = resolvePrice(previous);
     intervalPrice ??= resolvePrice(entry);
@@ -282,12 +282,9 @@ export function computeBacktestedSavings(
     actualCostEur += costSmart;
 
     state.dumbSoc ??= socPrev;
-    if (!state.dumbSoc) {
-      previous = entry;
-      continue;
-    }
+    const dumbSoc = state.dumbSoc;
 
-    dumbStartSoc ??= state.dumbSoc;
+    dumbStartSoc ??= dumbSoc;
 
     const solarToLoadKwh = Math.min(houseEnergy.kilowattHours, solarEnergy.kilowattHours);
     let remainingLoadEnergy = Energy.fromKilowattHours(
@@ -304,7 +301,7 @@ export function computeBacktestedSavings(
       ? state.maxDischargePower.forDuration(intervalDuration)
       : null;
 
-    const remainingCapacityEnergy = state.capacity.scale(1 - state.dumbSoc.ratio);
+    const remainingCapacityEnergy = state.capacity.scale(1 - dumbSoc.ratio);
     const chargeEnergy = Energy.fromKilowattHours(Math.min(
       solarSurplusEnergy.kilowattHours,
       remainingCapacityEnergy.kilowattHours,
@@ -314,7 +311,7 @@ export function computeBacktestedSavings(
       Math.max(0, solarSurplusEnergy.kilowattHours - chargeEnergy.kilowattHours),
     );
 
-    let interimSocRatio = state.dumbSoc.ratio + (
+    let interimSocRatio = dumbSoc.ratio + (
       state.capacity.kilowattHours > 0
         ? chargeEnergy.kilowattHours / state.capacity.kilowattHours
         : 0
@@ -364,7 +361,7 @@ export function computeBacktestedSavings(
     return null;
   }
 
-  const valuationPriceValue = toFiniteNumber(options.endValuationPriceEurPerKwh ?? null);
+  const valuationPriceValue = toFiniteNumber(options.endValuationPriceEurPerKwh);
   let valuationAdjustment = 0;
   if (
     valuationPriceValue !== null &&
@@ -400,23 +397,24 @@ function computeBacktestSeries(
   rawHistory: HistoryPoint[],
   options: BacktestSavingsOptions = {},
 ): BacktestSeriesResponse | null {
-  const capacityValue = toFiniteNumber(config?.battery?.capacity_kwh) ?? null;
+  const {battery, price} = config;
+  const capacityValue = toFiniteNumber(battery.capacity_kwh) ?? null;
   if (capacityValue === null || capacityValue <= 0) {
     computationLogger.warn("Backtest series aborted: missing or invalid battery capacity");
     return null;
   }
   const capacity = Energy.fromKilowattHours(capacityValue);
 
-  const floorSoc = parseSoc(config?.battery?.auto_mode_floor_soc ?? 0) ?? Percentage.zero();
-  const maxChargePower = parsePower(config?.battery?.max_charge_power_w ?? null);
-  const maxSolarChargePower = parsePower(config?.battery?.max_charge_power_solar_w ?? null);
-  const maxDischargePower = parsePower(config?.battery?.max_discharge_power_w ?? null);
+  const floorSoc = parseSoc(battery.auto_mode_floor_soc ?? 0) ?? Percentage.zero();
+  const maxChargePower = parsePower(battery.max_charge_power_w ?? null);
+  const maxSolarChargePower = parsePower(battery.max_charge_power_solar_w ?? null);
+  const maxDischargePower = parsePower(battery.max_discharge_power_w ?? null);
 
-  const referenceTimestampMs = resolveTimestampMs(options.referenceTimestamp ?? null);
+  const referenceTimestampMs = resolveTimestampMs(options.referenceTimestamp);
   const latestTimestampMs = referenceTimestampMs ?? (() => {
     let maxMs = Number.NEGATIVE_INFINITY;
     for (const entry of rawHistory) {
-      const ts = resolveTimestampMs(entry?.timestamp ?? null);
+      const ts = resolveTimestampMs(entry.timestamp);
       if (ts !== null && ts > maxMs) {
         maxMs = ts;
       }
@@ -435,7 +433,6 @@ function computeBacktestSeries(
   const windowStartMs = latestTimestampMs - windowHours * 3_600_000;
 
   const combined = rawHistory
-    .filter((entry) => entry && typeof entry === "object")
     .map<SortedHistoryPoint>((entry) => {
       const ts = resolveTimestampMs(entry.timestamp) ?? Number.NaN;
       return {
@@ -457,9 +454,9 @@ function computeBacktestSeries(
     `Backtest series computation started (windowHours=${windowHours}, points=${combined.length})`,
   );
 
-  const feedInTariffValue = Math.max(0, toFiniteNumber(config?.price?.feed_in_tariff_eur_per_kwh) ?? 0);
+  const feedInTariffValue = Math.max(0, toFiniteNumber(price.feed_in_tariff_eur_per_kwh) ?? 0);
   const feedInPrice = EnergyPrice.fromEurPerKwh(feedInTariffValue);
-  const importPriceFallbackValue = toFiniteNumber(options.importPriceFallbackEurPerKwh ?? null);
+  const importPriceFallbackValue = toFiniteNumber(options.importPriceFallbackEurPerKwh);
   const fallbackPrice = importPriceFallbackValue !== null
     ? EnergyPrice.fromEurPerKwh(importPriceFallbackValue)
     : null;
@@ -482,7 +479,7 @@ function computeBacktestSeries(
   for (const entry of combined) {
     if (entry.__ts < windowStartMs) {
       previous = entry;
-      const entrySoc = parseSoc(entry.battery_soc_percent ?? null);
+      const entrySoc = parseSoc(entry.battery_soc_percent);
       if (entrySoc) state.dumbSoc = entrySoc;
       const entryPrice = resolvePrice(entry);
       if (entryPrice) state.lastPrice = entryPrice;
@@ -491,7 +488,7 @@ function computeBacktestSeries(
 
     if (!previous || previous.__ts < windowStartMs) {
       previous = entry;
-      const entrySoc = parseSoc(entry.battery_soc_percent ?? null);
+      const entrySoc = parseSoc(entry.battery_soc_percent);
       if (entrySoc) state.dumbSoc = entrySoc;
       const entryPrice = resolvePrice(entry);
       if (entryPrice) state.lastPrice = entryPrice;
@@ -509,19 +506,19 @@ function computeBacktestSeries(
       continue;
     }
 
-    const socPrev = parseSoc(previous.battery_soc_percent ?? null);
-    const socCurr = parseSoc(entry.battery_soc_percent ?? null);
+    const socPrev = parseSoc(previous.battery_soc_percent);
+    const socCurr = parseSoc(entry.battery_soc_percent);
     if (!socPrev || !socCurr) {
       previous = entry;
       continue;
     }
-    const gridPowerW = toFiniteNumber(previous.grid_power_w ?? null);
+    const gridPowerW = toFiniteNumber(previous.grid_power_w);
     if (gridPowerW === null) {
       previous = entry;
       continue;
     }
-    const solarPowerW = toFiniteNumber(previous.solar_power_w ?? null) ?? 0;
-    const observedHomePowerW = toFiniteNumber(previous.home_power_w ?? null);
+    const solarPowerW = toFiniteNumber(previous.solar_power_w) ?? 0;
+    const observedHomePowerW = toFiniteNumber(previous.home_power_w);
 
     let intervalPrice = resolvePrice(previous);
     intervalPrice ??= resolvePrice(entry);
@@ -556,10 +553,7 @@ function computeBacktestSeries(
       : feedInPrice.costFor(gridEnergy);
 
     state.dumbSoc ??= socPrev;
-    if (!state.dumbSoc) {
-      previous = entry;
-      continue;
-    }
+    const dumbSoc = state.dumbSoc;
 
     const solarToLoadKwh = Math.min(houseEnergy.kilowattHours, solarEnergy.kilowattHours);
     let remainingLoadEnergy = Energy.fromKilowattHours(Math.max(0, houseEnergy.kilowattHours - solarToLoadKwh));
@@ -572,7 +566,7 @@ function computeBacktestSeries(
       ? state.maxDischargePower.forDuration(intervalDuration)
       : null;
 
-    const remainingCapacityEnergy = state.capacity.scale(1 - state.dumbSoc.ratio);
+    const remainingCapacityEnergy = state.capacity.scale(1 - dumbSoc.ratio);
     const chargeEnergy = Energy.fromKilowattHours(Math.min(
       solarSurplusEnergy.kilowattHours,
       remainingCapacityEnergy.kilowattHours,
@@ -580,7 +574,7 @@ function computeBacktestSeries(
     ));
     solarSurplusEnergy = Energy.fromKilowattHours(Math.max(0, solarSurplusEnergy.kilowattHours - chargeEnergy.kilowattHours));
 
-    let interimSocRatio = state.dumbSoc.ratio + (
+    let interimSocRatio = dumbSoc.ratio + (
       state.capacity.kilowattHours > 0
         ? chargeEnergy.kilowattHours / state.capacity.kilowattHours
         : 0
@@ -602,6 +596,7 @@ function computeBacktestSeries(
     );
     finalSocRatio = Math.min(1, Math.max(state.floorSoc.ratio, finalSocRatio));
     state.dumbSoc = Percentage.fromRatio(finalSocRatio);
+    const updatedDumbSoc = state.dumbSoc;
 
     const importEnergy = remainingLoadEnergy;
     const exportEnergy = solarSurplusEnergy;
@@ -618,7 +613,7 @@ function computeBacktestSeries(
 
     cumulativeCostSavingsEur += (costDumb - costSmart);
 
-    const energyDelta = state.capacity.scale(socCurr.ratio - state.dumbSoc.ratio);
+    const energyDelta = state.capacity.scale(socCurr.ratio - updatedDumbSoc.ratio);
     const m2mAdjustmentEur = importPrice.costFor(energyDelta);
     const cumulativeSavingsEur = cumulativeCostSavingsEur + m2mAdjustmentEur;
 
@@ -630,7 +625,7 @@ function computeBacktestSeries(
       grid_power_smart_w: gridPower.watts,
       grid_power_dumb_w: gridPowerDumb.watts,
       soc_smart_percent: socCurr.percent,
-      soc_dumb_percent: state.dumbSoc.percent,
+      soc_dumb_percent: updatedDumbSoc.percent,
       cost_smart_eur: costSmart,
       cost_dumb_eur: costDumb,
       savings_eur: costDumb - costSmart,

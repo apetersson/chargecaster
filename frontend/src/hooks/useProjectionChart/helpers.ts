@@ -42,7 +42,7 @@ export const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | nul
   if (!point) {
     return;
   }
-  const last = target[target.length - 1];
+  const last = target.at(-1);
   if (last && last.x === point.x && last.y === point.y && last.source === point.source) {
     return;
   }
@@ -53,7 +53,7 @@ export const pushGapPoint = (target: ProjectionPoint[], time: number | null | un
   if (typeof time !== "number" || !Number.isFinite(time)) {
     return;
   }
-  const last = target[target.length - 1];
+  const last = target.at(-1);
   if (last && Number.isNaN(last.y) && last.x === time) {
     return;
   }
@@ -63,7 +63,7 @@ export const pushGapPoint = (target: ProjectionPoint[], time: number | null | un
 export const buildOracleLookup = (entries: OracleEntry[]): Map<string, OracleEntry> => {
   const lookup = new Map<string, OracleEntry>();
   for (const entry of entries) {
-    if (!entry || entry.era_id.length === 0) {
+    if (entry.era_id.length === 0) {
       continue;
     }
     lookup.set(entry.era_id, entry);
@@ -126,7 +126,12 @@ export const extractCostPrice = (era: ForecastEra): number | null => {
   if (!costSource) {
     return null;
   }
-  return costSource.payload.price_with_fee_ct_per_kwh ?? costSource.payload.price_ct_per_kwh ?? null;
+  const priceWithFee = costSource.payload.price_with_fee_ct_per_kwh;
+  if (Number.isFinite(priceWithFee)) {
+    return priceWithFee;
+  }
+  const backupPrice = costSource.payload.price_ct_per_kwh;
+  return Number.isFinite(backupPrice) ? backupPrice : null;
 };
 
 export const extractSolarAverageWatts = (era: ForecastEra, slot: TimeSlot | null): number | null => {
@@ -304,8 +309,8 @@ export const attachHistoryIntervals = (
 
   for (let i = 0; i < historyPoints.length; i += 1) {
     const current = historyPoints[i];
-    const next = historyPoints[i + 1];
-    const rawEnd = next?.x ?? fallbackStart(current);
+    const next = i + 1 < historyPoints.length ? historyPoints[i + 1] : null;
+    const rawEnd = next ? next.x : fallbackStart(current);
     current.xEnd = rawEnd > current.x ? rawEnd : current.x + DEFAULT_SLOT_DURATION_MS;
   }
 };

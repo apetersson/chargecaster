@@ -82,7 +82,7 @@ export class SimulationSeedService implements OnModuleDestroy {
   private async applyFronius(snapshot: Awaited<ReturnType<SimulationService["runSimulation"]>>, config: ConfigDocument): Promise<void> {
     try {
       const result = await this.froniusService.applyOptimization(config, snapshot);
-      if (result?.errorMessage) {
+      if (result.errorMessage) {
         this.logger.warn(`Snapshot flagged with error: ${result.errorMessage}`);
         this.simulationService.appendErrorsToLatestSnapshot([result.errorMessage]);
       }
