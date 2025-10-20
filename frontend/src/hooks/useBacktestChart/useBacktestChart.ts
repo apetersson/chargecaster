@@ -173,7 +173,7 @@ export const useBacktestChart = (
     showPriceAxisLabels?: boolean;
     focus?: "smart" | "dumb"
   },
-) => {
+): ReturnType<typeof useChartInstance> => {
   const {datasets, bounds, timeRangeMs, legendGroups} = useMemo(() => {
     if (!series) {
       return {

@@ -9,7 +9,7 @@ export const useProjectionChart = (
   oracleEntries: OracleEntry[],
   summary: SnapshotSummary | null,
   options?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean },
-) => {
+): ReturnType<typeof useChartInstance> => {
   const {datasets, bounds, timeRangeMs, legendGroups} = useProjectionDatasets(
     history,
     forecast,

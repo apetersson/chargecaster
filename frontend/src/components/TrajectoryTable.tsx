@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type JSX } from "react";
 
 import type { ForecastEra, ForecastSourcePayload, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
@@ -63,7 +63,7 @@ const findOracleForEra = (
   return undefined;
 };
 
-const resolveCost = (era: ForecastEra, provider: string) => {
+const resolveCost = (era: ForecastEra, provider: string): { priceCt: number | null } | null => {
   const match = era.sources.find(
     (source): source is Extract<ForecastSourcePayload, { type: "cost" }> =>
       source.type === "cost" && source.provider.toLowerCase() === provider,
@@ -76,7 +76,10 @@ const resolveCost = (era: ForecastEra, provider: string) => {
   return {priceCt};
 };
 
-const resolveSolar = (era: ForecastEra, slot: TimeSlot | null) => {
+const resolveSolar = (
+  era: ForecastEra,
+  slot: TimeSlot | null,
+): { energyKwh: number | null; averageW: number | null } => {
   const match = era.sources.find(
     (source): source is Extract<ForecastSourcePayload, { type: "solar" }> => source.type === "solar",
   );
@@ -95,7 +98,7 @@ const resolveSolar = (era: ForecastEra, slot: TimeSlot | null) => {
   return {energyKwh, averageW};
 };
 
-const TrajectoryTable = ({forecast, oracleEntries, summary}: TrajectoryTableProps) => {
+const TrajectoryTable = ({forecast, oracleEntries, summary}: TrajectoryTableProps): JSX.Element => {
   const now = Date.now();
   const oracleLookup = useMemo(() => buildOracleLookup(oracleEntries), [oracleEntries]);
 
@@ -117,7 +120,9 @@ const TrajectoryTable = ({forecast, oracleEntries, summary}: TrajectoryTableProp
       return startA - startB;
     });
 
-  if (!rows.length) return (<section className="card"><p>No forecast data available.</p></section>);
+  if (!rows.length) {
+    return (<section className="card"><p>No forecast data available.</p></section>);
+  }
 
   return (
     <section className="card">
