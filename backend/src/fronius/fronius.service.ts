@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 
-import { Percentage } from "@chargecaster/domain";
+import { Percentage, describeError } from "@chargecaster/domain";
 import type { SnapshotPayload } from "@chargecaster/domain";
 import type { ConfigDocument } from "../config/schemas";
 import { RuntimeConfigService } from "../config/runtime-config.service";
@@ -36,17 +36,17 @@ export class FroniusService {
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
 
-  constructor(private readonly configState: RuntimeConfigService) {
+  constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
     const document = this.configState.getDocumentRef();
     let froniusConfig: FroniusConnectionConfig | null = null;
     try {
       froniusConfig = requireFroniusConnectionConfig(document);
     } catch (error) {
-      this.logger.error(`Fronius configuration invalid: ${this.describeError(error)}`);
+      this.logger.error(`Fronius configuration invalid: ${describeError(error)}`);
       throw error instanceof Error ? error : new Error(String(error));
     }
 
-    if (froniusConfig) {
+    if (froniusConfig !== null) {
       this.logger.log(`Fronius integration configured for ${froniusConfig.host}`);
     } else {
       this.logger.log("Fronius integration disabled by configuration.");
@@ -106,7 +106,7 @@ export class FroniusService {
       await this.logoutFroniusSession(froniusConfig);
       return {errorMessage: null};
     } catch (error: unknown) {
-      this.logger.warn(`Fronius update failed: ${this.describeError(error)}`);
+      this.logger.warn(`Fronius update failed: ${describeError(error)}`);
       return {errorMessage: this.normaliseSummaryError(error)};
     }
   }
@@ -115,7 +115,7 @@ export class FroniusService {
     if (!error) {
       return null;
     }
-    const message = this.describeError(error).toLowerCase();
+    const message = describeError(error).toLowerCase();
     if (!message) {
       return null;
     }
@@ -447,16 +447,10 @@ export class FroniusService {
       await this.requestJson("GET", logoutUrl, config);
       this.logger.verbose("Fronius session logged out.");
     } catch (error) {
-      this.logger.verbose(`Fronius logout skipped: ${this.describeError(error)}`);
+      this.logger.verbose(`Fronius logout skipped: ${describeError(error)}`);
     }
   }
 
-  private describeError(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    return String(error);
-  }
 }
 
 export function requireFroniusConnectionConfig(config: ConfigDocument): FroniusConnectionConfig | null {

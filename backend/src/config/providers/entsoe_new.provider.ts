@@ -1,5 +1,5 @@
+import { describeError, type RawForecastEntry } from "@chargecaster/domain";
 import { Logger } from "@nestjs/common";
-import type { RawForecastEntry } from "@chargecaster/domain";
 import type { EntsoeNewConfig } from "../schemas";
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
@@ -32,8 +32,8 @@ export class EntsoeNewProvider implements MarketProvider {
       this.logger.verbose(`ENTSO-E returned ${forecast.length} slots (snapshot=${priceSnapshot ?? "n/a"})`);
       return {forecast, priceSnapshot};
     } catch (error) {
-      this.logger.warn(`ENTSO-E fetch failed: ${this.describeError(error)}`);
-      ctx.warnings.push(`ENTSOE new-transparency fetch failed: ${this.describeError(error)}`);
+      this.logger.warn(`ENTSO-E fetch failed: ${describeError(error)}`);
+      ctx.warnings.push(`ENTSOE new-transparency fetch failed: ${describeError(error)}`);
       return {forecast: [], priceSnapshot: null};
     }
   }
@@ -200,8 +200,4 @@ export class EntsoeNewProvider implements MarketProvider {
     return result;
   }
 
-  private describeError(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    return String(error);
-  }
 }
