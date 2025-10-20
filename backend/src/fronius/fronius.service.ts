@@ -4,8 +4,9 @@ import { createHash, randomBytes } from "node:crypto";
 import type { ConfigDocument } from "../config/schemas";
 import { Percentage } from "@chargecaster/domain";
 import type { SnapshotPayload } from "@chargecaster/domain";
+import { RuntimeConfigService } from "../config/runtime-config.service";
 
-interface FroniusConfig {
+export interface FroniusConnectionConfig {
   host: string;
   user: string;
   password: string;
@@ -31,20 +32,49 @@ type FroniusMode = "charge" | "auto" | "hold";
 
 export class FroniusService {
   private readonly logger = new Logger(FroniusService.name);
+  private readonly froniusConfig: FroniusConnectionConfig | null;
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
 
+  constructor(private readonly configState: RuntimeConfigService) {
+    const document = this.configState.getDocumentRef();
+    let froniusConfig: FroniusConnectionConfig | null = null;
+    try {
+      froniusConfig = requireFroniusConnectionConfig(document);
+    } catch (error) {
+      this.logger.error(`Fronius configuration invalid: ${this.describeError(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+
+    if (froniusConfig) {
+      this.logger.log(`Fronius integration configured for ${froniusConfig.host}`);
+    } else {
+      this.logger.log("Fronius integration disabled by configuration.");
+    }
+    this.froniusConfig = froniusConfig;
+  }
+
   async applyOptimization(config: ConfigDocument, snapshot: SnapshotPayload): Promise<FroniusApplyResult> {
-    const froniusConfig = this.extractConfig(config);
-    if (!froniusConfig) {
+    if (config.dry_run) {
+      this.logger.log("Dry run enabled; skipping Fronius optimization apply.");
       return {errorMessage: null};
     }
+    if (config.fronius?.enabled === false) {
+      this.logger.verbose("Fronius integration disabled in config; skipping optimisation.");
+      return {errorMessage: null};
+    }
+    if (!this.froniusConfig) {
+      this.logger.verbose("Fronius configuration missing; skipping optimisation.");
+      return {errorMessage: null};
+    }
+    const froniusConfig = this.froniusConfig;
 
     const desiredMode = this.resolveDesiredMode(snapshot);
 
     const url = this.buildUrl(froniusConfig.host, froniusConfig.batteriesPath);
 
     try {
+      this.logger.log(`Preparing to apply Fronius mode ${desiredMode.toUpperCase()} via ${url}`);
       // const currentConfig = await this.requestJson("GET", url, froniusConfig);
       // const currentMode = this.extractCurrentMode(currentConfig);
       if (this.lastAppliedMode === desiredMode) {
@@ -64,9 +94,11 @@ export class FroniusService {
         return {errorMessage: null};
       }
 
+      const targetLabel = payload.target ? `${payload.target.percent.toFixed(1)}%` : "n/a";
       this.logger.log(
-        `Issuing Fronius command ${JSON.stringify(payload.body)} (mode=${desiredMode}) to ${url}`,
+        `Issuing Fronius command (mode=${desiredMode}, target=${targetLabel}) to ${url}`,
       );
+      this.logger.verbose(`Fronius payload: ${JSON.stringify(payload.body)}`);
       await this.requestJson("POST", url, froniusConfig, payload.body);
       this.lastAppliedMode = desiredMode;
       this.lastAppliedTarget = payload.target;
@@ -91,29 +123,6 @@ export class FroniusService {
       return AUTH_ERROR_SUMMARY_MESSAGE;
     }
     return null;
-  }
-
-  private extractConfig(config: ConfigDocument): FroniusConfig | null {
-    const record = config.fronius;
-    if (!record?.enabled) {
-      return null;
-    }
-    const hostRaw = record.host?.trim() ?? "";
-    const userRaw = record.user ?? "";
-    const passwordRaw = record.password ?? "";
-    if (!hostRaw || !userRaw || !passwordRaw) {
-      return null;
-    }
-
-    return {
-      host: hostRaw,
-      user: userRaw,
-      password: passwordRaw,
-      batteriesPath: record.batteries_path?.length ? record.batteries_path : "/config/batteries",
-      timeoutSeconds:
-        typeof record.timeout_s === "number" && Number.isFinite(record.timeout_s) ? record.timeout_s : 6,
-      verifyTls: record.verify_tls ?? false,
-    } satisfies FroniusConfig;
   }
 
   private resolveDesiredMode(snapshot: SnapshotPayload): FroniusMode {
@@ -281,9 +290,13 @@ export class FroniusService {
   private async requestJson(
     method: string,
     url: string,
-    credentials: FroniusConfig,
+    credentials: FroniusConnectionConfig,
     payload: Record<string, unknown> | null = null,
   ): Promise<unknown> {
+    this.logger.log(`Fronius ${method.toUpperCase()} ${url}`);
+    if (payload) {
+      this.logger.verbose(`Fronius request payload: ${JSON.stringify(payload)}`);
+    }
     const headers = new Headers({Accept: "application/json, text/plain, */*"});
     let body: string | undefined;
     if (payload) {
@@ -312,7 +325,7 @@ export class FroniusService {
   private async performDigestRequest(
     method: string,
     urlString: string,
-    credentials: FroniusConfig,
+    credentials: FroniusConnectionConfig,
     headers: Headers,
     body: string | undefined,
   ): Promise<Response> {
@@ -425,13 +438,14 @@ export class FroniusService {
     return `Digest ${parts.join(", ")}`;
   }
 
-  private async logoutFroniusSession(config: FroniusConfig): Promise<void> {
+  private async logoutFroniusSession(config: FroniusConnectionConfig): Promise<void> {
     const logoutUrl = this.buildUrl(config.host, "/commands/Logout");
     try {
+      this.logger.log(`Logging out Fronius session via ${logoutUrl}`);
       await this.requestJson("GET", logoutUrl, config);
-      this.logger.debug("Fronius session logged out.");
+      this.logger.verbose("Fronius session logged out.");
     } catch (error) {
-      this.logger.debug(`Fronius logout skipped: ${this.describeError(error)}`);
+      this.logger.verbose(`Fronius logout skipped: ${this.describeError(error)}`);
     }
   }
 
@@ -441,4 +455,29 @@ export class FroniusService {
     }
     return String(error);
   }
+}
+
+export function requireFroniusConnectionConfig(config: ConfigDocument): FroniusConnectionConfig | null {
+  const record = config.fronius;
+  if (!record || record.enabled === false) {
+    return null;
+  }
+
+  const hostRaw = record.host?.trim() ?? "";
+  const userRaw = record.user?.trim() ?? "";
+  const passwordRaw = record.password?.trim() ?? "";
+
+  if (!hostRaw || !userRaw || !passwordRaw) {
+    throw new Error("Fronius configuration requires host, user, and password when enabled.");
+  }
+
+  return {
+    host: hostRaw,
+    user: userRaw,
+    password: passwordRaw,
+    batteriesPath: record.batteries_path?.length ? record.batteries_path : "/config/batteries",
+    timeoutSeconds:
+      typeof record.timeout_s === "number" && Number.isFinite(record.timeout_s) ? record.timeout_s : 6,
+    verifyTls: record.verify_tls ?? false,
+  } satisfies FroniusConnectionConfig;
 }

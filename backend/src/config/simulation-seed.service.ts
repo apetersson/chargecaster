@@ -3,8 +3,8 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { SimulationService } from "../simulation/simulation.service";
 import { FroniusService } from "../fronius/fronius.service";
 import type { ConfigDocument } from "./schemas";
-import { ConfigFileService } from "./config-file.service";
 import { SimulationPreparationService } from "./simulation-preparation.service";
+import { RuntimeConfigService } from "./runtime-config.service";
 
 @Injectable()
 export class SimulationSeedService implements OnModuleDestroy {
@@ -14,7 +14,7 @@ export class SimulationSeedService implements OnModuleDestroy {
   private nextIntervalSeconds: number | null = null;
 
   constructor(
-    @Inject(ConfigFileService) private readonly configFileService: ConfigFileService,
+    @Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService,
     @Inject(SimulationPreparationService) private readonly preparationService: SimulationPreparationService,
     @Inject(SimulationService) private readonly simulationService: SimulationService,
     @Inject(FroniusService) private readonly froniusService: FroniusService,
@@ -27,10 +27,9 @@ export class SimulationSeedService implements OnModuleDestroy {
       return;
     }
     this.runInProgress = true;
-    const configPath = this.configFileService.resolvePath();
     try {
-      const rawConfig = await this.configFileService.loadDocument(configPath);
-      this.logger.log(`Loaded configuration from ${configPath}`);
+      const rawConfig = this.configState.getDocument();
+      this.logger.verbose("Loaded configuration from runtime state.");
 
       const prepared = await this.preparationService.prepare(rawConfig);
       this.nextIntervalSeconds = prepared.intervalSeconds;
@@ -63,12 +62,7 @@ export class SimulationSeedService implements OnModuleDestroy {
         },
       });
       this.logger.log("Seeded snapshot using config data.");
-
-      if (rawConfig.dry_run) {
-        this.logger.log("Dry run enabled; skipping Fronius optimization apply.");
-      } else {
-        await this.applyFronius(snapshot, rawConfig);
-      }
+      await this.applyFronius(snapshot, rawConfig);
     } catch (error) {
       this.logger.error(`Simulation seed failed: ${this.describeError(error)}`);
       throw error;

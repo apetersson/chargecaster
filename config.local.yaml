@@ -33,7 +33,7 @@ solar:
   direct_use_ratio: 0.6
 
 logging:
-  level: INFO
+  level: VERBOSE
 
 market_data:
   awattar:

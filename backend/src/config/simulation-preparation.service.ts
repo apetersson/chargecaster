@@ -35,6 +35,7 @@ export class SimulationPreparationService {
   ) {}
 
   async prepare(configFile: ConfigDocument): Promise<PreparedSimulation> {
+    this.logger.log("Preparing simulation inputs from configuration document");
     const simulationConfig = this.configFactory.create(configFile);
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -46,17 +47,17 @@ export class SimulationPreparationService {
 
     const evccResult = await this.evccDataService.collect(configFile.evcc, warnings);
     const marketResult = await this.marketDataService.collect(configFile.market_data, simulationConfig, warnings, evccResult.forecast);
-    this.logger.log(
+    this.logger.verbose(
       `Market data fetch summary: raw_slots=${marketResult.forecast.length}, price_snapshot=${marketResult.priceSnapshot ?? "n/a"}`,
     );
     const futureMarketForecast = this.filterFutureForecastEntries(marketResult.forecast);
-    this.logger.log(
+    this.logger.verbose(
       `EVCC fetch summary: raw_slots=${evccResult.forecast.length}, solar_slots=${evccResult.solarForecast.length}, battery_soc=${evccResult.batterySoc ?? "n/a"}`,
     );
     const nowIso = new Date().toISOString();
     const futureEvccForecast = this.filterFutureForecastEntries(evccResult.forecast);
     const futureSolarForecast = this.filterFutureSolarEntries(evccResult.solarForecast);
-    this.logger.log(
+    this.logger.verbose(
       `Future entry counts (ref=${nowIso}): evcc=${futureEvccForecast.length}, market=${futureMarketForecast.length}, solar=${futureSolarForecast.length}`,
     );
 

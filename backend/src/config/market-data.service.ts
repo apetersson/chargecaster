@@ -31,6 +31,7 @@ export class MarketDataService {
     const fromEvccCfg = config?.from_evcc;
 
     for (const p of providers) {
+      this.logger.log(`Collecting market data via provider ${p.key}`);
       let impl: MarketProvider | null = null;
       if (p.key === "awattar") {
         if (!awattarCfg) {
@@ -51,9 +52,13 @@ export class MarketDataService {
       if (!impl) continue;
       const ctx: MarketProviderContext = {simulationConfig, warnings};
       const {forecast, priceSnapshot} = await impl.collect(ctx);
+      this.logger.verbose(
+        `Provider ${p.key} returned forecast=${forecast.length}, price_snapshot=${priceSnapshot ?? "n/a"}`,
+      );
       if (forecast.length) {
         return {forecast, priceSnapshot};
       }
+      this.logger.warn(`Provider ${p.key} returned no usable price slots; trying next provider`);
     }
     return {forecast: [], priceSnapshot: null};
   }

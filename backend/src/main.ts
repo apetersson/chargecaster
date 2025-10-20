@@ -7,20 +7,27 @@ import type { FastifyInstance } from "fastify";
 import { existsSync } from "node:fs";
 import { normalize, relative } from "node:path";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
-import { Logger } from "@nestjs/common";
+import { Logger, LogLevel } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import fastifyStatic from "@fastify/static";
 
 import { AppModule } from "./app.module";
+import { ConfigFileService } from "./config/config-file.service";
+import { setRuntimeConfig } from "./config/runtime-config";
+import type { ConfigDocument } from "./config/schemas";
 import { SimulationService } from "./simulation/simulation.service";
 import { SimulationSeedService } from "./config/simulation-seed.service";
 import { TrpcRouter } from "./trpc/trpc.router";
+import { requireFroniusConnectionConfig } from "./fronius/fronius.service";
 
 const isAddressInfo = (value: AddressInfo | string | null): value is AddressInfo =>
   typeof value === "object" && value !== null && "port" in value;
 
 async function bootstrap(): Promise<NestFastifyApplication> {
+  const initialConfig = await configureGlobalLogging();
+  validateConfigDocument(initialConfig);
+  setRuntimeConfig(initialConfig);
   const adapter = new FastifyAdapter({logger: false, maxParamLength: 4096});
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     bufferLogs: true,
@@ -118,6 +125,119 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   }
 
   return app;
+}
+
+async function configureGlobalLogging(): Promise<ConfigDocument> {
+  const bootstrapLogger = new Logger("bootstrap");
+  const configFileService = new ConfigFileService();
+
+  let levels: LogLevel[] = ["fatal", "error", "warn", "log"];
+  let normalizedLevel = "info";
+  let document: ConfigDocument | null = null;
+
+  try {
+    const configPath = configFileService.resolvePath();
+    document = await configFileService.loadDocument(configPath);
+
+    const rawLevel = document.logging?.level ?? "info";
+    const {levels: resolvedLevels, normalized, fallbackUsed} = resolveLogLevels(rawLevel);
+    levels = resolvedLevels;
+    normalizedLevel = normalized;
+    if (fallbackUsed) {
+      bootstrapLogger.warn(`Unknown logging.level value '${String(rawLevel)}'; defaulting to INFO`);
+    }
+  } catch (error) {
+    bootstrapLogger.error(`Failed to load configuration for logging: ${describeError(error)}`);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+
+  Logger.overrideLogger(levels);
+  bootstrapLogger.log(`Logger minimum level set to ${normalizedLevel.toUpperCase()}`);
+  return document;
+}
+
+function validateConfigDocument(document: ConfigDocument): void {
+  const bootstrapLogger = new Logger("bootstrap");
+
+  try {
+    requireFroniusConnectionConfig(document);
+  } catch (error) {
+    throw new Error(`Fronius configuration invalid: ${describeError(error)}`);
+  }
+
+  const evccConfig = document.evcc;
+  if (evccConfig && evccConfig.enabled !== false) {
+    const baseUrl = typeof evccConfig.base_url === "string" ? evccConfig.base_url.trim() : "";
+    if (!baseUrl) {
+      throw new Error("EVCC base_url must be provided when evcc.enabled is true.");
+    }
+  }
+
+  const capacity = document.battery?.capacity_kwh;
+  if (typeof capacity !== "number" || !Number.isFinite(capacity) || capacity <= 0) {
+    throw new Error("battery.capacity_kwh must be a positive number.");
+  }
+
+  const market = document.market_data;
+  if (market) {
+    const priorities = new Map<number, string[]>();
+    const register = (name: string, priority: number | undefined) => {
+      if (typeof priority !== "number" || !Number.isFinite(priority)) {
+        return;
+      }
+      if (priority < 0) {
+        throw new Error(`market_data.${name}.priority must be a non-negative integer.`);
+      }
+      const bucket = priorities.get(priority) ?? [];
+      bucket.push(name);
+      priorities.set(priority, bucket);
+    };
+
+    register("awattar", market.awattar?.priority);
+    register("entsoe", market.entsoe?.priority);
+    register("from_evcc", market.from_evcc?.priority);
+
+    for (const [priority, providers] of priorities.entries()) {
+      if (providers.length > 1) {
+        throw new Error(`Duplicate market_data priority ${priority} assigned to ${providers.join(", ")}.`);
+      }
+    }
+  }
+
+  bootstrapLogger.verbose("Configuration validation successful.");
+}
+
+function resolveLogLevels(level: unknown): { levels: LogLevel[]; normalized: string; fallbackUsed: boolean } {
+  const normalizedInput = typeof level === "string" ? level.trim().toLowerCase() : "info";
+  const aliasMap: Record<string, string> = {
+    log: "info",
+    info: "info",
+    warning: "warn",
+  };
+  const canonical = aliasMap[normalizedInput] ?? normalizedInput;
+
+  const mapping: Record<string, LogLevel[]> = {
+    fatal: ["fatal"],
+    error: ["fatal", "error"],
+    warn: ["fatal", "error", "warn"],
+    info: ["fatal", "error", "warn", "log"],
+    debug: ["fatal", "error", "warn", "log", "debug"],
+    verbose: ["fatal", "error", "warn", "log", "debug", "verbose"],
+  };
+
+  const resolved = mapping[canonical];
+  if (resolved) {
+    return {levels: resolved, normalized: canonical, fallbackUsed: false};
+  }
+
+  return {levels: mapping.info, normalized: "info", fallbackUsed: true};
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 if (process.env.NODE_ENV !== "test") {

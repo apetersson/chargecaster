@@ -16,6 +16,7 @@ import { StorageService } from "../storage/storage.service";
 
 const DEFAULT_WINDOW_HOURS = 24;
 const FALLBACK_HISTORY_LIMIT = 500;
+const computationLogger = new Logger("BacktestComputation");
 
 export interface BacktestSavingsOptions {
   history?: HistoryPoint[];
@@ -109,6 +110,7 @@ export function computeBacktestedSavings(
 ): BacktestSavingsResult | null {
   const capacityValue = toFiniteNumber(config?.battery?.capacity_kwh) ?? null;
   if (capacityValue === null || capacityValue <= 0) {
+    computationLogger.warn("Backtest savings aborted: missing or invalid battery capacity");
     return null;
   }
   const capacity = Energy.fromKilowattHours(capacityValue);
@@ -131,6 +133,7 @@ export function computeBacktestedSavings(
   })();
 
   if (latestTimestampMs === null) {
+    computationLogger.verbose("Backtest savings aborted: unable to resolve reference timestamp");
     return null;
   }
 
@@ -152,8 +155,15 @@ export function computeBacktestedSavings(
     .sort((a, b) => a.__ts - b.__ts);
 
   if (combined.length < 2) {
+    computationLogger.verbose(
+      `Backtest savings aborted: insufficient history (usable_points=${combined.length})`,
+    );
     return null;
   }
+
+  computationLogger.log(
+    `Backtest savings computation started (windowHours=${windowHours}, points=${combined.length})`,
+  );
 
   const feedInTariffValue = Math.max(0, toFiniteNumber(config?.price?.feed_in_tariff_eur_per_kwh) ?? 0);
   const feedInPrice = EnergyPrice.fromEurPerKwh(feedInTariffValue);
@@ -350,6 +360,7 @@ export function computeBacktestedSavings(
   }
 
   if (intervalCount === 0) {
+    computationLogger.verbose("Backtest savings aborted: no intervals within window");
     return null;
   }
 
@@ -370,6 +381,10 @@ export function computeBacktestedSavings(
   const windowStartIso = new Date(windowStartUsed ?? windowStartMs).toISOString();
   const windowEndIso = new Date(latestTimestampMs).toISOString();
 
+  computationLogger.log(
+    `Backtest savings complete: intervals=${intervalCount}, savings=${savingsEur.toFixed(2)} EUR`,
+  );
+
   return {
     savingsEur,
     actualCostEur,
@@ -387,6 +402,7 @@ function computeBacktestSeries(
 ): BacktestSeriesResponse | null {
   const capacityValue = toFiniteNumber(config?.battery?.capacity_kwh) ?? null;
   if (capacityValue === null || capacityValue <= 0) {
+    computationLogger.warn("Backtest series aborted: missing or invalid battery capacity");
     return null;
   }
   const capacity = Energy.fromKilowattHours(capacityValue);
@@ -409,6 +425,7 @@ function computeBacktestSeries(
   })();
 
   if (latestTimestampMs === null) {
+    computationLogger.verbose("Backtest series aborted: unable to resolve reference timestamp");
     return null;
   }
 
@@ -430,8 +447,15 @@ function computeBacktestSeries(
     .sort((a, b) => a.__ts - b.__ts);
 
   if (combined.length < 2) {
+    computationLogger.verbose(
+      `Backtest series aborted: insufficient history (usable_points=${combined.length})`,
+    );
     return null;
   }
+
+  computationLogger.log(
+    `Backtest series computation started (windowHours=${windowHours}, points=${combined.length})`,
+  );
 
   const feedInTariffValue = Math.max(0, toFiniteNumber(config?.price?.feed_in_tariff_eur_per_kwh) ?? 0);
   const feedInPrice = EnergyPrice.fromEurPerKwh(feedInTariffValue);
@@ -619,12 +643,16 @@ function computeBacktestSeries(
   }
 
   if (!points.length) {
+    computationLogger.verbose("Backtest series aborted: no data points generated");
     return null;
   }
 
   const generatedAt = new Date(latestTimestampMs).toISOString();
   const windowStartIso = new Date(windowStartUsed ?? windowStartMs).toISOString();
   const windowEndIso = new Date(latestTimestampMs).toISOString();
+  computationLogger.log(
+    `Backtest series complete: points=${points.length}, window_start=${windowStartIso}, window_end=${windowEndIso}`,
+  );
   return {generated_at: generatedAt, window_start: windowStartIso, window_end: windowEndIso, points};
 }
 
@@ -643,12 +671,23 @@ export class BacktestSavingsService {
     const baseHistory = options.history ?? this.storage.listHistory(limit).map((record) => record.payload);
     const extraEntries = options.extraEntries ?? [];
     const combined = baseHistory.concat(extraEntries);
+    this.logger.log(
+      `Calculating backtest savings (history=${baseHistory.length}, extra=${extraEntries.length}, limit=${limit})`,
+    );
     try {
-      return computeBacktestedSavings(config, combined, {
+      const result = computeBacktestedSavings(config, combined, {
         ...options,
         history: undefined,
         extraEntries: undefined,
       });
+      if (result) {
+        this.logger.log(
+          `Backtest savings computed: intervals=${result.intervalCount}, savings=${result.savingsEur.toFixed(2)} EUR`,
+        );
+      } else {
+        this.logger.verbose("Backtest savings unavailable: insufficient data returned");
+      }
+      return result;
     } catch (error) {
       this.logger.warn(`Failed to compute backtested savings: ${String(error)}`);
       return null;
@@ -663,12 +702,23 @@ export class BacktestSavingsService {
     const baseHistory = options.history ?? this.storage.listHistory(limit).map((record) => record.payload);
     const extraEntries = options.extraEntries ?? [];
     const combined = baseHistory.concat(extraEntries);
+    this.logger.log(
+      `Building backtest series (history=${baseHistory.length}, extra=${extraEntries.length}, limit=${limit})`,
+    );
     try {
-      return computeBacktestSeries(config, combined, {
+      const result = computeBacktestSeries(config, combined, {
         ...options,
         history: undefined,
         extraEntries: undefined,
       });
+      if (result) {
+        this.logger.log(
+          `Backtest series generated: points=${result.points.length}, window=${result.window_start}→${result.window_end}`,
+        );
+      } else {
+        this.logger.verbose("Backtest series unavailable: insufficient data returned");
+      }
+      return result;
     } catch (error) {
       this.logger.warn(`Failed to compute backtest series: ${String(error)}`);
       return null;

@@ -1,10 +1,10 @@
 import { Module } from "@nestjs/common";
 
 import { TrpcRouter } from "./trpc.router";
-import { SimulationModule } from "../simulation/simulation.module";
+import { ChargecasterServicesModule } from "../chargecaster-services.module";
 
 @Module({
-  imports: [SimulationModule],
+  imports: [ChargecasterServicesModule],
   providers: [TrpcRouter],
   exports: [TrpcRouter],
 })

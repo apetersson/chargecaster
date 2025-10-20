@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import type { RawForecastEntry } from "@chargecaster/domain";
 import type { EntsoeNewConfig } from "../schemas";
@@ -9,11 +10,13 @@ const SLOT_15M_MS = 15 * 60 * 1000;
 
 export class EntsoeNewProvider implements MarketProvider {
   readonly key = "entsoe";
+  private readonly logger = new Logger(EntsoeNewProvider.name);
   constructor(private readonly cfg?: EntsoeNewConfig) {}
 
   async collect(ctx: MarketProviderContext): Promise<MarketProviderResult> {
     try {
       const ranges = this.buildDayWindows(this.cfg?.max_hours ?? 72);
+      this.logger.log(`Fetching ENTSO-E transparency data across ${ranges.length} window(s)`);
       let all: RawForecastEntry[] = [];
       for (const [fromIso, toIso] of ranges) {
         const payload = await this.fetchCurve(fromIso, toIso);
@@ -22,11 +25,14 @@ export class EntsoeNewProvider implements MarketProvider {
       }
       let forecast = clampHorizon(all, this.cfg?.max_hours ?? 72);
       if (this.cfg?.aggregate_hourly) {
+        this.logger.verbose("Aggregating ENTSO-E prices to hourly cadence");
         forecast = this.aggregateToHourly(forecast);
       }
       const priceSnapshot = derivePriceSnapshotFromForecast(forecast, ctx.simulationConfig);
+      this.logger.verbose(`ENTSO-E returned ${forecast.length} slots (snapshot=${priceSnapshot ?? "n/a"})`);
       return {forecast, priceSnapshot};
     } catch (error) {
+      this.logger.warn(`ENTSO-E fetch failed: ${this.describeError(error)}`);
       ctx.warnings.push(`ENTSOE new-transparency fetch failed: ${this.describeError(error)}`);
       return {forecast: [], priceSnapshot: null};
     }
@@ -53,6 +59,7 @@ export class EntsoeNewProvider implements MarketProvider {
   }
 
   private async fetchCurve(fromIso: string, toIso: string): Promise<unknown> {
+    this.logger.log(`ENTSO-E POST ${BASE_URL} (from=${fromIso}, to=${toIso})`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
@@ -67,6 +74,7 @@ export class EntsoeNewProvider implements MarketProvider {
         "Accept": "application/json",
         "Content-Type": "application/json; charset=utf-8",
       } as Record<string, string>;
+      this.logger.verbose(`ENTSO-E request payload: ${JSON.stringify(body)}`);
       const response = await fetch(BASE_URL, {
         method: "POST",
         headers,
