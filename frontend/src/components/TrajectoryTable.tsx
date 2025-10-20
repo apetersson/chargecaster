@@ -1,4 +1,4 @@
-import { useMemo, type JSX } from "react";
+import { type JSX, useMemo } from "react";
 import { TimeSlot } from "@chargecaster/domain";
 
 import type { ForecastEra, ForecastSourcePayload, OracleEntry, SnapshotSummary } from "../types";
@@ -38,7 +38,7 @@ const findOracleForEra = (
   era: ForecastEra,
   lookup: Map<string, OracleEntry>,
 ): OracleEntry | undefined => {
-  if (typeof era.era_id === "string" && era.era_id.length > 0) {
+  if (era.era_id.length > 0) {
     const direct = lookup.get(era.era_id);
     if (direct) {
       return direct;
@@ -72,11 +72,7 @@ const resolveCost = (era: ForecastEra, provider: string): { priceCt: number | nu
     return null;
   }
   const priceWithFee = match.payload.price_with_fee_ct_per_kwh;
-  if (Number.isFinite(priceWithFee)) {
-    return {priceCt: priceWithFee};
-  }
-  const fallbackPrice = match.payload.price_ct_per_kwh;
-  return {priceCt: Number.isFinite(fallbackPrice) ? fallbackPrice : null};
+  return {priceCt: priceWithFee};
 };
 
 const resolveSolar = (
@@ -91,10 +87,8 @@ const resolveSolar = (
   }
   const energyWh = match.payload.energy_wh;
   const energyKwh = energyWh / 1000;
-  const durationHours = slot ? slot.duration.hours :
-    (typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
-      ? era.duration_hours
-      : null);
+  const fallbackDuration = era.duration_hours ?? null;
+  const durationHours = slot ? slot.duration.hours : fallbackDuration;
   const averageW = match.payload.average_power_w ?? (
     durationHours && durationHours > 0 ? energyWh / durationHours : null
   );
@@ -133,12 +127,12 @@ function TrajectoryTable({forecast, oracleEntries, summary}: TrajectoryTableProp
       <div className="table-wrapper">
         <table className="forecast-table">
           <colgroup>
-            <col className="col-time" />
-            <col className="col-price" />
-            <col className="col-solar" />
-            <col className="col-power" />
-            <col className="col-soc" />
-            <col className="col-power" />
+            <col className="col-time"/>
+            <col className="col-price"/>
+            <col className="col-solar"/>
+            <col className="col-power"/>
+            <col className="col-soc"/>
+            <col className="col-power"/>
           </colgroup>
           <thead>
           <tr>
@@ -170,31 +164,27 @@ function TrajectoryTable({forecast, oracleEntries, summary}: TrajectoryTableProp
                 : solar.energyKwh !== null
                   ? formatNumber(solar.energyKwh, " kWh")
                   : "n/a";
-            const r = typeof summary?.solar_direct_use_ratio === "number" && Number.isFinite(summary.solar_direct_use_ratio)
-              ? summary.solar_direct_use_ratio
-              : 0.6;
-            const bp = typeof summary?.house_load_w === "number" && Number.isFinite(summary.house_load_w)
-              ? summary.house_load_w
-              : 0;
-            const solarAvgForDemand = typeof solar.averageW === "number" && Number.isFinite(solar.averageW) ? solar.averageW : 0;
+            const r = summary?.solar_direct_use_ratio ?? 0.6;
+            const bp = summary?.house_load_w ?? 0;
+            const solarAvgForDemand = solar.averageW ?? 0;
             const demandW = bp + r * solarAvgForDemand;
             const strategy = oracle?.strategy ?? "auto";
             const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);
             const targetLabel = oracle ? `${endSocValue} (${strategy.toUpperCase()})` : "n/a";
-            const gridEnergyWh = oracle?.grid_energy_wh;
+            const gridEnergyWh = oracle?.grid_energy_wh ?? null;
             let gridPower = "n/a";
-            if (typeof gridEnergyWh === "number" && Number.isFinite(gridEnergyWh)) {
-              const durationHours = slot ? slot.duration.hours :
-                (typeof era.duration_hours === "number" && Number.isFinite(era.duration_hours)
-                  ? era.duration_hours
-                  : (() => {
-                    const start = era.start ? new Date(era.start).getTime() : NaN;
-                    const end = era.end ? new Date(era.end).getTime() : NaN;
-                    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
-                      return (end - start) / 3_600_000;
-                    }
-                    return null;
-                  })());
+            if (gridEnergyWh !== null) {
+              const durationFallback = (() => {
+                const start = era.start ? new Date(era.start).getTime() : NaN;
+                const end = era.end ? new Date(era.end).getTime() : NaN;
+                if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                  return (end - start) / 3_600_000;
+                }
+                return null;
+              })();
+              const durationHours = slot
+                ? slot.duration.hours
+                : era.duration_hours ?? durationFallback;
               if (durationHours && durationHours > 0) {
                 const powerW = gridEnergyWh / durationHours;
                 if (Number.isFinite(powerW)) {
@@ -211,7 +201,8 @@ function TrajectoryTable({forecast, oracleEntries, summary}: TrajectoryTableProp
             return (
               <tr key={era.era_id}>
                 <td className="timestamp">{timeCell}</td>
-                <td className="numeric">{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
+                <td
+                  className="numeric">{marketCost && marketCost.priceCt !== null ? formatNumber(marketCost.priceCt, " ct/kWh") : "n/a"}</td>
                 <td className="numeric">{solarLabel}</td>
                 <td className="numeric">{formatNumber(demandW, " W")}</td>
                 <td className="numeric">{targetLabel}</td>

@@ -265,20 +265,14 @@ export class FroniusService {
     };
   }
 
-  private parsePercentage(value: unknown): Percentage | null {
+  private parsePercentage(value: Percentage | number | null | undefined): Percentage | null {
     if (value instanceof Percentage) {
       return value;
     }
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return Percentage.fromPercent(value);
+    if (value == null) {
+      return null;
     }
-    if (typeof value === "string" && value.trim().length > 0) {
-      const numeric = Number(value);
-      if (Number.isFinite(numeric)) {
-        return Percentage.fromPercent(numeric);
-      }
-    }
-    return null;
+    return Percentage.fromPercent(Math.min(Math.max(value, 0), 100));
   }
 
   private toPercentInteger(value: Percentage): number {

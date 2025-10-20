@@ -62,11 +62,8 @@ export class SimulationService {
 
   ensureSeedFromFixture(): SnapshotPayload {
     const existing = this.getLatestSnapshot();
-    if (existing) {
-      const hasForecast = Array.isArray(existing.forecast_eras) && existing.forecast_eras.length > 0;
-      if (hasForecast) {
-        return existing;
-      }
+    if (existing && existing.forecast_eras.length > 0) {
+      return existing;
     }
 
     const fixturePath = join(process.cwd(), "fixtures", "sample_data.json");
@@ -119,9 +116,12 @@ export class SimulationService {
     const liveState = {battery_soc: resolvedSoCPercent};
     const slots = normalizePriceSlots(input.forecast);
     const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
-    const warningCount = Array.isArray(input.warnings) ? input.warnings.length : 0;
-    const errorCount = Array.isArray(input.errors) ? input.errors.length : 0;
-    const forecastEraCount = Array.isArray(input.forecastEras) ? input.forecastEras.length : 0;
+    const warnings = [...(input.warnings ?? [])];
+    const errors = [...(input.errors ?? [])];
+    const forecastErasInput = input.forecastEras ?? [];
+    const warningCount = warnings.length;
+    const errorCount = errors.length;
+    const forecastEraCount = forecastErasInput.length;
     this.logger.log(
       `Running simulation with forecast_slots=${slots.length}, solar_slots=${solarSlots.length}, live_soc=${
         liveState.battery_soc ?? "n/a"
@@ -190,16 +190,13 @@ export class SimulationService {
     const fallbackPrice = slots.length
       ? EnergyPrice.fromEurPerKwh(slots[0].price).withAdditionalFee(gridFee(input.config))
       : null;
-    const priceSnapshot = typeof input.priceSnapshotEurPerKwh === "number"
+    const priceSnapshot = input.priceSnapshotEurPerKwh != null
       ? EnergyPrice.fromEurPerKwh(input.priceSnapshotEurPerKwh)
       : fallbackPrice;
     const priceSnapshotEur = priceSnapshot?.eurPerKwh ?? null;
     const priceSnapshotCt = priceSnapshot?.ctPerKwh ?? null;
-    const warnings = Array.isArray(input.warnings) ? [...input.warnings] : [];
-    const errors = Array.isArray(input.errors) ? [...input.errors] : [];
     const fallbackEras = buildErasFromSlots(slots);
-    const providedEras = Array.isArray(input.forecastEras) ? input.forecastEras : null;
-    const forecastEras = providedEras?.length ? providedEras : fallbackEras;
+    const forecastEras = forecastErasInput.length ? forecastErasInput : fallbackEras;
     // Run a second pass that mimics "auto" mode (no active grid charging) for comparison
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
@@ -251,7 +248,7 @@ export class SimulationService {
     };
 
     const observedGridPower = input.observations?.gridPowerW;
-    if (typeof observedGridPower === "number" && Number.isFinite(observedGridPower)) {
+    if (observedGridPower != null) {
       historyEntry.grid_power_w = observedGridPower;
     }
 
@@ -271,7 +268,7 @@ export class SimulationService {
         historyEntry.solar_power_w = historyEntry.solar_power_w ?? 0;
       }
     }
-    if (typeof observedSolarPower === "number" && Number.isFinite(observedSolarPower)) {
+    if (observedSolarPower != null) {
       historyEntry.solar_power_w = observedSolarPower;
       if (
         historyEntry.solar_energy_wh === null &&
@@ -282,7 +279,7 @@ export class SimulationService {
     }
 
     const observedHomePower = input.observations?.homePowerW;
-    if (typeof observedHomePower === "number" && Number.isFinite(observedHomePower)) {
+    if (observedHomePower != null) {
       historyEntry.home_power_w = observedHomePower;
     }
 
@@ -309,7 +306,7 @@ export class SimulationService {
   }
 
   appendErrorsToLatestSnapshot(messages: string[]): void {
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (messages.length === 0) {
       return;
     }
     const latest = this.storageRef.getLatestSnapshot();
@@ -317,7 +314,7 @@ export class SimulationService {
       return;
     }
     const updatedPayload: SnapshotPayload = structuredClone(latest.payload);
-    const existing = Array.isArray(updatedPayload.errors) ? [...updatedPayload.errors] : [];
+    const existing = [...updatedPayload.errors];
     let changed = false;
     for (const rawMessage of messages) {
       const message = rawMessage.trim();

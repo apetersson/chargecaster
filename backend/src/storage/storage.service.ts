@@ -46,8 +46,7 @@ export class StorageService implements OnModuleDestroy {
   }
 
   replaceSnapshot(payload: SnapshotPayload): void {
-    const rawTimestamp = payload.timestamp;
-    const timestamp = typeof rawTimestamp === "string" && rawTimestamp.length > 0 ? rawTimestamp : new Date().toISOString();
+    const timestamp = payload.timestamp;
     this.logger.log(`Replacing latest snapshot with timestamp ${timestamp}`);
     const deleteStmt = this.db.prepare("DELETE FROM snapshots");
     const insertStmt = this.db.prepare("INSERT INTO snapshots (timestamp, payload) VALUES (?, ?)");
@@ -66,9 +65,7 @@ export class StorageService implements OnModuleDestroy {
     const stmt = this.db.prepare("INSERT INTO history (timestamp, payload) VALUES (?, ?)");
     const txn = this.db.transaction((items: HistoryPoint[]) => {
       for (const entry of items) {
-        const rawTimestamp = entry.timestamp;
-        const timestamp = typeof rawTimestamp === "string" && rawTimestamp.length > 0 ? rawTimestamp : new Date().toISOString();
-        stmt.run(timestamp, JSON.stringify(entry));
+        stmt.run(entry.timestamp, JSON.stringify(entry));
       }
     });
     txn(entries);

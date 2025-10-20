@@ -51,7 +51,7 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
           <span className="value small">
             {formatNumber(
               data.price_snapshot_ct_per_kwh ??
-              (typeof data.price_snapshot_eur_per_kwh === "number"
+              (data.price_snapshot_eur_per_kwh != null
                 ? data.price_snapshot_eur_per_kwh * 100
                 : null),
               " ct/kWh",
