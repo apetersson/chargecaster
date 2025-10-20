@@ -1,10 +1,11 @@
+import { TimeSlot } from "@chargecaster/domain";
+
 import type {
   ForecastEra,
   ForecastSourcePayload,
   HistoryPoint,
   OracleEntry,
 } from "../../types";
-import { TimeSlot } from "@chargecaster/domain";
 
 import { DEFAULT_POWER_BOUNDS, DEFAULT_PRICE_BOUNDS, DEFAULT_SLOT_DURATION_MS } from "./constants";
 import type { AxisBounds, DerivedEra, ProjectionPoint, TimeRangeMs } from "./types";

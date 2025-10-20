@@ -1,8 +1,8 @@
 import { useMemo, type JSX } from "react";
+import { TimeSlot } from "@chargecaster/domain";
 
 import type { ForecastEra, ForecastSourcePayload, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
-import { TimeSlot } from "@chargecaster/domain";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
@@ -173,7 +173,7 @@ const TrajectoryTable = ({forecast, oracleEntries, summary}: TrajectoryTableProp
             const bp = typeof summary?.house_load_w === "number" && Number.isFinite(summary.house_load_w)
               ? summary.house_load_w
               : 0;
-            const solarAvgForDemand = typeof solar.averageW === "number" && Number.isFinite(solar.averageW) ? (solar.averageW as number) : 0;
+            const solarAvgForDemand = typeof solar.averageW === "number" && Number.isFinite(solar.averageW) ? solar.averageW : 0;
             const demandW = bp + r * solarAvgForDemand;
             const strategy = oracle?.strategy ?? "auto";
             const endSocValue = formatPercent(oracle?.end_soc_percent ?? oracle?.target_soc_percent ?? null);

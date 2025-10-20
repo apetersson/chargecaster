@@ -73,19 +73,21 @@ const App = (): JSX.Element => {
           forecastData,
           oracleData,
           backtestData,
-        ] = await Promise.all([
+        ] = await Promise.all<
+          [
+            DashboardOutputs["summary"],
+            DashboardOutputs["history"],
+            DashboardOutputs["forecast"],
+            DashboardOutputs["oracle"],
+            DashboardOutputs["backtest24h"],
+          ]
+        >([
           trpcClient.dashboard.summary.query(),
           trpcClient.dashboard.history.query(),
           trpcClient.dashboard.forecast.query(),
           trpcClient.dashboard.oracle.query(),
           trpcClient.dashboard.backtest24h.query(),
-        ]) as [
-          DashboardOutputs["summary"],
-          DashboardOutputs["history"],
-          DashboardOutputs["forecast"],
-          DashboardOutputs["oracle"],
-          DashboardOutputs["backtest24h"],
-        ];
+        ]);
 
         setSummary(summaryData);
         setHistory(historyData.entries);

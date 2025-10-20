@@ -190,14 +190,14 @@ export const useBacktestChart = (
   }, [series]);
 
   // Apply focus styling (smart vs dumb). We adjust colors post-build for clarity.
+  const focusModeOption = options?.focus ?? "dumb";
   const styledDatasets = useMemo(() => {
-    const focus = options?.focus ?? "dumb";
     return datasets.map((d, i) => {
       // indices: 0 savings, 1 grid smart, 2 grid dumb, 3 soc smart, 4 soc dumb
       if (i === 0) return d; // keep savings styling
       const isSmart = i === 1 || i === 3;
       const isDumb = i === 2 || i === 4;
-      if (focus === "smart" && isDumb) {
+      if (focusModeOption === "smart" && isDumb) {
         return {
           ...d,
           borderColor: "#94a3b8",
@@ -217,15 +217,29 @@ export const useBacktestChart = (
       }
       return d;
     });
-  }, [datasets, options?.focus]);
+  }, [datasets, focusModeOption]);
 
-  const chartOptions: ChartOptions<"line"> = useMemo(() => buildOptions({
-    bounds,
-    timeRangeMs,
-    legendGroups,
-    responsive: options,
-    valueAxisUnit: "ct"
-  }), [bounds, timeRangeMs, legendGroups, options?.isMobile, options?.showPowerAxisLabels, options?.showPriceAxisLabels]);
+  const chartOptions: ChartOptions<"line"> = useMemo(
+    () => buildOptions({
+      bounds,
+      timeRangeMs,
+      legendGroups,
+      responsive: {
+        isMobile: options?.isMobile,
+        showPowerAxisLabels: options?.showPowerAxisLabels,
+        showPriceAxisLabels: options?.showPriceAxisLabels,
+      },
+      valueAxisUnit: "ct",
+    }),
+    [
+      bounds,
+      timeRangeMs,
+      legendGroups,
+      options?.isMobile,
+      options?.showPowerAxisLabels,
+      options?.showPriceAxisLabels,
+    ],
+  );
 
   return useChartInstance(styledDatasets, chartOptions);
 };

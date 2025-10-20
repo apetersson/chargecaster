@@ -1,10 +1,10 @@
-import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { Injectable, Logger } from "@nestjs/common";
 
 import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
+import { EnergyPrice, TimeSlot } from "@chargecaster/domain";
 import { normalizePriceSlots } from "../simulation/simulation.service";
 import { parseTimestamp } from "../simulation/solar";
-import { EnergyPrice, TimeSlot } from "@chargecaster/domain";
 
 const SLOT_DURATION_MS = 3_600_000;
 

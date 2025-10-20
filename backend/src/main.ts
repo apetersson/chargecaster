@@ -2,10 +2,10 @@ import "reflect-metadata";
 
 import type { AddressInfo } from "node:net";
 
-import cors from "@fastify/cors";
-import type { FastifyInstance } from "fastify";
 import { existsSync } from "node:fs";
 import { normalize, relative } from "node:path";
+import cors from "@fastify/cors";
+import type { FastifyInstance } from "fastify";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Logger, LogLevel } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";

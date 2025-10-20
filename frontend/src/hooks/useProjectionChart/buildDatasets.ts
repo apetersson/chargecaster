@@ -1,5 +1,5 @@
-import type { ChartDataset } from "./chartSetup";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
+import type { ChartDataset } from "./chartSetup";
 
 import { GRID_BORDER, GRID_FILL, GRID_MARKERS_LABEL, HISTORY_BORDER, HISTORY_POINT, PRICE_BORDER, PRICE_FILL, SOC_BORDER, SOC_FILL, SOLAR_BORDER, SOLAR_FILL, GAP_THRESHOLD_MS, DEMAND_BORDER, DEMAND_FILL } from "./constants";
 import {
@@ -210,7 +210,7 @@ const buildDemandSeries = (
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
     const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
-    const solarAvg = isFiniteNumber(era.solarAverageW) ? (era.solarAverageW as number) : 0;
+    const solarAvg = isFiniteNumber(era.solarAverageW) ? era.solarAverageW : 0;
     const demand = bp + r * solarAvg;
     futurePoints.push({x: midpoint, y: demand, source: "forecast"});
   }
@@ -259,7 +259,7 @@ const buildLegendGroups = (
     }
   });
 
-  const legendConfig: Array<{ label: string; color: string; datasetLabels: string[] }> = [
+  const legendConfig: { label: string; color: string; datasetLabels: string[] }[] = [
     {label: "State of Charge", color: SOC_BORDER, datasetLabels: ["State of Charge"]},
     {label: "Grid Power", color: GRID_BORDER, datasetLabels: ["Grid Power", GRID_MARKERS_LABEL]},
     {label: "Solar Generation", color: SOLAR_BORDER, datasetLabels: ["Solar Generation"]},

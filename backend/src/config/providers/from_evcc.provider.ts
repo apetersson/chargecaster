@@ -1,7 +1,7 @@
 import { Logger } from "@nestjs/common";
-import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import type { RawForecastEntry } from "@chargecaster/domain";
 import type { FromEvccConfig } from "../schemas";
+import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import { derivePriceSnapshotFromForecast } from "./provider.utils";
 
 export class FromEvccProvider implements MarketProvider {

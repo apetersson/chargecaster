@@ -10,15 +10,27 @@ export const useProjectionChartOptions = (
   legendGroups: LegendGroup[],
   responsive?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean },
 ): ChartOptions<"line"> => {
+  const isMobile = responsive?.isMobile;
+  const showPowerAxisLabels = responsive?.showPowerAxisLabels;
+  const showPriceAxisLabels = responsive?.showPriceAxisLabels;
   return useMemo(
-    () => buildOptions({bounds, timeRangeMs, legendGroups, responsive}),
+    () => buildOptions({
+      bounds,
+      timeRangeMs,
+      legendGroups,
+      responsive: {
+        isMobile,
+        showPowerAxisLabels,
+        showPriceAxisLabels,
+      },
+    }),
     [
       bounds,
       timeRangeMs,
       legendGroups,
-      responsive?.isMobile,
-      responsive?.showPowerAxisLabels,
-      responsive?.showPriceAxisLabels,
+      isMobile,
+      showPowerAxisLabels,
+      showPriceAxisLabels,
     ],
   );
 };

@@ -3,6 +3,7 @@ import { initTRPC, type AnyProcedure, type AnyRouter, type ProcedureType } from 
 import { z } from "zod";
 
 import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
+import type { BacktestSeriesResponse } from "@chargecaster/domain";
 import { SimulationService } from "../simulation/simulation.service";
 import { ForecastService } from "../simulation/forecast.service";
 import { HistoryService } from "../simulation/history.service";
@@ -11,7 +12,6 @@ import { OracleService } from "../simulation/oracle.service";
 import { BacktestSavingsService } from "../simulation/backtest.service";
 import { SimulationConfigFactory } from "../config/simulation-config.factory";
 import { RuntimeConfigService } from "../config/runtime-config.service";
-import type { BacktestSeriesResponse } from "@chargecaster/domain";
 
 interface TrpcContext {
   simulationService?: SimulationService;

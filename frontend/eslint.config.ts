@@ -30,9 +30,21 @@ export default [
     },
     rules: {
       "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "off",
+      "react-hooks/exhaustive-deps": "error",
+      "react/jsx-no-leaked-render": "warn",
+      "react/no-unstable-nested-components": "warn",
+      "react/no-array-index-key": "warn",
+      "react/function-component-definition": ["warn", {
+        namedComponents: "function-declaration",
+        unnamedComponents: "arrow-function",
+      }],
+      "react/no-danger": "warn",
+      "jsx-a11y/no-autofocus": "warn",
+      "jsx-a11y/anchor-has-content": "warn",
+      "jsx-a11y/label-has-associated-control": "warn",
+      "import/no-cycle": ["error", { maxDepth: 1 }],
       // React 17+ JSX transform
-      "react/jsx-uses-react": "off",
+      "react/jsx-uses-react": "error",
       "react/react-in-jsx-scope": "off",
     },
   },

@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { HistoryPoint, HistoryResponse } from "@chargecaster/domain";
-import { normalizeHistoryList } from "./history.serializer";
 import { StorageService } from "../storage/storage.service";
+import { normalizeHistoryList } from "./history.serializer";
 
 @Injectable()
 export class HistoryService {
