@@ -365,7 +365,7 @@ export class FroniusService {
     }
   }
 
-  private parseDigestChallenge(header: string): Record<string, string> | null {
+  private parseDigestChallenge(header: string): Partial<Record<string, string>> | null {
     if (!header) {
       return null;
     }
@@ -375,18 +375,20 @@ export class FroniusService {
       : prefixTrimmed;
 
     const regex = /([a-zA-Z0-9_-]+)=(("[^"]*")|([^,]*))/g;
-    const params: Record<string, string> = {};
+    const params: Partial<Record<string, string>> = {};
     let match: RegExpExecArray | null;
     while ((match = regex.exec(withoutScheme)) !== null) {
       const key = match[1].toLowerCase();
-      const rawValue = match[3] ?? match[4] ?? "";
+      const group3: string | undefined = match[3] as string | undefined;
+      const group4: string | undefined = match[4] as string | undefined;
+      const rawValue = group3 ?? group4 ?? "";
       params[key] = rawValue.replace(/^"|"$/g, "");
     }
     return Object.keys(params).length ? params : null;
   }
 
   private buildDigestAuthorization(
-    params: Record<string, string>,
+    params: Partial<Record<string, string>>,
     method: string,
     url: URL,
     username: string,
@@ -405,7 +407,7 @@ export class FroniusService {
       throw new Error(`Unsupported digest algorithm '${algorithm}'`);
     }
 
-    const uri = url.pathname + (url.search ?? "");
+    const uri = url.pathname + url.search;
     const nc = "00000001";
     const cnonce = randomBytes(8).toString("hex");
 

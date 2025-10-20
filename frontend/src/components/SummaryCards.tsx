@@ -3,7 +3,7 @@ import type { JSX } from "react";
 import type { SnapshotSummary } from "../types";
 import { formatDate, formatNumber, formatPercent, statusClass } from "../utils/format";
 
-const SummaryCards = ({data}: { data: SnapshotSummary | null }): JSX.Element | null => {
+function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | null {
   if (!data) {
     return null;
   }
@@ -90,6 +90,6 @@ const SummaryCards = ({data}: { data: SnapshotSummary | null }): JSX.Element | n
       <small className="timestamp">Last update: {formatDate(data.timestamp)}</small>
     </section>
   );
-};
+}
 
 export default SummaryCards;

@@ -93,7 +93,7 @@ export class SimulationConfigFactory {
   }
 
   getIntervalSeconds(config: SimulationConfig): number | null {
-    const value = config.logic?.interval_seconds;
+    const value = config.logic.interval_seconds;
     if (typeof value === "number" && Number.isFinite(value) && value > 0) {
       return value;
     }

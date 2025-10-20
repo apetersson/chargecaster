@@ -341,7 +341,7 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
   const stateObj = state as UnknownRecord;
   const homePowerW = pickFirstNumber(
     site.homePower,
-    stateObj?.homePower,
+    stateObj.homePower,
   );
 
   const priceSnapshot = pickFirstNumber(

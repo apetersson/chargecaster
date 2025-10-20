@@ -46,8 +46,7 @@ export function clampRatio(value: unknown): number {
 }
 
 export function gridFee(cfg: SimulationConfig): number {
-  const priceCfg = cfg.price ?? {};
-  const value = priceCfg.grid_fee_eur_per_kwh ?? 0;
+  const value = cfg.price.grid_fee_eur_per_kwh ?? 0;
   return Number(value) || 0;
 }
 
@@ -156,35 +155,37 @@ function prepareSimulationContext(
     throw new Error("price forecast is empty");
   }
 
-  const capacityKwh = Number(cfg.battery?.capacity_kwh ?? 0);
+  const {battery, price, logic, solar} = cfg;
+
+  const capacityKwh = Number(battery.capacity_kwh ?? 0);
   if (!(capacityKwh > 0)) {
     throw new Error("battery.capacity_kwh must be > 0");
   }
 
   const normalizedOptions = {
     solarGenerationPerSlotKwh: options.solarGenerationKwhPerSlot ?? [],
-    directUseRatio: clampRatio(options.pvDirectUseRatio ?? cfg.solar?.direct_use_ratio ?? 0),
+    directUseRatio: clampRatio(options.pvDirectUseRatio ?? solar?.direct_use_ratio ?? 0),
     feedInTariff: Math.max(
       0,
-      Number(options.feedInTariffEurPerKwh ?? cfg.price?.feed_in_tariff_eur_per_kwh ?? 0),
+      Number(options.feedInTariffEurPerKwh ?? price.feed_in_tariff_eur_per_kwh ?? 0),
     ),
     allowBatteryExport:
       typeof options.allowBatteryExport === "boolean"
         ? options.allowBatteryExport
-        : cfg.logic?.allow_battery_export ?? true,
+        : logic.allow_battery_export ?? true,
     allowGridChargeFromGrid:
       typeof options.allowGridChargeFromGrid === "boolean" ? options.allowGridChargeFromGrid : true,
   } as const;
 
-  const maxChargePowerW = Math.max(0, Number(cfg.battery?.max_charge_power_w ?? 0));
-  const maxSolarChargePowerW = cfg.battery?.max_charge_power_solar_w != null
-    ? Math.max(0, Number(cfg.battery.max_charge_power_solar_w))
+  const maxChargePowerW = Math.max(0, Number(battery.max_charge_power_w ?? 0));
+  const maxSolarChargePowerW = battery.max_charge_power_solar_w != null
+    ? Math.max(0, Number(battery.max_charge_power_solar_w))
     : null;
-  const maxDischargePowerW = cfg.battery?.max_discharge_power_w != null
-    ? Math.max(0, Number(cfg.battery.max_discharge_power_w))
+  const maxDischargePowerW = battery.max_discharge_power_w != null
+    ? Math.max(0, Number(battery.max_discharge_power_w))
     : null;
   const networkTariffEurPerKwh = gridFee(cfg);
-  const houseLoadW = cfg.logic?.house_load_w ?? 1200;
+  const houseLoadW = logic.house_load_w ?? 1200;
 
   let currentSoCPercent = Number(liveState.battery_soc ?? 50);
   if (Number.isNaN(currentSoCPercent)) {
@@ -195,14 +196,14 @@ function prepareSimulationContext(
   const socPercentStep = 100 / SOC_STEPS;
   const energyPerStepKwh = capacityKwh / SOC_STEPS;
   const minAllowedSocPercent = (() => {
-    const v = cfg.battery?.auto_mode_floor_soc;
+    const v = battery.auto_mode_floor_soc;
     if (typeof v === "number" && Number.isFinite(v)) {
       return Math.min(Math.max(v, 0), 100);
     }
     return 0;
   })();
   const maxChargeSoC = (() => {
-    const v = cfg.battery?.max_charge_soc_percent;
+    const v = battery.max_charge_soc_percent;
     if (typeof v === "number" && Number.isFinite(v)) {
       return Math.min(Math.max(v, 0), 100);
     }
@@ -532,13 +533,19 @@ function buildSimulationOutput(
     : 0;
 
   const shouldChargeFromGrid = gridChargeTotalKwh > 0.001;
-  const firstTarget = oracleEntries[0]?.end_soc_percent ?? oracleEntries[0]?.target_soc_percent ?? null;
-  const lastEntry = oracleEntries[oracleEntries.length - 1];
-  const finalTarget = lastEntry?.end_soc_percent ?? lastEntry?.target_soc_percent ?? null;
+  const hasOracleEntries = oracleEntries.length > 0;
+  const firstEntry = hasOracleEntries ? oracleEntries[0] : null;
+  const firstTarget = firstEntry
+    ? firstEntry.end_soc_percent ?? firstEntry.target_soc_percent ?? null
+    : null;
+  const lastEntry = hasOracleEntries ? oracleEntries[oracleEntries.length - 1] : null;
+  const finalTarget = lastEntry
+    ? lastEntry.end_soc_percent ?? lastEntry.target_soc_percent ?? null
+    : null;
   const recommendedTargetRaw = shouldChargeFromGrid ? context.maxChargeSoC : (finalTarget ?? context.maxChargeSoC);
   const recommendedTarget = Math.max(
     context.minAllowedSocPercent,
-    Math.min(recommendedTargetRaw ?? context.maxChargeSoC, context.maxChargeSoC),
+    Math.min(recommendedTargetRaw, context.maxChargeSoC),
   );
   const nextStepSocPercentRaw = firstTarget ?? context.currentSoCStep * context.socPercentStep;
   const nextStepSocPercent = Math.max(context.minAllowedSocPercent, nextStepSocPercentRaw);

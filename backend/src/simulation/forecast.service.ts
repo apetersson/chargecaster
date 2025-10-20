@@ -11,7 +11,7 @@ export class ForecastService {
     return normalizePriceSlots(forecast);
   }
 
-  buildResponse(timestamp: string, eras: ForecastEra[] | undefined | null): ForecastResponse {
+  buildResponse(timestamp: string | null, eras: ForecastEra[] | undefined | null): ForecastResponse {
     this.logger.log(
       `Building forecast response (eras=${Array.isArray(eras) ? eras.length : 0}, timestamp=${timestamp ?? "n/a"})`,
     );

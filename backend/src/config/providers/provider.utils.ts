@@ -24,6 +24,6 @@ export function derivePriceSnapshotFromForecast(
   if (!slots.length) return null;
   const base = slots[0]?.price;
   if (typeof base !== "number" || Number.isNaN(base)) return null;
-  const gridFee = config.price?.grid_fee_eur_per_kwh ?? 0;
+  const gridFee = config.price.grid_fee_eur_per_kwh ?? 0;
   return base + gridFee;
 }

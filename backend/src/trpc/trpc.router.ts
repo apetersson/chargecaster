@@ -142,10 +142,9 @@ export class TrpcRouter {
         }),
         runSimulation: t.procedure.input(runSimulationInputSchema).mutation(({ctx, input}) => {
           const service = ctx.simulationService ?? this.simulationService;
+          const liveSocLabel = typeof input.liveState.battery_soc === "number" ? input.liveState.battery_soc : "n/a";
           this.logger.log(
-            `tRPC.dashboard.runSimulation requested (forecast=${input.forecast.length}, liveSoc=${
-              typeof input.liveState?.battery_soc === "number" ? input.liveState.battery_soc : "n/a"
-            })`,
+            `tRPC.dashboard.runSimulation requested (forecast=${input.forecast.length}, liveSoc=${liveSocLabel})`,
           );
           return service.runSimulation({
             config: input.config,

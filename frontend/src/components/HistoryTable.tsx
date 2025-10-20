@@ -7,7 +7,7 @@ type HistoryTableProps = {
   history: HistoryPoint[];
 };
 
-const HistoryTable = ({history}: HistoryTableProps): JSX.Element | null => {
+function HistoryTable({history}: HistoryTableProps): JSX.Element | null {
   if (!history.length) {
     return null;
   }
@@ -40,8 +40,8 @@ const HistoryTable = ({history}: HistoryTableProps): JSX.Element | null => {
           </tr>
           </thead>
           <tbody>
-          {rows.map((item, idx) => (
-            <tr key={`${item.timestamp}-${idx}`}>
+          {rows.map((item) => (
+            <tr key={item.timestamp}>
               <td className="timestamp">{formatDate(item.timestamp)}</td>
               <td className="numeric">{formatNumber(item.price_ct_per_kwh, " ct/kWh")}</td>
               <td className="numeric">{formatNumber(item.solar_power_w, " W")}</td>
@@ -55,6 +55,6 @@ const HistoryTable = ({history}: HistoryTableProps): JSX.Element | null => {
       </div>
     </section>
   );
-};
+}
 
 export default HistoryTable;

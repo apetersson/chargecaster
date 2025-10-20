@@ -35,7 +35,9 @@ export const buildOptions = ({bounds, timeRangeMs, legendGroups, responsive, val
     legendItem: Parameters<NonNullable<typeof legendDefaults.onClick>>[1],
     legend: Parameters<NonNullable<typeof legendDefaults.onClick>>[2],
   ) => {
-    legendDefaults.onClick?.call(legend, event, legendItem, legend);
+    if (typeof legendDefaults.onClick === "function") {
+      legendDefaults.onClick.call(legend, event, legendItem, legend);
+    }
   };
   const generateDefaultLabels = (chart: Chart): LegendItem[] => generateLegendLabels(chart);
 
@@ -60,7 +62,8 @@ export const buildOptions = ({bounds, timeRangeMs, legendGroups, responsive, val
             if (!groupedLegendEntries.length) {
               return generateDefaultLabels(chart).filter((item) => item.text !== GRID_MARKERS_LABEL);
             }
-            const template = generateDefaultLabels(chart)[0];
+            const defaultLabels = generateDefaultLabels(chart);
+            const template = defaultLabels.length > 0 ? defaultLabels[0] : undefined;
             return groupedLegendEntries.map((group) => {
               const datasetIndex = group.datasetIndices[0];
               const hidden = group.datasetIndices.every((index) => chart.getDatasetMeta(index).hidden);
