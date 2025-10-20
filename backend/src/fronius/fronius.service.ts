@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
-import type { SnapshotPayload } from "@chargecaster/domain";
 import { describeError, Percentage } from "@chargecaster/domain";
 import type { ConfigDocument } from "../config/schemas";
 import { RuntimeConfigService } from "../config/runtime-config.service";
@@ -19,6 +18,8 @@ const DIGEST_PREFIX = "digest";
 
 const AUTH_ERROR_SUMMARY_MESSAGE = "Unable to control battery because of authentication problem.";
 
+const TARGET_TOLERANCE_PERCENT = 0.5;
+
 export interface FroniusApplyResult {
   errorMessage: string | null;
 }
@@ -27,6 +28,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 type FroniusMode = "charge" | "auto" | "hold";
+
+export type OptimisationCommand =
+  | "charge"
+  | "auto"
+  | {auto: {floorSocPercent?: number | null}}
+  | {hold: {minSocPercent: number; observedSocPercent?: number | null; floorSocPercent?: number | null}};
+
+interface NormalisedStrategy {
+  mode: FroniusMode;
+  manualTarget: Percentage | null;
+  observedSocPercent: number | null;
+  floorTarget: Percentage | null;
+}
 
 @Injectable()
 
@@ -62,7 +76,7 @@ export class FroniusService {
     this.froniusConfig = froniusConfig;
   }
 
-  async applyOptimization(snapshot: SnapshotPayload): Promise<FroniusApplyResult> {
+  async applyOptimization(strategyInput: OptimisationCommand): Promise<FroniusApplyResult> {
     if (this.dryRunEnabled) {
       this.logger.log("Dry run enabled; skipping Fronius optimization apply.");
       return {errorMessage: null};
@@ -76,27 +90,19 @@ export class FroniusService {
       return {errorMessage: null};
     }
     const froniusConfig = this.froniusConfig;
-
-    const desiredMode = this.resolveDesiredMode(snapshot);
+    const strategy = this.normaliseStrategy(strategyInput);
+    const desiredMode = strategy.mode;
 
     const url = this.buildUrl(froniusConfig.host, froniusConfig.batteriesPath);
 
     try {
       this.logger.log(`Preparing to apply Fronius mode ${desiredMode.toUpperCase()} via ${url}`);
-      // const currentConfig = await this.requestJson("GET", url, froniusConfig);
-      // const currentMode = this.extractCurrentMode(currentConfig);
-      if (this.lastAppliedMode === desiredMode) {
-        this.logger.log(`Fronius already in ${desiredMode} mode; skipping update.`);
+      if (this.shouldSkipUpdate(strategy)) {
+        this.logger.log(`Fronius already aligned with ${desiredMode} strategy; skipping update.`);
         return {errorMessage: null};
       }
 
-      if (desiredMode === "hold") {
-        this.logger.log("Fronius hold strategy requested; leaving inverter settings unchanged.");
-        this.lastAppliedMode = "hold";
-        return {errorMessage: null};
-      }
-
-      const payload = this.buildPayload(snapshot, desiredMode);
+      const payload = this.buildPayload(strategy);
       if (!payload) {
         this.logger.warn("Unable to construct Fronius payload; skipping update.");
         return {errorMessage: null};
@@ -110,6 +116,18 @@ export class FroniusService {
       await this.requestJson("POST", url, froniusConfig, payload.body);
       this.lastAppliedMode = desiredMode;
       this.lastAppliedTarget = payload.target;
+      if (desiredMode === "hold" && payload.target && strategy.observedSocPercent != null) {
+        const delta = Math.abs(strategy.observedSocPercent - payload.target.percent);
+        if (delta > 1) {
+          this.logger.warn(
+            `Observed SoC ${strategy.observedSocPercent.toFixed(1)}% differs from hold target ${payload.target.percent.toFixed(1)}% by ${delta.toFixed(2)} percentage points.`,
+          );
+        } else {
+          this.logger.verbose(
+            `Hold target ${payload.target.percent.toFixed(1)}% aligns with observed SoC ${strategy.observedSocPercent.toFixed(1)}% (Δ=${delta.toFixed(2)}%).`,
+          );
+        }
+      }
       this.logger.log("Fronius command applied successfully.");
       await this.logoutFroniusSession(froniusConfig);
       return {errorMessage: null};
@@ -117,6 +135,62 @@ export class FroniusService {
       this.logger.warn(`Fronius update failed: ${describeError(error)}`);
       return {errorMessage: this.normaliseSummaryError(error)};
     }
+  }
+
+  private normaliseStrategy(input: OptimisationCommand): NormalisedStrategy {
+    if (input === "charge") {
+      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null};
+    }
+    if (input === "auto") {
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null};
+    }
+    if ("hold" in input) {
+      const holdConfig = input.hold;
+      const manualTarget = this.parsePercentage(holdConfig.minSocPercent);
+      if (!manualTarget) {
+        throw new Error("Hold strategy requires a finite minSoC percentage.");
+      }
+      const floorTarget = this.parsePercentage(holdConfig.floorSocPercent ?? holdConfig.minSocPercent);
+      const observedSocPercent = this.normaliseObservedSoc(holdConfig.observedSocPercent);
+      return {
+        mode: "hold",
+        manualTarget,
+        observedSocPercent,
+        floorTarget,
+      };
+    }
+    if ("auto" in input) {
+      const autoConfig = input.auto;
+      const floorTarget = this.parsePercentage(autoConfig.floorSocPercent ?? null);
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget};
+    }
+    throw new Error("Unsupported Fronius optimisation command.");
+  }
+
+  private normaliseObservedSoc(value: number | null | undefined): number | null {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return null;
+    }
+    return Math.min(Math.max(value, 0), 100);
+  }
+
+  private shouldSkipUpdate(strategy: NormalisedStrategy): boolean {
+    if (this.lastAppliedMode !== strategy.mode) {
+      return false;
+    }
+    if (strategy.mode === "hold") {
+      if (!strategy.manualTarget || !this.lastAppliedTarget) {
+        return false;
+      }
+      return Math.abs(this.lastAppliedTarget.percent - strategy.manualTarget.percent) <= TARGET_TOLERANCE_PERCENT;
+    }
+    if (strategy.mode === "auto") {
+      if (!strategy.floorTarget || !this.lastAppliedTarget) {
+        return false;
+      }
+      return Math.abs(this.lastAppliedTarget.percent - strategy.floorTarget.percent) <= TARGET_TOLERANCE_PERCENT;
+    }
+    return true;
   }
 
   private normaliseSummaryError(error: unknown): string | null {
@@ -131,21 +205,6 @@ export class FroniusService {
       return AUTH_ERROR_SUMMARY_MESSAGE;
     }
     return null;
-  }
-
-  private resolveDesiredMode(snapshot: SnapshotPayload): FroniusMode {
-    if (snapshot.current_mode === "charge" || snapshot.current_mode === "auto" || snapshot.current_mode === "hold") {
-      return snapshot.current_mode;
-    }
-    const currentSoc = this.parsePercentage(snapshot.current_soc_percent);
-    const nextSoc = this.parsePercentage(snapshot.next_step_soc_percent);
-    if (currentSoc && nextSoc && nextSoc.percent > currentSoc.percent + 0.5) {
-      return "charge";
-    }
-    if (currentSoc && nextSoc && Math.abs(nextSoc.percent - currentSoc.percent) <= 0.5) {
-      return "hold";
-    }
-    return "auto";
   }
 
   private extractCurrentTarget(payload: unknown): number | null {
@@ -201,15 +260,10 @@ export class FroniusService {
     return null;
   }
 
-  private buildPayload(
-    snapshot: SnapshotPayload,
-    mode: FroniusMode,
-  ): { body: Record<string, unknown>; target: Percentage | null } | null {
-    const currentSoc = this.parsePercentage(snapshot.current_soc_percent);
-
+  private buildPayload(strategy: NormalisedStrategy): { body: Record<string, unknown>; target: Percentage | null } | null {
     const maxCharge = this.resolveMaxCharge();
 
-    if (mode === "charge") {
+    if (strategy.mode === "charge") {
       const target = maxCharge ?? Percentage.full();
       return {
         body: this.serializeManualTarget(target),
@@ -217,9 +271,14 @@ export class FroniusService {
       };
     }
 
-    if (mode === "hold") {
-      const floor = this.resolveAutoFloor(snapshot);
-      let target = currentSoc ?? this.lastAppliedTarget ?? maxCharge ?? Percentage.full();
+    if (strategy.mode === "hold") {
+      const manualTarget = strategy.manualTarget;
+      if (!manualTarget) {
+        this.logger.warn("Hold strategy missing manual target; skipping update.");
+        return null;
+      }
+      const floor = this.resolveAutoFloor(strategy.floorTarget ?? manualTarget);
+      let target = manualTarget;
       if (target.ratio < floor.ratio) {
         target = floor;
       }
@@ -232,7 +291,7 @@ export class FroniusService {
       };
     }
 
-    const floorSoc = this.resolveAutoFloor(snapshot);
+    const floorSoc = this.resolveAutoFloor(strategy.floorTarget);
     return {
       body: {
         BAT_M0_SOC_MIN: this.toPercentInteger(floorSoc),
@@ -242,14 +301,13 @@ export class FroniusService {
     };
   }
 
-  private resolveAutoFloor(snapshot: SnapshotPayload): Percentage {
+  private resolveAutoFloor(explicitFloor: Percentage | null): Percentage {
     const configFloor = this.autoModeFloorOverride;
     if (configFloor) {
       return configFloor;
     }
-    const snapshotNext = this.parsePercentage(snapshot.next_step_soc_percent);
-    if (snapshotNext) {
-      return snapshotNext;
+    if (explicitFloor) {
+      return explicitFloor;
     }
     return Percentage.fromPercent(5);
   }

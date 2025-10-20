@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { describeError } from "@chargecaster/domain";
 import { SimulationService } from "../simulation/simulation.service";
 import { FroniusService } from "../fronius/fronius.service";
+import { OptimisationCommandTranslator } from "../hardware/optimisation-command-translator.service";
 import { SimulationPreparationService } from "./simulation-preparation.service";
 import { RuntimeConfigService } from "./runtime-config.service";
 
@@ -18,6 +19,7 @@ export class SimulationSeedService implements OnModuleDestroy {
     @Inject(SimulationPreparationService) private readonly preparationService: SimulationPreparationService,
     @Inject(SimulationService) private readonly simulationService: SimulationService,
     @Inject(FroniusService) private readonly froniusService: FroniusService,
+    @Inject(OptimisationCommandTranslator) private readonly optimisationCommandTranslator: OptimisationCommandTranslator,
   ) {
   }
 
@@ -81,7 +83,8 @@ export class SimulationSeedService implements OnModuleDestroy {
 
   private async applyFronius(snapshot: Awaited<ReturnType<SimulationService["runSimulation"]>>): Promise<void> {
     try {
-      const result = await this.froniusService.applyOptimization(snapshot);
+      const command = this.optimisationCommandTranslator.fromSimulationSnapshot(snapshot);
+      const result = await this.froniusService.applyOptimization(command);
       if (result.errorMessage) {
         this.logger.warn(`Snapshot flagged with error: ${result.errorMessage}`);
         this.simulationService.appendErrorsToLatestSnapshot([result.errorMessage]);

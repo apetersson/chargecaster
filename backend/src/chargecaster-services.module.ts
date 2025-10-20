@@ -14,6 +14,7 @@ import { MarketDataService } from "./config/market-data.service";
 import { EvccDataService } from "./config/evcc-data.service";
 import { ForecastAssemblyService } from "./config/forecast-assembly.service";
 import { FroniusService } from "./fronius/fronius.service";
+import { OptimisationCommandTranslator } from "./hardware/optimisation-command-translator.service";
 import { StorageModule } from "./storage/storage.module";
 import { RuntimeConfigService } from "./config/runtime-config.service";
 
@@ -34,6 +35,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     EvccDataService,
     ForecastAssemblyService,
     FroniusService,
+    OptimisationCommandTranslator,
     RuntimeConfigService,
   ],
   exports: [
@@ -51,6 +53,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     EvccDataService,
     ForecastAssemblyService,
     FroniusService,
+    OptimisationCommandTranslator,
     RuntimeConfigService,
   ],
 })
