@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EvccDataService } from "../src/config/evcc-data.service";
 

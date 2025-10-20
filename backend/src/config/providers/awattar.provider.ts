@@ -1,7 +1,7 @@
 import { Logger } from "@nestjs/common";
-import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import type { RawForecastEntry } from "@chargecaster/domain";
 import { parseMarketForecast, type AwattarConfig } from "../schemas";
+import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
 
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";

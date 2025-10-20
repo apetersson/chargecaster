@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MarketDataService } from "../src/config/market-data.service";
 import type { SimulationConfig } from "@chargecaster/domain";
+import { MarketDataService } from "../src/config/market-data.service";
 
 const fixturePath = join(process.cwd(), "fixtures", "awattar-market-sample.json");
 

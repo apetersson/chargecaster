@@ -1,8 +1,8 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import type { Database } from "better-sqlite3";
 import DatabaseConstructor from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 
 import type { HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
 import { historyPointSchema, snapshotPayloadSchema } from "@chargecaster/domain";

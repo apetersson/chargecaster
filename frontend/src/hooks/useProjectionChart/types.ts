@@ -1,6 +1,6 @@
+import { TimeSlot } from "@chargecaster/domain";
 import type { ScatterDataPoint } from "chart.js";
 import type { ForecastEra, OracleEntry } from "../../types";
-import { TimeSlot } from "@chargecaster/domain";
 
 export type SeriesSource = "history" | "forecast" | "gap";
 

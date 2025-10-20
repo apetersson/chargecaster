@@ -1,6 +1,6 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import type {
   ForecastEra,
   HistoryPoint,
@@ -10,12 +10,12 @@ import type {
   SimulationConfig,
   SnapshotPayload,
 } from "@chargecaster/domain";
-import { normalizeHistoryList } from "./history.serializer";
+import { Duration, Energy, EnergyPrice, Percentage, TimeSlot, TariffSlot } from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
+import { parseEvccState } from "../config/schemas";
+import { normalizeHistoryList } from "./history.serializer";
 import { BacktestSavingsService } from "./backtest.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
-import { parseEvccState } from "../config/schemas";
-import { Duration, Energy, EnergyPrice, Percentage, TimeSlot, TariffSlot } from "@chargecaster/domain";
 import { clampRatio, gridFee, simulateOptimalSchedule } from "./optimal-schedule";
 
 const DEFAULT_SLOT_DURATION = Duration.fromHours(1);

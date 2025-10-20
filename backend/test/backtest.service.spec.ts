@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { computeBacktestedSavings } from "../src/simulation/backtest.service";
 import type { HistoryPoint, SimulationConfig } from "@chargecaster/domain";
+import { computeBacktestedSavings } from "../src/simulation/backtest.service";
 
 describe("computeBacktestedSavings", () => {
   const baseConfig: SimulationConfig = {

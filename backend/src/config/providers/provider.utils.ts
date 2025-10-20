@@ -1,5 +1,5 @@
-import { normalizePriceSlots } from "../../simulation/simulation.service";
 import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
+import { normalizePriceSlots } from "../../simulation/simulation.service";
 import { parseTimestamp } from "../../simulation/solar";
 
 type WithFromTo = RawForecastEntry & { from?: unknown; to?: unknown };

@@ -23,7 +23,7 @@ export class EvccDataService {
     solarPowerW: number | null;
     homePowerW: number | null;
   }> {
-    const enabled = config?.enabled ?? true;
+    const enabled = config?.enabled !== false;
     if (!enabled) {
       warnings.push("EVCC data fetch disabled in config.");
       this.logger.warn("EVCC data fetch disabled in config.");
@@ -51,7 +51,7 @@ export class EvccDataService {
     const timeoutMs = config?.timeout_ms ?? REQUEST_TIMEOUT_MS;
     const token = config?.token ?? null;
     const headers: Record<string, string> = {};
-    if (token) {
+    if (typeof token === "string" && token.length > 0) {
       headers.Authorization = `Bearer ${token}`;
     }
 

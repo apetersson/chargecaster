@@ -1,7 +1,7 @@
-import { Injectable, Logger } from "@nestjs/common";
 import { constants as fsConstants, accessSync, readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { Injectable, Logger } from "@nestjs/common";
 import YAML from "yaml";
 
 import type { ConfigDocument } from "./schemas";

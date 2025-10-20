@@ -84,8 +84,8 @@ export const buildOptions = ({bounds, timeRangeMs, legendGroups, responsive, val
         },
         onClick: (event, legendItem, legend) => {
           const chart = legend.chart;
-          const datasetIndices = (legendItem as LegendItem & { datasetIndices?: number[] }).datasetIndices;
-          if (!datasetIndices || !datasetIndices.length || !groupedLegendEntries.length) {
+          const datasetIndices = (legendItem as LegendItem & { datasetIndices?: number[] }).datasetIndices ?? [];
+          if (datasetIndices.length === 0 || groupedLegendEntries.length === 0) {
             legendClickDefault(event, legendItem, legend);
             return;
           }

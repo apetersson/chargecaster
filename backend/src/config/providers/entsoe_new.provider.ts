@@ -1,7 +1,7 @@
 import { Logger } from "@nestjs/common";
-import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import type { RawForecastEntry } from "@chargecaster/domain";
 import type { EntsoeNewConfig } from "../schemas";
+import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
 
 const BASE_URL = "https://newtransparency.entsoe.eu/market/energyPrices/load";

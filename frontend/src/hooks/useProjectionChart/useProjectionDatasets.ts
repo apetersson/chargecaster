@@ -23,13 +23,6 @@ export const useProjectionDatasets = (
 ): ProjectionDatasetResult => {
   return useMemo(
     () => buildDatasets(history, forecast, oracleEntries, summary),
-    [
-      history,
-      forecast,
-      oracleEntries,
-      summary?.timestamp,
-      summary?.current_soc_percent,
-      summary?.next_step_soc_percent,
-    ],
+    [history, forecast, oracleEntries, summary],
   );
 };

@@ -70,10 +70,10 @@ export function statusClass(
   errors?: string[],
   warnings?: string[],
 ): { label: string; className: string } {
-  if (errors && errors.length) {
+  if (errors?.length) {
     return {label: "Errors", className: "status err"};
   }
-  if (warnings && warnings.length) {
+  if (warnings?.length) {
     return {label: "Warnings", className: "status warn"};
   }
   return {label: "OK", className: "status ok"};

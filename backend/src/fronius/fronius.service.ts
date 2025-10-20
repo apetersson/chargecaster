@@ -1,9 +1,9 @@
-import { Injectable, Logger } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
+import { Injectable, Logger } from "@nestjs/common";
 
-import type { ConfigDocument } from "../config/schemas";
 import { Percentage } from "@chargecaster/domain";
 import type { SnapshotPayload } from "@chargecaster/domain";
+import type { ConfigDocument } from "../config/schemas";
 import { RuntimeConfigService } from "../config/runtime-config.service";
 
 export interface FroniusConnectionConfig {
