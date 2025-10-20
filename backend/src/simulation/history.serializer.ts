@@ -5,10 +5,6 @@ function toHistoryPoint(entry: HistoryPoint | HistoryRawEntry): HistoryPoint {
   return historyPointSchema.parse(entry as HistoryRawEntry);
 }
 
-export function normalizeHistoryEntry(entry: HistoryPoint | HistoryRawEntry): HistoryPoint {
-  return toHistoryPoint(entry);
-}
-
 export function normalizeHistoryList(entries: (HistoryPoint | HistoryRawEntry)[]): HistoryPoint[] {
   return entries
     .map((entry) => toHistoryPoint(entry))

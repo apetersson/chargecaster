@@ -307,9 +307,9 @@ function buildSlotProfiles(params: {
       ? 0
       : params.maxSolarChargePowerW != null
         ? Math.min(
-            availableSolarKwh,
-            (params.maxSolarChargePowerW / WATTS_PER_KW) * durationHours,
-          )
+          availableSolarKwh,
+          (params.maxSolarChargePowerW / WATTS_PER_KW) * durationHours,
+        )
         : availableSolarKwh;
     const dischargeLimitKwh = params.maxDischargePowerW == null
       ? Number.POSITIVE_INFINITY
@@ -511,10 +511,8 @@ function pvCanExportUnderState(
   const socHeadroomKwh = socStepsToFull * context.energyPerStepKwh;
   const requiredToAvoidExportKwh = Math.max(0, profile.availableSolarKwh - profile.loadAfterDirectUseKwh);
   const requiredChargeKwh = Math.min(requiredToAvoidExportKwh, profile.solarChargeLimitKwh, socHeadroomKwh);
-  if (requiredChargeKwh > EPSILON && energyChangeKwh + EPSILON < requiredChargeKwh) {
-    return false;
-  }
-  return true;
+  return !(requiredChargeKwh > EPSILON && energyChangeKwh + EPSILON < requiredChargeKwh);
+
 }
 
 function buildSimulationOutput(

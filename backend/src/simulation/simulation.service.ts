@@ -10,7 +10,7 @@ import type {
   SimulationConfig,
   SnapshotPayload,
 } from "@chargecaster/domain";
-import { Duration, Energy, EnergyPrice, Percentage, TimeSlot, TariffSlot } from "@chargecaster/domain";
+import { Duration, Energy, EnergyPrice, Percentage, TariffSlot, TimeSlot } from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
 import { parseEvccState } from "../config/schemas";
 import { normalizeHistoryList } from "./history.serializer";

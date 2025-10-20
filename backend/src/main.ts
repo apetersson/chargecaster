@@ -167,7 +167,7 @@ function validateConfigDocument(document: ConfigDocument): void {
   }
 
   const evccConfig = document.evcc;
-  if (evccConfig && evccConfig.enabled !== false) {
+  if (evccConfig?.enabled) {
     const baseUrl = typeof evccConfig.base_url === "string" ? evccConfig.base_url.trim() : "";
     if (!baseUrl) {
       throw new Error("EVCC base_url must be provided when evcc.enabled is true.");
@@ -229,7 +229,11 @@ function resolveLogLevels(level: unknown): { levels: LogLevel[]; normalized: str
     case "debug":
       return {levels: ["fatal", "error", "warn", "log", "debug"], normalized: "debug", fallbackUsed: false};
     case "verbose":
-      return {levels: ["fatal", "error", "warn", "log", "debug", "verbose"], normalized: "verbose", fallbackUsed: false};
+      return {
+        levels: ["fatal", "error", "warn", "log", "debug", "verbose"],
+        normalized: "verbose",
+        fallbackUsed: false
+      };
     default:
       return {levels: ["fatal", "error", "warn", "log"], normalized: "info", fallbackUsed: true};
   }
