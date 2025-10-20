@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
-import { Percentage, describeError } from "@chargecaster/domain";
 import type { SnapshotPayload } from "@chargecaster/domain";
+import { describeError, Percentage } from "@chargecaster/domain";
 import type { ConfigDocument } from "../config/schemas";
 import { RuntimeConfigService } from "../config/runtime-config.service";
 
@@ -42,7 +42,7 @@ export class FroniusService {
 
   constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
     const document = this.configState.getDocumentRef();
-    this.dryRunEnabled = document.dry_run === true;
+    this.dryRunEnabled = document.dry_run;
     this.froniusDisabled = document.fronius?.enabled === false;
     this.autoModeFloorOverride = this.parsePercentage(document.battery?.auto_mode_floor_soc ?? null);
     this.maxChargeLimit = this.parsePercentage(document.battery?.max_charge_soc_percent ?? null);
@@ -307,7 +307,7 @@ export class FroniusService {
 
     const response = await this.performDigestRequest(method, url, credentials, headers, body);
     if (!response.ok) {
-      let text = "";
+      let text: string;
       try {
         text = await response.text();
       } catch {
@@ -456,7 +456,7 @@ export class FroniusService {
 
 export function requireFroniusConnectionConfig(config: ConfigDocument): FroniusConnectionConfig | null {
   const record = config.fronius;
-  if (!record || record.enabled === false) {
+  if (!record?.enabled) {
     return null;
   }
 

@@ -39,12 +39,6 @@ export class StorageService implements OnModuleDestroy {
     this.logger.verbose("Storage connection closed");
   }
 
-  saveSnapshot(timestamp: string, payload: SnapshotPayload): void {
-    this.logger.log(`Persisting snapshot at ${timestamp}`);
-    const stmt = this.db.prepare("INSERT INTO snapshots (timestamp, payload) VALUES (?, ?)");
-    stmt.run(timestamp, JSON.stringify(payload));
-  }
-
   replaceSnapshot(payload: SnapshotPayload): void {
     const timestamp = payload.timestamp;
     this.logger.log(`Replacing latest snapshot with timestamp ${timestamp}`);

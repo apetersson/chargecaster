@@ -1,14 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
 
 import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
-import { parseTimestamp } from "../simulation/solar";
 import type { ConfigDocument } from "./schemas";
 import { AwattarProvider } from "./providers/awattar.provider";
 import { EntsoeNewProvider } from "./providers/entsoe_new.provider";
 import { FromEvccProvider } from "./providers/from_evcc.provider";
 import type { MarketProvider, MarketProviderContext } from "./providers/provider.types";
-
-const SLOT_DURATION_MS = 3_600_000;
 
 @Injectable()
 export class MarketDataService {
@@ -20,7 +17,7 @@ export class MarketDataService {
     warnings: string[],
     evccFallback?: RawForecastEntry[],
   ): Promise<{ forecast: RawForecastEntry[]; priceSnapshot: number | null }> {
-    const providers: { key: "entsoe"|"awattar"|"from_evcc"; prio: number }[] = [];
+    const providers: { key: "entsoe" | "awattar" | "from_evcc"; prio: number }[] = [];
     if (config?.awattar) providers.push({key: "awattar", prio: config.awattar.priority});
     if (config?.entsoe) providers.push({key: "entsoe", prio: config.entsoe.priority});
     if (config?.from_evcc) providers.push({key: "from_evcc", prio: config.from_evcc.priority});
@@ -60,30 +57,5 @@ export class MarketDataService {
       this.logger.warn(`Provider ${p.key} returned no usable price slots; trying next provider`);
     }
     return {forecast: [], priceSnapshot: null};
-  }
-
-  private normalizeMarketEntries(entries: RawForecastEntry[], maxHours = 72): RawForecastEntry[] {
-    const records: RawForecastEntry[] = [];
-    if (!entries.length) {
-      return records;
-    }
-
-    const now = Date.now();
-    for (const entry of entries) {
-      const startTimestamp = parseTimestamp(entry.start ?? entry.from ?? null);
-      const endTimestamp = parseTimestamp(entry.end ?? entry.to ?? null);
-      if (!startTimestamp || !endTimestamp) {
-        continue;
-      }
-      if (startTimestamp.getTime() < now - SLOT_DURATION_MS) {
-        continue;
-      }
-      const durationHours = (endTimestamp.getTime() - startTimestamp.getTime()) / 3_600_000;
-      if (!Number.isFinite(durationHours) || durationHours <= 0 || durationHours > maxHours) {
-        continue;
-      }
-      records.push(entry);
-    }
-    return records;
   }
 }

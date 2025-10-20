@@ -1,10 +1,10 @@
 import { Injectable, Logger } from "@nestjs/common";
 
-import { describeError } from "@chargecaster/domain";
 import type { RawForecastEntry, RawSolarEntry } from "@chargecaster/domain";
+import { describeError } from "@chargecaster/domain";
 import { buildSolarForecastFromTimeseries } from "../simulation/solar";
-import { parseEvccState } from "./schemas";
 import type { ConfigDocument } from "./schemas";
+import { parseEvccState } from "./schemas";
 
 const REQUEST_TIMEOUT_MS = 15000;
 
@@ -30,12 +30,10 @@ export class EvccDataService {
       timeout_ms: timeoutMsOverride,
       token,
     } = config ?? {};
-
-    const enabledFlag = enabled !== false;
     const timeoutMs = timeoutMsOverride ?? REQUEST_TIMEOUT_MS;
     const tokenValue = typeof token === "string" && token.length > 0 ? token : null;
 
-    if (!enabledFlag) {
+    if (!enabled) {
       warnings.push("EVCC data fetch disabled in config.");
       this.logger.warn("EVCC data fetch disabled in config.");
       return this.emptyResult();

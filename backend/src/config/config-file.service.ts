@@ -1,4 +1,4 @@
-import { constants as fsConstants, accessSync, readFileSync } from "node:fs";
+import { constants as fsConstants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describeError } from "@chargecaster/domain";
@@ -39,23 +39,4 @@ export class ConfigFileService {
     }
     return parseConfigDocument(parsed);
   }
-
-  loadDocumentSync(path: string): ConfigDocument {
-    this.logger.verbose(`Loading configuration (sync) from ${path}`);
-    try {
-      accessSync(path, fsConstants.R_OK);
-    } catch (error) {
-      const message = `Config file not accessible at ${path}: ${describeError(error)}`;
-      this.logger.error(message);
-      throw new Error(message);
-    }
-
-    const rawContent = readFileSync(path, "utf-8");
-    const parsed: unknown = YAML.parse(rawContent);
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Config file is empty or invalid");
-    }
-    return parseConfigDocument(parsed);
-  }
-
 }
