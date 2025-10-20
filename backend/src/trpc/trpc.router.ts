@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { initTRPC, type AnyProcedure, type AnyRouter, type ProcedureType } from "@trpc/server";
 import { z } from "zod";
 
@@ -9,8 +9,8 @@ import { HistoryService } from "../simulation/history.service";
 import { SummaryService } from "../simulation/summary.service";
 import { OracleService } from "../simulation/oracle.service";
 import { BacktestSavingsService } from "../simulation/backtest.service";
-import { ConfigFileService } from "../config/config-file.service";
 import { SimulationConfigFactory } from "../config/simulation-config.factory";
+import { RuntimeConfigService } from "../config/runtime-config.service";
 import type { BacktestSeriesResponse } from "@chargecaster/domain";
 
 interface TrpcContext {
@@ -83,6 +83,7 @@ const historyInputSchema = z.object({
 @Injectable()
 export class TrpcRouter {
   public readonly router;
+  private readonly logger = new Logger(TrpcRouter.name);
 
   constructor(
     @Inject(SimulationService) private readonly simulationService: SimulationService,
@@ -91,26 +92,37 @@ export class TrpcRouter {
     @Inject(SummaryService) private readonly summaryService: SummaryService,
     @Inject(OracleService) private readonly oracleService: OracleService,
     @Inject(BacktestSavingsService) private readonly backtestService: BacktestSavingsService,
-    @Inject(ConfigFileService) private readonly configFile: ConfigFileService,
+    @Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService,
     @Inject(SimulationConfigFactory) private readonly configFactory: SimulationConfigFactory,
   ) {
     this.router = t.router({
-      health: t.procedure.query(() => ({status: "ok"})),
+      health: t.procedure.query(() => {
+        this.logger.verbose("tRPC.health heartbeat");
+        return {status: "ok"};
+      }),
       dashboard: t.router({
-        summary: t.procedure.query(() => this.summaryService.toSummary(this.simulationService.ensureSeedFromFixture())),
+        summary: t.procedure.query(() => {
+          this.logger.log("tRPC.dashboard.summary requested");
+          return this.summaryService.toSummary(this.simulationService.ensureSeedFromFixture());
+        }),
         history: t.procedure.input(historyInputSchema.optional()).query(({input}) => {
           const limit = input?.limit ?? 96;
+          this.logger.log(`tRPC.dashboard.history requested (limit=${limit})`);
           return this.historyService.getHistory(limit);
         }),
         forecast: t.procedure.query(() => {
+          this.logger.log("tRPC.dashboard.forecast requested");
           const snap = this.simulationService.ensureSeedFromFixture();
           return this.forecastService.buildResponse(snap.timestamp, Array.isArray(snap.forecast_eras) ? snap.forecast_eras : []);
         }),
-        oracle: t.procedure.query(() => this.oracleService.build(this.simulationService.ensureSeedFromFixture())),
+        oracle: t.procedure.query(() => {
+          this.logger.log("tRPC.dashboard.oracle requested");
+          return this.oracleService.build(this.simulationService.ensureSeedFromFixture());
+        }),
         backtest24h: t.procedure.query(async (): Promise<BacktestSeriesResponse> => {
-          // Load current config from file to ensure battery parameters are available
-          const path = this.configFile.resolvePath();
-          const doc = await this.configFile.loadDocument(path);
+          this.logger.log("tRPC.dashboard.backtest24h requested");
+          this.logger.verbose("Loading runtime config for backtest calculations");
+          const doc = this.configState.getDocument();
           const simConfig = this.configFactory.create(doc);
           const series = this.backtestService.buildSeries(simConfig, { windowHours: 24, historyLimit: 1000 });
           if (series) {
@@ -121,6 +133,7 @@ export class TrpcRouter {
         }),
         snapshot: t.procedure.query(({ctx}) => {
           const service = ctx.simulationService ?? this.simulationService;
+          this.logger.log("tRPC.dashboard.snapshot requested");
           const latest = service.getLatestSnapshot();
           if (latest) {
             return latest;
@@ -129,6 +142,11 @@ export class TrpcRouter {
         }),
         runSimulation: t.procedure.input(runSimulationInputSchema).mutation(({ctx, input}) => {
           const service = ctx.simulationService ?? this.simulationService;
+          this.logger.log(
+            `tRPC.dashboard.runSimulation requested (forecast=${input.forecast.length}, liveSoc=${
+              typeof input.liveState?.battery_soc === "number" ? input.liveState.battery_soc : "n/a"
+            })`,
+          );
           return service.runSimulation({
             config: input.config,
             liveState: input.liveState,
@@ -137,6 +155,7 @@ export class TrpcRouter {
         }),
         loadFixture: t.procedure.mutation(({ctx}) => {
           const service = ctx.simulationService ?? this.simulationService;
+          this.logger.log("tRPC.dashboard.loadFixture requested");
           return service.ensureSeedFromFixture();
         }),
       }),

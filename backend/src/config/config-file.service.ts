@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, accessSync, readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import YAML from "yaml";
@@ -22,6 +22,7 @@ export class ConfigFileService {
   }
 
   async loadDocument(path: string): Promise<ConfigDocument> {
+    this.logger.verbose(`Loading configuration from ${path}`);
     try {
       await access(path, fsConstants.R_OK);
     } catch (error) {
@@ -31,6 +32,24 @@ export class ConfigFileService {
     }
 
     const rawContent = await readFile(path, "utf-8");
+    const parsed: unknown = YAML.parse(rawContent);
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Config file is empty or invalid");
+    }
+    return parseConfigDocument(parsed);
+  }
+
+  loadDocumentSync(path: string): ConfigDocument {
+    this.logger.verbose(`Loading configuration (sync) from ${path}`);
+    try {
+      accessSync(path, fsConstants.R_OK);
+    } catch (error) {
+      const message = `Config file not accessible at ${path}: ${this.describeError(error)}`;
+      this.logger.error(message);
+      throw new Error(message);
+    }
+
+    const rawContent = readFileSync(path, "utf-8");
     const parsed: unknown = YAML.parse(rawContent);
     if (!parsed || typeof parsed !== "object") {
       throw new Error("Config file is empty or invalid");

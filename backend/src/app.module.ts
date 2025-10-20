@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 
-import { SimulationModule } from "./simulation/simulation.module";
+import { ChargecasterServicesModule } from "./chargecaster-services.module";
 import { StorageModule } from "./storage/storage.module";
 import { TrpcModule } from "./trpc/trpc.module";
 
@@ -13,7 +13,7 @@ import { TrpcModule } from "./trpc/trpc.module";
       cache: true,
     }),
     StorageModule,
-    SimulationModule,
+    ChargecasterServicesModule,
     TrpcModule,
   ],
 })

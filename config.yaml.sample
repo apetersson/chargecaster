@@ -26,7 +26,7 @@ logic:
   house_load_w: 1200       # assumed constant load for simulation
 
 logging:
-  level: "INFO"            # DEBUG, INFO, WARNING
+  level: "INFO" # ERROR, WARN, INFO, DEBUG, VERBOSE
 
 market_data:
   awattar:

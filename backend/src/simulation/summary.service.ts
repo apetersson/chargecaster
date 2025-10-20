@@ -1,13 +1,19 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { EnergyPrice } from "@chargecaster/domain";
 import type { SnapshotPayload, SnapshotSummary } from "@chargecaster/domain";
 
 @Injectable()
 export class SummaryService {
+  private readonly logger = new Logger(SummaryService.name);
+
   toSummary(snapshot: SnapshotPayload): SnapshotSummary {
+    this.logger.log(`Building summary for snapshot ${snapshot.timestamp}`);
     const snapshotPrice = typeof snapshot.price_snapshot_eur_per_kwh === "number"
       ? EnergyPrice.fromEurPerKwh(snapshot.price_snapshot_eur_per_kwh)
       : null;
+    this.logger.verbose(
+      `Summary pricing context: eur_per_kwh=${snapshot.price_snapshot_eur_per_kwh ?? "n/a"}, ct_per_kwh=${snapshotPrice?.ctPerKwh ?? "n/a"}`,
+    );
 
     return {
       timestamp: snapshot.timestamp,

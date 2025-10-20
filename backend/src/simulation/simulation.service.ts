@@ -122,6 +122,15 @@ export class SimulationService {
     const liveState = {battery_soc: resolvedSoCPercent};
     const slots = normalizePriceSlots(input.forecast);
     const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
+    this.logger.log(
+      `Running simulation with forecast_slots=${slots.length}, solar_slots=${solarSlots.length}, live_soc=${
+        liveState.battery_soc ?? "n/a"
+      }`,
+    );
+    this.logger.verbose(
+      `Simulation inputs: warnings=${input.warnings?.length ?? 0}, errors=${input.errors?.length ?? 0}, ` +
+      `price_snapshot=${input.priceSnapshotEurPerKwh ?? "n/a"}, forecast_eras=${input.forecastEras?.length ?? 0}`,
+    );
 
     // Distribute solar energy into each price slot proportionally to the time overlap.
     // This fixes the 1h solar vs 15m tariff slot mismatch (avoids 4x inflation).
@@ -175,7 +184,7 @@ export class SimulationService {
           return holdLevel ? `${strategyLabel}@${entry.era_id} (SoC ${holdLevel})` : `${strategyLabel}@${entry.era_id}`;
         })
         .join("\n");
-      this.logger.log(`Era strategies: \n${strategyLog}`);
+      this.logger.verbose(`Era strategies:\n${strategyLog}`);
     }
     const fallbackPrice = slots.length
       ? EnergyPrice.fromEurPerKwh(slots[0].price).withAdditionalFee(gridFee(input.config))
