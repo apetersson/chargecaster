@@ -87,7 +87,7 @@ export const resolveSegmentBorder = (
   context: LineSegmentContext,
   accent: string,
   historyAccent: string = HISTORY_BORDER,
-) => {
+): string => {
   const source = getSegmentSource(context);
   return source === "history" ? historyAccent : accent;
 };
@@ -96,7 +96,7 @@ export const resolveSegmentBackground = (
   context: LineSegmentContext,
   accentFill: string,
   historyFill: string = HISTORY_FILL,
-) => {
+): string => {
   const source = getSegmentSource(context);
   return source === "history" ? historyFill : accentFill;
 };
@@ -105,7 +105,7 @@ export const resolveBarColors = (
   point: unknown,
   forecastColor: string,
   historyColor: string,
-) => {
+): string => {
   if (!isProjectionPoint(point) || typeof point.y !== "number" || Number.isNaN(point.y)) {
     return "rgba(0,0,0,0)";
   }

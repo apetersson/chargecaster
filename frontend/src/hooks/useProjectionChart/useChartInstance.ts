@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 
 import { Chart, type ChartDataset, type ChartOptions } from "./chartSetup";
 import type { ProjectionPoint } from "./types";
@@ -6,7 +6,7 @@ import type { ProjectionPoint } from "./types";
 export const useChartInstance = (
   datasets: ChartDataset<"line", ProjectionPoint[]>[],
   options: ChartOptions<"line">,
-) => {
+): MutableRefObject<HTMLCanvasElement | null> => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart<"line", ProjectionPoint[]> | null>(null);
 

@@ -37,7 +37,7 @@ export const toHistoryPoint = (
   return {x: time, y: value, source: "history"};
 };
 
-export const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null) => {
+export const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | null): void => {
   if (!point) {
     return;
   }
@@ -48,7 +48,7 @@ export const addPoint = (target: ProjectionPoint[], point: ProjectionPoint | nul
   target.push(point);
 };
 
-export const pushGapPoint = (target: ProjectionPoint[], time: number | null | undefined) => {
+export const pushGapPoint = (target: ProjectionPoint[], time: number | null | undefined): void => {
   if (typeof time !== "number" || !Number.isFinite(time)) {
     return;
   }
@@ -183,7 +183,7 @@ export const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEn
   return derived.sort((a, b) => a.startMs - b.startMs);
 };
 
-export const sortChronologically = (points: ProjectionPoint[]) =>
+export const sortChronologically = (points: ProjectionPoint[]): ProjectionPoint[] =>
   points.sort((a, b) => a.x - b.x);
 
 export const buildCombinedSeries = (
@@ -297,7 +297,7 @@ export const computeTimeRangeMs = (
 export const attachHistoryIntervals = (
   historyPoints: ProjectionPoint[],
   futureStart: number | undefined,
-) => {
+): void => {
   const fallbackStart = (current: ProjectionPoint) =>
     typeof futureStart === "number" ? futureStart : current.x + DEFAULT_SLOT_DURATION_MS;
 

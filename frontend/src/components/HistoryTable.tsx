@@ -1,3 +1,5 @@
+import type { JSX } from "react";
+
 import type { HistoryPoint } from "../types";
 import { formatDate, formatNumber, formatPercent } from "../utils/format";
 
@@ -5,7 +7,7 @@ type HistoryTableProps = {
   history: HistoryPoint[];
 };
 
-const HistoryTable = ({history}: HistoryTableProps) => {
+const HistoryTable = ({history}: HistoryTableProps): JSX.Element | null => {
   if (!history.length) {
     return null;
   }

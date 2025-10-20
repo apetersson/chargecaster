@@ -36,14 +36,14 @@ export const dateTimeNoSecondsFormatter = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
-export function formatPercent(value: number | null | undefined) {
+export function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
   return `${percentFormatter.format(value)}%`;
 }
 
-export function formatNumber(value: number | null | undefined, unit = "") {
+export function formatNumber(value: number | null | undefined, unit = ""): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
@@ -55,7 +55,7 @@ export function formatNumber(value: number | null | undefined, unit = "") {
   return `${numberFormatter.format(value)}${nbspUnit}`;
 }
 
-export function formatDate(value: string | null | undefined) {
+export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "n/a";
   }
@@ -66,7 +66,10 @@ export function formatDate(value: string | null | undefined) {
   return dateTimeFormatter.format(parsed);
 }
 
-export function statusClass(errors?: string[], warnings?: string[]) {
+export function statusClass(
+  errors?: string[],
+  warnings?: string[],
+): { label: string; className: string } {
   if (errors && errors.length) {
     return {label: "Errors", className: "status err"};
   }

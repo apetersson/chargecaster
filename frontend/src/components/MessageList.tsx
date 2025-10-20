@@ -1,9 +1,11 @@
+import type { JSX } from "react";
+
 type MessageListProps = {
   items?: string[];
   tone: "error" | "warning";
 };
 
-const MessageList = ({items, tone}: MessageListProps) => {
+const MessageList = ({items, tone}: MessageListProps): JSX.Element | null => {
   if (!items || items.length === 0) {
     return null;
   }

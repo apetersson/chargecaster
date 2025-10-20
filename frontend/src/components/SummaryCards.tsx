@@ -1,7 +1,9 @@
+import type { JSX } from "react";
+
 import type { SnapshotSummary } from "../types";
 import { formatDate, formatNumber, formatPercent, statusClass } from "../utils/format";
 
-const SummaryCards = ({data}: { data: SnapshotSummary | null }) => {
+const SummaryCards = ({data}: { data: SnapshotSummary | null }): JSX.Element | null => {
   if (!data) {
     return null;
   }

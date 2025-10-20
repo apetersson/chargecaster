@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import HistoryTable from "./components/HistoryTable";
 import MessageList from "./components/MessageList";
@@ -35,7 +35,7 @@ const getErrorMessage = (error: unknown): string => {
 };
 
 
-const App = () => {
+const App = (): JSX.Element => {
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastEra[]>([]);

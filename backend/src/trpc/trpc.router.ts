@@ -119,7 +119,7 @@ export class TrpcRouter {
           this.logger.log("tRPC.dashboard.oracle requested");
           return this.oracleService.build(this.simulationService.ensureSeedFromFixture());
         }),
-        backtest24h: t.procedure.query(async (): Promise<BacktestSeriesResponse> => {
+        backtest24h: t.procedure.query((): BacktestSeriesResponse => {
           this.logger.log("tRPC.dashboard.backtest24h requested");
           this.logger.verbose("Loading runtime config for backtest calculations");
           const doc = this.configState.getDocument();
