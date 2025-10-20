@@ -38,37 +38,33 @@ function buildDatasets(series: BacktestSeriesResponse): BuildResult {
     minTimestampMs = minTimestampMs == null ? start : Math.min(minTimestampMs, start);
     maxTimestampMs = maxTimestampMs == null ? end : Math.max(maxTimestampMs, end);
 
-    const baseSavingsEur: number | null = typeof p.savings_cum_eur === "number" && Number.isFinite(p.savings_cum_eur)
-      ? p.savings_cum_eur
-      : (typeof p.savings_eur === "number" && Number.isFinite(p.savings_eur) ? p.savings_eur : null);
-    const savingsCt = typeof baseSavingsEur === "number"
-      ? baseSavingsEur * 100
-      : null;
-    if (typeof savingsCt === "number" && Number.isFinite(savingsCt)) {
+    const baseSavingsEur = p.savings_cum_eur ?? p.savings_eur ?? null;
+    const savingsCt = baseSavingsEur != null ? baseSavingsEur * 100 : null;
+    if (savingsCt != null && Number.isFinite(savingsCt)) {
       savingsPoints.push({x: start, y: savingsCt, source: "history"});
       savingsPoints.push({x: end, y: savingsCt, source: "history"});
       savingsMinCt = Math.min(savingsMinCt, savingsCt);
       savingsMaxCt = Math.max(savingsMaxCt, savingsCt);
     }
 
-    if (typeof p.grid_power_smart_w === "number" && Number.isFinite(p.grid_power_smart_w)) {
+    if (p.grid_power_smart_w != null && Number.isFinite(p.grid_power_smart_w)) {
       gridSmart.push({x: start, y: p.grid_power_smart_w, source: "history"});
       gridSmart.push({x: end, y: p.grid_power_smart_w, source: "history"});
       powerMinW = Math.min(powerMinW, p.grid_power_smart_w);
       powerMaxW = Math.max(powerMaxW, p.grid_power_smart_w);
     }
 
-    if (typeof p.grid_power_dumb_w === "number" && Number.isFinite(p.grid_power_dumb_w)) {
+    if (p.grid_power_dumb_w != null && Number.isFinite(p.grid_power_dumb_w)) {
       gridDumb.push({x: start, y: p.grid_power_dumb_w, source: "history"});
       gridDumb.push({x: end, y: p.grid_power_dumb_w, source: "history"});
       powerMinW = Math.min(powerMinW, p.grid_power_dumb_w);
       powerMaxW = Math.max(powerMaxW, p.grid_power_dumb_w);
     }
 
-    if (typeof p.soc_smart_percent === "number" && Number.isFinite(p.soc_smart_percent)) {
+    if (p.soc_smart_percent != null && Number.isFinite(p.soc_smart_percent)) {
       socSmart.push({x: end, y: p.soc_smart_percent, source: "history"});
     }
-    if (typeof p.soc_dumb_percent === "number" && Number.isFinite(p.soc_dumb_percent)) {
+    if (p.soc_dumb_percent != null && Number.isFinite(p.soc_dumb_percent)) {
       socDumb.push({x: end, y: p.soc_dumb_percent, source: "history"});
     }
   }

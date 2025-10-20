@@ -51,33 +51,29 @@ interface ComputationState {
   maxDischargePower: Power | null;
 }
 
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
+function toFiniteNumber(value: number | null | undefined): number | null {
+  if (value == null) {
+    return null;
   }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-  return null;
+  return Number.isFinite(value) ? value : null;
 }
 
 function resolvePrice(point: HistoryPoint | null | undefined): EnergyPrice | null {
   if (!point) {
     return null;
   }
-  const priceEur = toFiniteNumber(point.price_eur_per_kwh ?? null);
+  const priceEur = toFiniteNumber(point.price_eur_per_kwh);
   if (priceEur !== null) {
     return EnergyPrice.fromEurPerKwh(priceEur);
   }
-  const priceCt = toFiniteNumber(point.price_ct_per_kwh ?? null);
+  const priceCt = toFiniteNumber(point.price_ct_per_kwh);
   if (priceCt !== null) {
     return EnergyPrice.fromEurPerKwh(priceCt / 100);
   }
   return null;
 }
 
-function parseSoc(value: unknown): Percentage | null {
+function parseSoc(value: number | null | undefined): Percentage | null {
   const numeric = toFiniteNumber(value);
   if (numeric === null) {
     return null;
@@ -86,7 +82,7 @@ function parseSoc(value: unknown): Percentage | null {
   return Percentage.fromPercent(bounded);
 }
 
-function parsePower(value: unknown): Power | null {
+function parsePower(value: number | null | undefined): Power | null {
   const numeric = toFiniteNumber(value);
   if (numeric === null || numeric <= 0) {
     return null;
@@ -138,7 +134,7 @@ export function computeBacktestedSavings(
     return null;
   }
 
-  const windowHours = options.windowHours && Number.isFinite(options.windowHours) && options.windowHours > 0
+  const windowHours = options.windowHours != null && options.windowHours > 0
     ? options.windowHours
     : DEFAULT_WINDOW_HOURS;
   const windowStartMs = latestTimestampMs - windowHours * 3_600_000;
@@ -259,7 +255,7 @@ export function computeBacktestedSavings(
 
     const gridPower = Power.fromWatts(gridPowerW);
     const solarPower = Power.fromWatts(Math.max(0, solarPowerW));
-    const observedHomePower = typeof observedHomePowerW === "number" && Number.isFinite(observedHomePowerW)
+    const observedHomePower = observedHomePowerW !== null
       ? Power.fromWatts(Math.max(0, observedHomePowerW))
       : null;
 
@@ -427,7 +423,7 @@ function computeBacktestSeries(
     return null;
   }
 
-  const windowHours = options.windowHours && Number.isFinite(options.windowHours) && options.windowHours > 0
+  const windowHours = options.windowHours != null && options.windowHours > 0
     ? options.windowHours
     : DEFAULT_WINDOW_HOURS;
   const windowStartMs = latestTimestampMs - windowHours * 3_600_000;
@@ -533,7 +529,7 @@ function computeBacktestSeries(
 
     const gridPower = Power.fromWatts(gridPowerW);
     const solarPower = Power.fromWatts(Math.max(0, solarPowerW));
-    const observedHomePower = typeof observedHomePowerW === "number" && Number.isFinite(observedHomePowerW)
+    const observedHomePower = observedHomePowerW !== null
       ? Power.fromWatts(Math.max(0, observedHomePowerW))
       : null;
 
