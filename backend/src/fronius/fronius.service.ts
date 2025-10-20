@@ -33,11 +33,19 @@ type FroniusMode = "charge" | "auto" | "hold";
 export class FroniusService {
   private readonly logger = new Logger(FroniusService.name);
   private readonly froniusConfig: FroniusConnectionConfig | null;
+  private readonly dryRunEnabled: boolean;
+  private readonly froniusDisabled: boolean;
+  private readonly autoModeFloorOverride: Percentage | null;
+  private readonly maxChargeLimit: Percentage | null;
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
 
   constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
     const document = this.configState.getDocumentRef();
+    this.dryRunEnabled = document.dry_run === true;
+    this.froniusDisabled = document.fronius?.enabled === false;
+    this.autoModeFloorOverride = this.parsePercentage(document.battery?.auto_mode_floor_soc ?? null);
+    this.maxChargeLimit = this.parsePercentage(document.battery?.max_charge_soc_percent ?? null);
     let froniusConfig: FroniusConnectionConfig | null = null;
     try {
       froniusConfig = requireFroniusConnectionConfig(document);
@@ -54,16 +62,16 @@ export class FroniusService {
     this.froniusConfig = froniusConfig;
   }
 
-  async applyOptimization(config: ConfigDocument, snapshot: SnapshotPayload): Promise<FroniusApplyResult> {
-    if (config.dry_run) {
+  async applyOptimization(snapshot: SnapshotPayload): Promise<FroniusApplyResult> {
+    if (this.dryRunEnabled) {
       this.logger.log("Dry run enabled; skipping Fronius optimization apply.");
       return {errorMessage: null};
     }
-    if (config.fronius?.enabled === false) {
+    if (this.froniusDisabled) {
       this.logger.verbose("Fronius integration disabled in config; skipping optimisation.");
       return {errorMessage: null};
     }
-    if (!this.froniusConfig) {
+    if (this.froniusConfig === null) {
       this.logger.verbose("Fronius configuration missing; skipping optimisation.");
       return {errorMessage: null};
     }
@@ -88,7 +96,7 @@ export class FroniusService {
         return {errorMessage: null};
       }
 
-      const payload = this.buildPayload(config, snapshot, desiredMode);
+      const payload = this.buildPayload(snapshot, desiredMode);
       if (!payload) {
         this.logger.warn("Unable to construct Fronius payload; skipping update.");
         return {errorMessage: null};
@@ -194,13 +202,12 @@ export class FroniusService {
   }
 
   private buildPayload(
-    config: ConfigDocument,
     snapshot: SnapshotPayload,
     mode: FroniusMode,
   ): { body: Record<string, unknown>; target: Percentage | null } | null {
     const currentSoc = this.parsePercentage(snapshot.current_soc_percent);
 
-    const maxCharge = this.resolveMaxCharge(config);
+    const maxCharge = this.resolveMaxCharge();
 
     if (mode === "charge") {
       const target = maxCharge ?? Percentage.full();
@@ -211,7 +218,7 @@ export class FroniusService {
     }
 
     if (mode === "hold") {
-      const floor = this.resolveAutoFloor(config, snapshot);
+      const floor = this.resolveAutoFloor(snapshot);
       let target = currentSoc ?? this.lastAppliedTarget ?? maxCharge ?? Percentage.full();
       if (target.ratio < floor.ratio) {
         target = floor;
@@ -225,7 +232,7 @@ export class FroniusService {
       };
     }
 
-    const floorSoc = this.resolveAutoFloor(config, snapshot);
+    const floorSoc = this.resolveAutoFloor(snapshot);
     return {
       body: {
         BAT_M0_SOC_MIN: this.toPercentInteger(floorSoc),
@@ -235,8 +242,8 @@ export class FroniusService {
     };
   }
 
-  private resolveAutoFloor(config: ConfigDocument, snapshot: SnapshotPayload): Percentage {
-    const configFloor = this.parsePercentage(config.battery?.auto_mode_floor_soc ?? null);
+  private resolveAutoFloor(snapshot: SnapshotPayload): Percentage {
+    const configFloor = this.autoModeFloorOverride;
     if (configFloor) {
       return configFloor;
     }
@@ -247,8 +254,8 @@ export class FroniusService {
     return Percentage.fromPercent(5);
   }
 
-  private resolveMaxCharge(config: ConfigDocument): Percentage | null {
-    return this.parsePercentage(config.battery?.max_charge_soc_percent ?? null);
+  private resolveMaxCharge(): Percentage | null {
+    return this.maxChargeLimit;
   }
 
   private serializeManualTarget(target: Percentage): Record<string, unknown> {

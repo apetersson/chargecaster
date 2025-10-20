@@ -3,7 +3,6 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { describeError } from "@chargecaster/domain";
 import { SimulationService } from "../simulation/simulation.service";
 import { FroniusService } from "../fronius/fronius.service";
-import type { ConfigDocument } from "./schemas";
 import { SimulationPreparationService } from "./simulation-preparation.service";
 import { RuntimeConfigService } from "./runtime-config.service";
 
@@ -63,7 +62,7 @@ export class SimulationSeedService implements OnModuleDestroy {
         },
       });
       this.logger.log("Seeded snapshot using config data.");
-      await this.applyFronius(snapshot, rawConfig);
+      await this.applyFronius(snapshot);
     } catch (error) {
       this.logger.error(`Simulation seed failed: ${describeError(error)}`);
       throw error;
@@ -80,9 +79,9 @@ export class SimulationSeedService implements OnModuleDestroy {
     }
   }
 
-  private async applyFronius(snapshot: Awaited<ReturnType<SimulationService["runSimulation"]>>, config: ConfigDocument): Promise<void> {
+  private async applyFronius(snapshot: Awaited<ReturnType<SimulationService["runSimulation"]>>): Promise<void> {
     try {
-      const result = await this.froniusService.applyOptimization(config, snapshot);
+      const result = await this.froniusService.applyOptimization(snapshot);
       if (result.errorMessage) {
         this.logger.warn(`Snapshot flagged with error: ${result.errorMessage}`);
         this.simulationService.appendErrorsToLatestSnapshot([result.errorMessage]);
