@@ -1,6 +1,7 @@
 import { constants as fsConstants, accessSync, readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { describeError } from "@chargecaster/domain";
 import { Injectable, Logger } from "@nestjs/common";
 import YAML from "yaml";
 
@@ -26,7 +27,7 @@ export class ConfigFileService {
     try {
       await access(path, fsConstants.R_OK);
     } catch (error) {
-      const message = `Config file not accessible at ${path}: ${this.describeError(error)}`;
+      const message = `Config file not accessible at ${path}: ${describeError(error)}`;
       this.logger.error(message);
       throw new Error(message);
     }
@@ -44,7 +45,7 @@ export class ConfigFileService {
     try {
       accessSync(path, fsConstants.R_OK);
     } catch (error) {
-      const message = `Config file not accessible at ${path}: ${this.describeError(error)}`;
+      const message = `Config file not accessible at ${path}: ${describeError(error)}`;
       this.logger.error(message);
       throw new Error(message);
     }
@@ -57,10 +58,4 @@ export class ConfigFileService {
     return parseConfigDocument(parsed);
   }
 
-  private describeError(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    return String(error);
-  }
 }

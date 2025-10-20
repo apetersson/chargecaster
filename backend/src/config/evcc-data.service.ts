@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 
+import { describeError } from "@chargecaster/domain";
 import type { RawForecastEntry, RawSolarEntry } from "@chargecaster/domain";
 import { buildSolarForecastFromTimeseries } from "../simulation/solar";
 import { parseEvccState } from "./schemas";
@@ -51,7 +52,7 @@ export class EvccDataService {
     try {
       endpoint = new URL("/api/state", baseUrl).toString();
     } catch (error) {
-      const message = `Invalid EVCC base_url (${baseUrl}): ${this.describeError(error)}`;
+      const message = `Invalid EVCC base_url (${baseUrl}): ${describeError(error)}`;
       warnings.push(message);
       this.logger.warn(message);
       return this.emptyResult();
@@ -81,7 +82,7 @@ export class EvccDataService {
         homePowerW: parsed.homePowerW,
       };
     } catch (error) {
-      const message = `EVCC data fetch failed: ${this.describeError(error)}`;
+      const message = `EVCC data fetch failed: ${describeError(error)}`;
       warnings.push(message);
       this.logger.warn(message);
       return this.emptyResult();
@@ -122,10 +123,4 @@ export class EvccDataService {
     }
   }
 
-  private describeError(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    return String(error);
-  }
 }

@@ -6,6 +6,7 @@ export { TimeSlot } from "./time-slot";
 export { TariffSlot } from "./tariff-slot";
 export { Scalar } from "./scalar";
 export { Percentage } from "./percentage";
+export { describeError } from "./errors";
 export {
   normaliseSolarTimeseries,
   parseTemporal,

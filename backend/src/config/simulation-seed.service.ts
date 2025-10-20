@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 
+import { describeError } from "@chargecaster/domain";
 import { SimulationService } from "../simulation/simulation.service";
 import { FroniusService } from "../fronius/fronius.service";
 import type { ConfigDocument } from "./schemas";
@@ -64,7 +65,7 @@ export class SimulationSeedService implements OnModuleDestroy {
       this.logger.log("Seeded snapshot using config data.");
       await this.applyFronius(snapshot, rawConfig);
     } catch (error) {
-      this.logger.error(`Simulation seed failed: ${this.describeError(error)}`);
+      this.logger.error(`Simulation seed failed: ${describeError(error)}`);
       throw error;
     } finally {
       this.runInProgress = false;
@@ -87,7 +88,7 @@ export class SimulationSeedService implements OnModuleDestroy {
         this.simulationService.appendErrorsToLatestSnapshot([result.errorMessage]);
       }
     } catch (error) {
-      this.logger.warn(`Fronius integration failed: ${this.describeError(error)}`);
+      this.logger.warn(`Fronius integration failed: ${describeError(error)}`);
     }
   }
 
@@ -99,15 +100,9 @@ export class SimulationSeedService implements OnModuleDestroy {
     const intervalSeconds = this.nextIntervalSeconds ?? 300;
     const delayMs = Math.max(1, intervalSeconds) * 1000;
     this.schedulerTimer = setTimeout(() => {
-      this.seedFromConfig().catch((error) => this.logger.error(`Scheduled run failed: ${this.describeError(error)}`));
+      this.seedFromConfig().catch((error) => this.logger.error(`Scheduled run failed: ${describeError(error)}`));
     }, delayMs);
     this.logger.log(`Next simulation scheduled in ${(delayMs / 60000).toFixed(2)} minutes`);
   }
 
-  private describeError(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    return String(error);
-  }
 }

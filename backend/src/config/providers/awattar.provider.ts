@@ -1,5 +1,5 @@
+import { describeError, type RawForecastEntry } from "@chargecaster/domain";
 import { Logger } from "@nestjs/common";
-import type { RawForecastEntry } from "@chargecaster/domain";
 import { parseMarketForecast, type AwattarConfig } from "../schemas";
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
 import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
@@ -23,8 +23,8 @@ export class AwattarProvider implements MarketProvider {
       this.logger.verbose(`Awattar returned ${forecast.length} slots (snapshot=${priceSnapshot ?? "n/a"})`);
       return {forecast, priceSnapshot};
     } catch (error) {
-      this.logger.warn(`Awattar fetch failed: ${this.describeError(error)}`);
-      ctx.warnings.push(`Awattar fetch failed: ${this.describeError(error)}`);
+      this.logger.warn(`Awattar fetch failed: ${describeError(error)}`);
+      ctx.warnings.push(`Awattar fetch failed: ${describeError(error)}`);
       return {forecast: [], priceSnapshot: null};
     }
   }
@@ -44,8 +44,4 @@ export class AwattarProvider implements MarketProvider {
     }
   }
 
-  private describeError(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    return String(error);
-  }
 }

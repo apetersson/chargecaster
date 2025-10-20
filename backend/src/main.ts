@@ -12,6 +12,7 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import fastifyStatic from "@fastify/static";
 
+import { describeError } from "@chargecaster/domain";
 import { AppModule } from "./app.module";
 import { ConfigFileService } from "./config/config-file.service";
 import { setRuntimeConfig } from "./config/runtime-config";
@@ -232,13 +233,6 @@ function resolveLogLevels(level: unknown): { levels: LogLevel[]; normalized: str
     default:
       return {levels: ["fatal", "error", "warn", "log"], normalized: "info", fallbackUsed: true};
   }
-}
-
-function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }
 
 if (process.env.NODE_ENV !== "test") {
