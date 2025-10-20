@@ -203,16 +203,16 @@ export const useBacktestChart = (
           borderColor: "#94a3b8",
           backgroundColor: "rgba(148, 163, 184, 0.08)",
           borderWidth: 2,
-          fill: d.yAxisID === "soc" ? false : true,
+          fill: d.yAxisID !== "soc",
         };
       }
-      if (focus === "dumb" && isSmart) {
+      if (focusModeOption === "dumb" && isSmart) {
         return {
           ...d,
           borderColor: "#94a3b8",
           backgroundColor: "rgba(148, 163, 184, 0.08)",
           borderWidth: 2,
-          fill: d.yAxisID === "soc" ? false : true,
+          fill: d.yAxisID !== "soc",
         };
       }
       return d;
