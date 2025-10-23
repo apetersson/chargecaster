@@ -7,7 +7,7 @@ import type {
   OracleEntry,
 } from "../../types";
 
-import { DEFAULT_POWER_BOUNDS, DEFAULT_PRICE_BOUNDS, DEFAULT_SLOT_DURATION_MS } from "./constants";
+import { DEFAULT_POWER_BOUNDS, DEFAULT_PRICE_BOUNDS, DEFAULT_SLOT_DURATION_MS, GAP_THRESHOLD_MS } from "./constants";
 import type { AxisBounds, DerivedEra, ProjectionPoint, TimeRangeMs } from "./types";
 
 export const isFiniteNumber = (value: unknown): value is number =>
@@ -195,6 +195,7 @@ export const sortChronologically = (points: ProjectionPoint[]): ProjectionPoint[
 export const buildCombinedSeries = (
   historySeries: ProjectionPoint[],
   forecastSeries: ProjectionPoint[],
+  options?: { allowContinuous?: boolean },
 ): ProjectionPoint[] => {
   const past = sortChronologically([...historySeries]);
   const future = sortChronologically([...forecastSeries]);
@@ -207,8 +208,15 @@ export const buildCombinedSeries = (
   }
 
   const combined: ProjectionPoint[] = [...past];
-  const gapTime = future[0].x;
-  combined.push({x: gapTime, y: Number.NaN, source: "gap"});
+  const firstFuture = future[0];
+  const lastPast = past[past.length - 1];
+  const delta = typeof firstFuture.x === "number" && typeof lastPast.x === "number"
+    ? firstFuture.x - lastPast.x
+    : Number.POSITIVE_INFINITY;
+  const shouldAllowContinuous = options?.allowContinuous ?? false;
+  if (!shouldAllowContinuous || !Number.isFinite(delta) || delta > GAP_THRESHOLD_MS) {
+    combined.push({x: firstFuture.x, y: Number.NaN, source: "gap"});
+  }
   combined.push(...future);
   return combined;
 };

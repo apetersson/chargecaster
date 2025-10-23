@@ -158,6 +158,30 @@ const buildSolarSeries = (
   let hadActiveSegment = false;
   let lastDataEraEnd: number | null = null;
 
+  const findAnchorPoint = (): ProjectionPoint | null => {
+    for (let idx = futurePoints.length - 1; idx >= 0; idx -= 1) {
+      const candidate = futurePoints[idx];
+      if (Number.isFinite(candidate.y)) {
+        return candidate;
+      }
+      if (Number.isNaN(candidate.y)) {
+        break;
+      }
+    }
+    if (!historyPoints.length) {
+      return null;
+    }
+    return historyPoints.reduce<ProjectionPoint | null>((latest, point) => {
+      if (!Number.isFinite(point.y)) {
+        return latest;
+      }
+      if (!latest || point.x > latest.x) {
+        return point;
+      }
+      return latest;
+    }, null);
+  };
+
   for (const era of futureEras) {
     const hasSolar = isFiniteNumber(era.solarAverageW);
 
@@ -166,6 +190,7 @@ const buildSolarSeries = (
         pushGapPoint(futurePoints, era.startMs);
         hadActiveSegment = false;
       }
+      lastDataEraEnd = null;
       continue;
     }
 
@@ -183,12 +208,26 @@ const buildSolarSeries = (
 
     const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
     const solarAverage = era.solarAverageW as number;
-    futurePoints.push({x: midpoint, y: solarAverage, source: "forecast"});
+
+    const anchor = findAnchorPoint();
+    let startValue = solarAverage;
+    if (anchor && Number.isFinite(anchor.y) && anchor.x <= midpoint) {
+      const clampedStart = Math.max(anchor.x, Math.min(midpoint, era.startMs));
+      const denominator = midpoint - anchor.x;
+      const numerator = clampedStart - anchor.x;
+      if (denominator > 0 && numerator >= 0) {
+        const ratio = numerator / denominator;
+        startValue = anchor.y + (solarAverage - anchor.y) * Math.min(1, ratio);
+      }
+    }
+
+    addPoint(futurePoints, {x: era.startMs, y: startValue, source: "forecast"});
+    addPoint(futurePoints, {x: midpoint, y: solarAverage, source: "forecast"});
     hadActiveSegment = true;
     lastDataEraEnd = era.endMs;
   }
 
-  return buildCombinedSeries(historyPoints, futurePoints);
+  return buildCombinedSeries(historyPoints, futurePoints, {allowContinuous: true});
 };
 
 const buildDemandSeries = (
