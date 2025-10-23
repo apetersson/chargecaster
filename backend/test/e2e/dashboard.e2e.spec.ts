@@ -1,12 +1,12 @@
 import "reflect-metadata";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import cors from "@fastify/cors";
 import type { FastifyCorsOptions } from "@fastify/cors";
 import { createTRPCProxyClient, httpBatchLink } from "@trpc/client";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import type { FastifyTRPCPluginOptions } from "@trpc/server/adapters/fastify";
-import { NestFactory } from "@nestjs/core";
+import { Test } from "@nestjs/testing";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -15,7 +15,8 @@ import { AppModule } from "../../src/app.module";
 import { SimulationService, extractForecastFromState } from "../../src/simulation/simulation.service";
 import type { AppRouter } from "../../src/trpc/trpc.router";
 import { TrpcRouter } from "../../src/trpc/trpc.router";
-
+import { setRuntimeConfig } from "../../src/config/runtime-config";
+import type { ConfigDocument } from "../../src/config/schemas";
 const config = {
   battery: {
     capacity_kwh: 12,
@@ -39,11 +40,50 @@ describe("dashboard tRPC", () => {
 
   let app: NestFastifyApplication;
   let client: ReturnType<typeof createTRPCProxyClient<AppRouter>>;
+  let originalStoragePath: string | undefined;
+  let testDbDir: string;
 
   beforeAll(async () => {
     process.env.NODE_ENV = "test";
+    const testDbPath = join(process.cwd(), "..", "data", "test_db", "backend-e2e.sqlite");
+    testDbDir = join(process.cwd(), "..", "data", "test_db");
+    if (existsSync(testDbDir)) {
+      throw new Error(`Refusing to run dashboard e2e: test DB folder already exists at ${testDbDir}`);
+    }
+    originalStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
+    process.env.CHARGECASTER_STORAGE_PATH = testDbPath;
+    const runtimeConfig: ConfigDocument = {
+      dry_run: true,
+      fronius: {
+        enabled: false,
+      },
+      battery: {
+        capacity_kwh: 12,
+        max_charge_power_w: 500,
+        auto_mode_floor_soc: 5,
+      },
+      price: {
+        grid_fee_eur_per_kwh: 0.02,
+      },
+      logic: {
+        interval_seconds: 300,
+        min_hold_minutes: 20,
+        house_load_w: 1200,
+        allow_battery_export: true,
+      },
+      logging: {
+        level: "info",
+      },
+    };
+    setRuntimeConfig(runtimeConfig);
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .compile();
+
     const adapter = new FastifyAdapter({ logger: false, maxParamLength: 4096 });
-    app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, { logger: false });
+    app = moduleRef.createNestApplication<NestFastifyApplication>(adapter);
     const fastify = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
     await fastify.register(cors, { origin: true } satisfies FastifyCorsOptions);
     const trpcRouter = app.get(TrpcRouter);
@@ -128,6 +168,12 @@ describe("dashboard tRPC", () => {
 
   afterAll(async () => {
     await app.close();
+    rmSync(testDbDir, { recursive: true, force: true });
+    if (originalStoragePath === undefined) {
+      delete process.env.CHARGECASTER_STORAGE_PATH;
+    } else {
+      process.env.CHARGECASTER_STORAGE_PATH = originalStoragePath;
+    }
   });
 
   test("runs simulation and stores snapshot", async () => {

@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import type { Database } from "better-sqlite3";
 import DatabaseConstructor from "better-sqlite3";
@@ -10,7 +10,7 @@ import { historyPointSchema, snapshotPayloadSchema } from "@chargecaster/domain"
 export interface SnapshotRecord {
   id: number;
   timestamp: string;
-  payload: SnapshotPayload;
+      payload: SnapshotPayload;
 }
 
 export interface HistoryRecord {
@@ -21,13 +21,18 @@ export interface HistoryRecord {
 
 @Injectable()
 export class StorageService implements OnModuleDestroy {
-  private readonly dbPath = join(process.cwd(), "..", "data", "db", "backend.sqlite");
+  private readonly dbPath: string;
   private readonly db: Database;
   private readonly logger = new Logger(StorageService.name);
 
   constructor() {
-    const folder = join(process.cwd(), "..", "data", "db");
+    const override = process.env.CHARGECASTER_STORAGE_PATH?.trim();
+    const resolvedPath = override && override.length > 0
+      ? resolve(process.cwd(), override)
+      : join(process.cwd(), "..", "data", "db", "backend.sqlite");
+    const folder = dirname(resolvedPath);
     mkdirSync(folder, {recursive: true});
+    this.dbPath = resolvedPath;
     this.db = new DatabaseConstructor(this.dbPath);
     this.db.pragma("journal_mode = WAL");
     this.migrate();
