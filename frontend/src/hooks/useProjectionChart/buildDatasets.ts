@@ -267,6 +267,26 @@ const buildPriceSeries = (
   const firstFutureStart = futureEras[0]?.startMs;
   attachHistoryIntervals(sortedHistory, firstFutureStart);
 
+  const nowMs = Date.now();
+  const hasFutureStart = typeof firstFutureStart === "number" && Number.isFinite(firstFutureStart);
+  const futureBoundary = hasFutureStart ? firstFutureStart : null;
+
+  const historySeries = sortedHistory.map((point) => {
+    if (!Number.isFinite(point.x)) {
+      return point;
+    }
+    let clampedEnd = typeof point.xEnd === "number" && Number.isFinite(point.xEnd) ? point.xEnd : point.x;
+    if (futureBoundary !== null && futureBoundary > nowMs) {
+      clampedEnd = Math.min(clampedEnd, futureBoundary);
+    }
+    clampedEnd = Math.min(clampedEnd, nowMs);
+    if (!Number.isFinite(clampedEnd)) {
+      return point;
+    }
+    const safeEnd = clampedEnd < point.x ? point.x : clampedEnd;
+    return {...point, xEnd: safeEnd};
+  });
+
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
     if (!isFiniteNumber(era.priceCtPerKwh)) {
@@ -281,7 +301,7 @@ const buildPriceSeries = (
     });
   }
 
-  return [...sortedHistory, ...futurePoints];
+  return [...historySeries, ...futurePoints];
 };
 
 const buildLegendGroups = (

@@ -319,7 +319,7 @@ export const attachHistoryIntervals = (
     const current = historyPoints[i];
     const next = i + 1 < historyPoints.length ? historyPoints[i + 1] : null;
     const rawEnd = next ? next.x : fallbackStart(current);
-    current.xEnd = rawEnd > current.x ? rawEnd : current.x + DEFAULT_SLOT_DURATION_MS;
+    current.xEnd = rawEnd >= current.x ? rawEnd : current.x + DEFAULT_SLOT_DURATION_MS;
   }
 };
 
