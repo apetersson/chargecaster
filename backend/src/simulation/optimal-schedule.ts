@@ -374,7 +374,9 @@ function evaluateStateTransitions(
   currentSoCStep: number,
   costToGoNextRow: number[],
 ): { cost: number; transition: PolicyTransition } {
-  // Evaluate every feasible delta in SoC for this slot and pair it with the downstream cost-to-go signal
+  // Evaluate every feasible delta in SoC for this slot and pair it with the downstream cost-to-go signal.
+  // The loop below is the core of the DP step: it filters out infeasible moves and keeps the lowest cost option.
+  // Think of it as enumerating “charge / discharge / hold” for the next slot, subject to hardware + policy constraints.
   const {
     energyPerStepKwh,
     numSoCStates,
@@ -396,6 +398,7 @@ function evaluateStateTransitions(
   } = profile;
 
   let maxChargeSteps = numSoCStates - 1 - currentSoCStep;
+  // Limit the upward swing by what the inverter can supply (grid + solar) during this slot.
   if (totalChargeLimitKwh > 0) {
     maxChargeSteps = Math.min(
       maxChargeSteps,
@@ -407,6 +410,7 @@ function evaluateStateTransitions(
   const upLimit = Math.min(maxChargeSteps, numSoCStates - 1 - currentSoCStep);
 
   let maxDischargeStepsByPower = currentSoCStep;
+  // Downward movement is limited by both available SoC and the discharge power ceiling.
   if (Number.isFinite(dischargeLimitKwh)) {
     maxDischargeStepsByPower = Math.min(
       maxDischargeStepsByPower,
@@ -419,6 +423,7 @@ function evaluateStateTransitions(
   let bestCost = Number.POSITIVE_INFINITY;
   let bestTransition: PolicyTransition | null = null;
 
+  // Iterate through every delta in SoC (negative = discharge, positive = charge, zero = hold).
   for (let deltaSoCSteps = -downLimit; deltaSoCSteps <= upLimit; deltaSoCSteps += 1) {
     const nextSoCStep = currentSoCStep + deltaSoCSteps;
     const energyChangeKwh = deltaSoCSteps * energyPerStepKwh;
@@ -428,12 +433,14 @@ function evaluateStateTransitions(
       continue;
     }
 
+    // Avoid transitions that would force PV export when export is disabled.
     if (
       !pvCanExportUnderState(context, profile, currentSoCStep, energyChangeKwh, gridEnergyKwh)
     ) {
       continue;
     }
 
+    // Respect the no-export rule by disallowing net export when the caller has it disabled.
     if (!allowBatteryExport) {
       const minGridEnergyKwh = baselineGridEnergyKwh < 0 ? baselineGridEnergyKwh : 0;
       if (gridEnergyKwh < minGridEnergyKwh - EPSILON) {
@@ -445,16 +452,13 @@ function evaluateStateTransitions(
       const gridImportKwh = Math.max(0, gridEnergyKwh);
       const additionalGridChargeKwh = Math.max(0, gridImportKwh - baselineGridImportKwh);
 
+      // Charging past the configured SoC cap is only allowed if it comes from solar spill.
       if (nextSoCStep > maxAllowedSoCStep && additionalGridChargeKwh > EPSILON) {
         continue;
       }
 
-      const solarPossibleKwh = Math.min(energyChangeKwh, solarChargeLimitKwh, Math.max(0, availableSolarKwh));
-      const maxGridNeededKwh = Math.max(0, energyChangeKwh - solarPossibleKwh);
+      // Stay within inverter limits for grid and solar charge power.
       if (additionalGridChargeKwh > gridChargeLimitKwh + EPSILON) {
-        continue;
-      }
-      if (additionalGridChargeKwh > maxGridNeededKwh + EPSILON) {
         continue;
       }
       const solarChargingKwh = Math.max(0, energyChangeKwh - additionalGridChargeKwh);
@@ -463,6 +467,7 @@ function evaluateStateTransitions(
       }
     }
 
+    // Keep the transition with the lowest total (slot + future) cost.
     const slotCost = computeSlotCost(gridEnergyKwh, priceTotal, feedInTariff);
     const totalCost = slotCost + costToGoNextRow[nextSoCStep];
     if (totalCost < bestCost) {
