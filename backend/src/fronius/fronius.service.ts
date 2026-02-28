@@ -507,10 +507,37 @@ export class FroniusService {
         return response;
       }
 
-      const authorization = this.buildDigestAuthorization(params, method, url, credentials.user, credentials.password);
-      headers.set("Authorization", authorization);
+      let currentParams = params;
+      const credentialCandidates = this.buildDigestCredentialCandidates(
+        credentials.user,
+        credentials.password,
+        currentParams.realm ?? "",
+      );
 
-      response = await fetch(url, requestInit);
+      for (const [index, credentialSecret] of credentialCandidates.entries()) {
+        const authorization = this.buildDigestAuthorization(
+          currentParams,
+          method,
+          url,
+          credentials.user,
+          credentialSecret,
+        );
+        headers.set("Authorization", authorization);
+        response = await fetch(url, requestInit);
+        if (response.status !== 401) {
+          if (index > 0) {
+            this.logger.warn(
+              `Fronius accepted pre-hashed credential flow for digest auth variant #${index + 1}.`,
+            );
+          }
+          return response;
+        }
+        const nextChallenge = response.headers.get("www-authenticate") ?? response.headers.get("x-www-authenticate");
+        const nextParams = nextChallenge ? this.parseDigestChallenge(nextChallenge) : null;
+        if (nextParams) {
+          currentParams = nextParams;
+        }
+      }
 
       return response;
     } finally {
@@ -545,7 +572,7 @@ export class FroniusService {
     method: string,
     url: URL,
     username: string,
-    password: string,
+    credentialSecret: string,
   ): string {
     const realm = params.realm ?? "";
     const nonce = params.nonce ?? "";
@@ -570,7 +597,7 @@ export class FroniusService {
 
     const baseHa1 = this.hashDigestValue(
       digestAlgorithm.nodeAlgorithm,
-      `${username}:${realm}:${password}`,
+      `${username}:${realm}:${credentialSecret}`,
     );
     const ha1 = digestAlgorithm.session
       ? this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${baseHa1}:${nonce}:${cnonce}`)
@@ -601,6 +628,15 @@ export class FroniusService {
     }
 
     return `Digest ${parts.join(", ")}`;
+  }
+
+  private buildDigestCredentialCandidates(username: string, password: string, realm: string): string[] {
+    const candidates = [password];
+    if (realm.length) {
+      candidates.push(this.hashDigestValue("sha256", `${username}:${realm}:${password}`));
+      candidates.push(this.hashDigestValue("md5", `${username}:${realm}:${password}`));
+    }
+    return [...new Set(candidates)];
   }
 
   private resolveDigestAlgorithm(
