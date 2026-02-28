@@ -42,6 +42,14 @@ interface NormalisedStrategy {
   floorTarget: Percentage | null;
 }
 
+interface DigestSession {
+  nonce: string;
+  realm: string;
+  qop: string;
+  ha1: string;
+  nc: number;
+}
+
 @Injectable()
 
 export class FroniusService {
@@ -55,6 +63,7 @@ export class FroniusService {
   private lastAppliedMode: FroniusMode | null = null;
   private workingBatteriesPath: string | null = null;
   private workingCommandsPrefix: string | null = null;
+  private digestSession: DigestSession | null = null;
 
   constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
     const document = this.configState.getDocumentRef();
@@ -495,6 +504,22 @@ export class FroniusService {
         signal: controller.signal,
       } satisfies RequestInit;
 
+      // If we have an active digest session, reuse it instead of re-challenging.
+      if (this.digestSession) {
+        const session = this.digestSession;
+        session.nc++;
+        const digestUri = this.buildDigestUriCandidates(url)[0];
+        const authorization = this.buildSessionAuthorization(session, method, credentials.user, digestUri);
+        headers.set("Authorization", authorization);
+        const response = await fetch(url, requestInit);
+        if (response.status !== 401) {
+          return response;
+        }
+        // Session expired or rejected; fall through to fresh challenge.
+        this.digestSession = null;
+        this.logger.warn("Digest session rejected; re-authenticating.");
+      }
+
       let response = await fetch(url, requestInit);
 
       if (response.status !== 401) {
@@ -507,35 +532,59 @@ export class FroniusService {
         return response;
       }
 
-      let currentParams = params;
-      const credentialCandidates = this.buildDigestCredentialCandidates(
-        credentials.user,
-        credentials.password,
-        currentParams.realm ?? "",
-      );
+      const realm = params.realm ?? "";
+      const nonce = params.nonce ?? "";
+      const qop = (params.qop ?? "auth").split(",").map((s) => s.trim().toLowerCase()).find((s) => s.length) ?? "auth";
+      // Fronius uses a mixed-hash scheme: HA1 is always MD5(user:realm:password),
+      // even when the challenge algorithm is SHA256. The SHA256 algorithm only
+      // governs the final digest response computation. Try MD5 HA1 first (matching
+      // the Fronius UI behaviour), then fall back to standard SHA256 HA1.
+      const ha1Candidates = [
+        this.hashDigestValue("md5", `${credentials.user}:${realm}:${credentials.password}`),
+        this.hashDigestValue("sha256", `${credentials.user}:${realm}:${credentials.password}`),
+      ];
 
-      for (const [index, credentialSecret] of credentialCandidates.entries()) {
-        const authorization = this.buildDigestAuthorization(
-          currentParams,
-          method,
-          url,
-          credentials.user,
-          credentialSecret,
-        );
-        headers.set("Authorization", authorization);
-        response = await fetch(url, requestInit);
-        if (response.status !== 401) {
-          if (index > 0) {
-            this.logger.warn(
-              `Fronius accepted pre-hashed credential flow for digest auth variant #${index + 1}.`,
-            );
+      for (const [index, ha1] of ha1Candidates.entries()) {
+        const digestUriCandidates = this.buildDigestUriCandidates(url);
+        for (const digestUri of digestUriCandidates) {
+          const nc = 1;
+          const cnonce = randomBytes(8).toString("hex");
+          const ncHex = nc.toString().padStart(8, "0");
+          const ha2 = this.hashDigestValue("sha256", `${method.toUpperCase()}:${digestUri}`);
+          const responseValue = this.hashDigestValue(
+            "sha256",
+            `${ha1}:${nonce}:${ncHex}:${cnonce}:${qop}:${ha2}`,
+          );
+
+          const parts = [
+            `username="${credentials.user}"`,
+            `realm="${realm}"`,
+            `nonce="${nonce}"`,
+            `uri="${digestUri}"`,
+            `response="${responseValue}"`,
+            `qop=${qop}`,
+            `nc=${ncHex}`,
+            `cnonce="${cnonce}"`,
+          ];
+          headers.set("Authorization", `Digest ${parts.join(", ")}`);
+          response = await fetch(url, requestInit);
+          if (response.status !== 401) {
+            if (index > 0) {
+              this.logger.warn(
+                `Fronius accepted credential variant #${index + 1} (standard ${index === 1 ? "SHA256" : "other"} HA1).`,
+              );
+            }
+            // Establish digest session for subsequent requests.
+            this.digestSession = {nonce, realm, qop, ha1, nc};
+            return response;
           }
-          return response;
-        }
-        const nextChallenge = response.headers.get("www-authenticate") ?? response.headers.get("x-www-authenticate");
-        const nextParams = nextChallenge ? this.parseDigestChallenge(nextChallenge) : null;
-        if (nextParams) {
-          currentParams = nextParams;
+          const nextChallenge = response.headers.get("www-authenticate") ?? response.headers.get("x-www-authenticate");
+          const nextParams = nextChallenge ? this.parseDigestChallenge(nextChallenge) : null;
+          if (nextParams) {
+            if (nextParams.nonce) {
+              params.nonce = nextParams.nonce;
+            }
+          }
         }
       }
 
@@ -543,6 +592,32 @@ export class FroniusService {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  private buildSessionAuthorization(
+    session: DigestSession,
+    method: string,
+    username: string,
+    digestUri: string,
+  ): string {
+    const ncHex = session.nc.toString().padStart(8, "0");
+    const cnonce = randomBytes(8).toString("hex");
+    const ha2 = this.hashDigestValue("sha256", `${method.toUpperCase()}:${digestUri}`);
+    const responseValue = this.hashDigestValue(
+      "sha256",
+      `${session.ha1}:${session.nonce}:${ncHex}:${cnonce}:${session.qop}:${ha2}`,
+    );
+    const parts = [
+      `username="${username}"`,
+      `realm="${session.realm}"`,
+      `nonce="${session.nonce}"`,
+      `uri="${digestUri}"`,
+      `response="${responseValue}"`,
+      `qop=${session.qop}`,
+      `nc=${ncHex}`,
+      `cnonce="${cnonce}"`,
+    ];
+    return `Digest ${parts.join(", ")}`;
   }
 
   private parseDigestChallenge(header: string): Partial<Record<string, string>> | null {
@@ -567,95 +642,14 @@ export class FroniusService {
     return Object.keys(params).length ? params : null;
   }
 
-  private buildDigestAuthorization(
-    params: Partial<Record<string, string>>,
-    method: string,
-    url: URL,
-    username: string,
-    credentialSecret: string,
-  ): string {
-    const realm = params.realm ?? "";
-    const nonce = params.nonce ?? "";
-    if (!realm || !nonce) {
-      throw new Error("Invalid digest challenge: missing realm or nonce");
+  private buildDigestUriCandidates(url: URL): string[] {
+    if (!url.search) {
+      return [url.pathname];
     }
-
-    const qopRaw = params.qop ?? "auth";
-    const qop = qopRaw.split(",").map((item) => item.trim().toLowerCase()).find((item) => item.length) ?? "auth";
-    const algorithmToken = params.algorithm ?? "MD5";
-    const digestAlgorithm = this.resolveDigestAlgorithm(algorithmToken);
-    if (!digestAlgorithm) {
-      throw new Error(`Unsupported digest algorithm '${algorithmToken}'`);
+    if (url.pathname.endsWith("/commands/Login")) {
+      return [url.pathname, `${url.pathname}${url.search}`];
     }
-    if (qop === "auth-int") {
-      throw new Error("Unsupported digest qop 'auth-int'");
-    }
-
-    const uri = url.pathname + url.search;
-    const nc = "00000001";
-    const cnonce = randomBytes(8).toString("hex");
-
-    const baseHa1 = this.hashDigestValue(
-      digestAlgorithm.nodeAlgorithm,
-      `${username}:${realm}:${credentialSecret}`,
-    );
-    const ha1 = digestAlgorithm.session
-      ? this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${baseHa1}:${nonce}:${cnonce}`)
-      : baseHa1;
-    const ha2 = this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${method.toUpperCase()}:${uri}`);
-
-    const responseValue = qop
-      ? this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`)
-      : this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${ha1}:${nonce}:${ha2}`);
-
-    const parts = [
-      `username="${username}"`,
-      `realm="${realm}"`,
-      `nonce="${nonce}"`,
-      `uri="${uri}"`,
-      `response="${responseValue}"`,
-      `algorithm="${algorithmToken}"`,
-    ];
-
-    if (qop) {
-      parts.push(`qop=${qop}`);
-      parts.push(`nc=${nc}`);
-      parts.push(`cnonce="${cnonce}"`);
-    }
-
-    if (params.opaque) {
-      parts.push(`opaque="${params.opaque}"`);
-    }
-
-    return `Digest ${parts.join(", ")}`;
-  }
-
-  private buildDigestCredentialCandidates(username: string, password: string, realm: string): string[] {
-    const candidates = [password];
-    if (realm.length) {
-      candidates.push(this.hashDigestValue("sha256", `${username}:${realm}:${password}`));
-      candidates.push(this.hashDigestValue("md5", `${username}:${realm}:${password}`));
-    }
-    return [...new Set(candidates)];
-  }
-
-  private resolveDigestAlgorithm(
-    rawAlgorithm: string,
-  ): { nodeAlgorithm: "md5" | "sha256"; session: boolean } | null {
-    const normalized = rawAlgorithm.trim().toLowerCase().replace(/_/g, "-");
-    if (normalized === "md5") {
-      return {nodeAlgorithm: "md5", session: false};
-    }
-    if (normalized === "md5-sess") {
-      return {nodeAlgorithm: "md5", session: true};
-    }
-    if (normalized === "sha256" || normalized === "sha-256") {
-      return {nodeAlgorithm: "sha256", session: false};
-    }
-    if (normalized === "sha256-sess" || normalized === "sha-256-sess") {
-      return {nodeAlgorithm: "sha256", session: true};
-    }
-    return null;
+    return [`${url.pathname}${url.search}`, url.pathname];
   }
 
   private hashDigestValue(algorithm: "md5" | "sha256", value: string): string {
@@ -680,8 +674,10 @@ export class FroniusService {
           this.logger.warn(`Fronius logout endpoint ${logoutUrl} returned 404; trying fallback path.`);
         }
       }
+      this.digestSession = null;
       this.logger.verbose("Fronius session logged out.");
     } catch (error) {
+      this.digestSession = null;
       this.logger.verbose(`Fronius logout skipped: ${describeError(error)}`);
     }
   }
