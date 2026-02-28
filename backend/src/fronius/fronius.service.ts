@@ -54,6 +54,7 @@ export class FroniusService {
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
   private workingBatteriesPath: string | null = null;
+  private workingCommandsPrefix: string | null = null;
 
   constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
     const document = this.configState.getDocumentRef();
@@ -115,12 +116,15 @@ export class FroniusService {
       this.logger.verbose(`Fronius payload: ${JSON.stringify(payload.body)}`);
       let lastError: unknown = null;
       for (const [index, url] of urlCandidates.entries()) {
+        const pathHint = new URL(url).pathname;
+        await this.loginFroniusSession(froniusConfig, pathHint);
         this.logger.log(
           `Issuing Fronius command (mode=${desiredMode}, target=${targetLabel}) to ${url}`,
         );
         try {
           await this.requestJson("POST", url, froniusConfig, payload.body);
           this.workingBatteriesPath = new URL(url).pathname;
+          this.workingCommandsPrefix = this.extractApiPrefix(this.workingBatteriesPath);
           if (index > 0) {
             this.logger.warn(
               `Fronius accepted fallback endpoint ${this.workingBatteriesPath}; persist this path via fronius.batteries_path.`,
@@ -384,6 +388,54 @@ export class FroniusService {
     return uniquePaths.map((path) => this.buildUrl(host, path));
   }
 
+  private extractApiPrefix(path: string): "/api" | "" {
+    return path.startsWith("/api/") ? "/api" : "";
+  }
+
+  private buildCommandUrlCandidates(
+    host: string,
+    pathHint: string,
+    command: "Login" | "Logout",
+    query: Record<string, string> = {},
+  ): string[] {
+    const preferredPrefix = this.workingCommandsPrefix ?? this.extractApiPrefix(pathHint);
+    const prefixes: Array<"/api" | ""> = preferredPrefix === "/api" ? ["/api", ""] : ["", "/api"];
+    const urls = prefixes.map((prefix) => {
+      const base = this.buildUrl(host, `${prefix}/commands/${command}`);
+      const search = new URLSearchParams(query).toString();
+      return search.length ? `${base}?${search}` : base;
+    });
+    return [...new Set(urls)];
+  }
+
+  private async loginFroniusSession(config: FroniusConnectionConfig, batteriesPathHint: string): Promise<void> {
+    const loginCandidates = this.buildCommandUrlCandidates(
+      config.host,
+      batteriesPathHint,
+      "Login",
+      {user: config.user},
+    );
+    let lastError: unknown = null;
+    for (const [index, loginUrl] of loginCandidates.entries()) {
+      try {
+        this.logger.log(`Logging in Fronius session via ${loginUrl}`);
+        await this.requestJson("GET", loginUrl, config);
+        this.workingCommandsPrefix = this.extractApiPrefix(new URL(loginUrl).pathname);
+        return;
+      } catch (error: unknown) {
+        lastError = error;
+        const canTryFallback = index < loginCandidates.length - 1;
+        if (!canTryFallback || !this.isHttp404(error)) {
+          throw error;
+        }
+        this.logger.warn(`Fronius login endpoint ${loginUrl} returned 404; trying fallback path.`);
+      }
+    }
+    if (lastError) {
+      throw lastError;
+    }
+  }
+
   private isHttp404(error: unknown): boolean {
     return describeError(error).toLowerCase().includes("http 404");
   }
@@ -575,10 +627,23 @@ export class FroniusService {
   }
 
   private async logoutFroniusSession(config: FroniusConnectionConfig): Promise<void> {
-    const logoutUrl = this.buildUrl(config.host, "/commands/Logout");
     try {
-      this.logger.log(`Logging out Fronius session via ${logoutUrl}`);
-      await this.requestJson("GET", logoutUrl, config);
+      const pathHint = this.workingBatteriesPath ?? config.batteriesPath;
+      const logoutCandidates = this.buildCommandUrlCandidates(config.host, pathHint, "Logout");
+      for (const [index, logoutUrl] of logoutCandidates.entries()) {
+        try {
+          this.logger.log(`Logging out Fronius session via ${logoutUrl}`);
+          await this.requestJson("GET", logoutUrl, config);
+          this.workingCommandsPrefix = this.extractApiPrefix(new URL(logoutUrl).pathname);
+          break;
+        } catch (error: unknown) {
+          const canTryFallback = index < logoutCandidates.length - 1;
+          if (!canTryFallback || !this.isHttp404(error)) {
+            throw error;
+          }
+          this.logger.warn(`Fronius logout endpoint ${logoutUrl} returned 404; trying fallback path.`);
+        }
+      }
       this.logger.verbose("Fronius session logged out.");
     } catch (error) {
       this.logger.verbose(`Fronius logout skipped: ${describeError(error)}`);
