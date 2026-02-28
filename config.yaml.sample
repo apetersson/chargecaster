@@ -4,7 +4,7 @@ fronius:
   host: "http://192.168.0.15"
   user: "technician"
   password: "CHANGE_ME"
-  batteries_path: "/config/batteries"
+  batteries_path: "/api/config/batteries"
   verify_tls: false
   timeout_s: 6
 

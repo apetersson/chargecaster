@@ -53,6 +53,7 @@ export class FroniusService {
   private readonly maxChargeLimit: Percentage | null;
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
+  private workingBatteriesPath: string | null = null;
 
   constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
     const document = this.configState.getDocumentRef();
@@ -93,10 +94,12 @@ export class FroniusService {
     const strategy = this.normaliseStrategy(strategyInput);
     const desiredMode = strategy.mode;
 
-    const url = this.buildUrl(froniusConfig.host, froniusConfig.batteriesPath);
-
     try {
-      this.logger.log(`Preparing to apply Fronius mode ${desiredMode.toUpperCase()} via ${url}`);
+      const configuredPath = this.workingBatteriesPath ?? froniusConfig.batteriesPath;
+      const urlCandidates = this.buildBatteriesUrlCandidates(froniusConfig.host, configuredPath);
+      this.logger.log(
+        `Preparing to apply Fronius mode ${desiredMode.toUpperCase()} via ${urlCandidates[0]}`,
+      );
       if (this.shouldSkipUpdate(strategy)) {
         this.logger.log(`Fronius already aligned with ${desiredMode} strategy; skipping update.`);
         return {errorMessage: null};
@@ -109,11 +112,34 @@ export class FroniusService {
       }
 
       const targetLabel = payload.target ? `${payload.target.percent.toFixed(1)}%` : "n/a";
-      this.logger.log(
-        `Issuing Fronius command (mode=${desiredMode}, target=${targetLabel}) to ${url}`,
-      );
       this.logger.verbose(`Fronius payload: ${JSON.stringify(payload.body)}`);
-      await this.requestJson("POST", url, froniusConfig, payload.body);
+      let lastError: unknown = null;
+      for (const [index, url] of urlCandidates.entries()) {
+        this.logger.log(
+          `Issuing Fronius command (mode=${desiredMode}, target=${targetLabel}) to ${url}`,
+        );
+        try {
+          await this.requestJson("POST", url, froniusConfig, payload.body);
+          this.workingBatteriesPath = new URL(url).pathname;
+          if (index > 0) {
+            this.logger.warn(
+              `Fronius accepted fallback endpoint ${this.workingBatteriesPath}; persist this path via fronius.batteries_path.`,
+            );
+          }
+          lastError = null;
+          break;
+        } catch (error: unknown) {
+          lastError = error;
+          const canTryFallback = index < urlCandidates.length - 1;
+          if (!canTryFallback || !this.isHttp404(error)) {
+            throw error;
+          }
+          this.logger.warn(`Fronius endpoint ${url} returned 404; trying fallback path.`);
+        }
+      }
+      if (lastError) {
+        throw lastError;
+      }
       this.lastAppliedMode = desiredMode;
       this.lastAppliedTarget = payload.target;
       if (desiredMode === "hold" && payload.target && strategy.observedSocPercent != null) {
@@ -346,6 +372,22 @@ export class FroniusService {
     return `${normalizedHost}${normalizedPath}`;
   }
 
+  private buildBatteriesUrlCandidates(host: string, configuredPath: string): string[] {
+    const normalizedPath = configuredPath.startsWith("/") ? configuredPath : `/${configuredPath}`;
+    const candidates = [normalizedPath];
+    if (normalizedPath.startsWith("/api/")) {
+      candidates.push(normalizedPath.slice("/api".length));
+    } else {
+      candidates.push(`/api${normalizedPath}`);
+    }
+    const uniquePaths = [...new Set(candidates)];
+    return uniquePaths.map((path) => this.buildUrl(host, path));
+  }
+
+  private isHttp404(error: unknown): boolean {
+    return describeError(error).toLowerCase().includes("http 404");
+  }
+
   private async requestJson(
     method: string,
     url: string,
@@ -461,21 +503,31 @@ export class FroniusService {
 
     const qopRaw = params.qop ?? "auth";
     const qop = qopRaw.split(",").map((item) => item.trim().toLowerCase()).find((item) => item.length) ?? "auth";
-    const algorithm = (params.algorithm ?? "MD5").toUpperCase();
-    if (algorithm !== "MD5") {
-      throw new Error(`Unsupported digest algorithm '${algorithm}'`);
+    const algorithmToken = params.algorithm ?? "MD5";
+    const digestAlgorithm = this.resolveDigestAlgorithm(algorithmToken);
+    if (!digestAlgorithm) {
+      throw new Error(`Unsupported digest algorithm '${algorithmToken}'`);
+    }
+    if (qop === "auth-int") {
+      throw new Error("Unsupported digest qop 'auth-int'");
     }
 
     const uri = url.pathname + url.search;
     const nc = "00000001";
     const cnonce = randomBytes(8).toString("hex");
 
-    const ha1 = createHash("md5").update(`${username}:${realm}:${password}`).digest("hex");
-    const ha2 = createHash("md5").update(`${method.toUpperCase()}:${uri}`).digest("hex");
+    const baseHa1 = this.hashDigestValue(
+      digestAlgorithm.nodeAlgorithm,
+      `${username}:${realm}:${password}`,
+    );
+    const ha1 = digestAlgorithm.session
+      ? this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${baseHa1}:${nonce}:${cnonce}`)
+      : baseHa1;
+    const ha2 = this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${method.toUpperCase()}:${uri}`);
 
     const responseValue = qop
-      ? createHash("md5").update(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`).digest("hex")
-      : createHash("md5").update(`${ha1}:${nonce}:${ha2}`).digest("hex");
+      ? this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`)
+      : this.hashDigestValue(digestAlgorithm.nodeAlgorithm, `${ha1}:${nonce}:${ha2}`);
 
     const parts = [
       `username="${username}"`,
@@ -483,7 +535,7 @@ export class FroniusService {
       `nonce="${nonce}"`,
       `uri="${uri}"`,
       `response="${responseValue}"`,
-      `algorithm="${algorithm}"`,
+      `algorithm="${algorithmToken}"`,
     ];
 
     if (qop) {
@@ -497,6 +549,29 @@ export class FroniusService {
     }
 
     return `Digest ${parts.join(", ")}`;
+  }
+
+  private resolveDigestAlgorithm(
+    rawAlgorithm: string,
+  ): { nodeAlgorithm: "md5" | "sha256"; session: boolean } | null {
+    const normalized = rawAlgorithm.trim().toLowerCase().replace(/_/g, "-");
+    if (normalized === "md5") {
+      return {nodeAlgorithm: "md5", session: false};
+    }
+    if (normalized === "md5-sess") {
+      return {nodeAlgorithm: "md5", session: true};
+    }
+    if (normalized === "sha256" || normalized === "sha-256") {
+      return {nodeAlgorithm: "sha256", session: false};
+    }
+    if (normalized === "sha256-sess" || normalized === "sha-256-sess") {
+      return {nodeAlgorithm: "sha256", session: true};
+    }
+    return null;
+  }
+
+  private hashDigestValue(algorithm: "md5" | "sha256", value: string): string {
+    return createHash(algorithm).update(value).digest("hex");
   }
 
   private async logoutFroniusSession(config: FroniusConnectionConfig): Promise<void> {
