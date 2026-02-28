@@ -4,7 +4,7 @@ fronius:
   host: "http://inverter.invalid"
   user: "CHANGE_ME"
   password: "CHANGE_ME"
-  batteries_path: "/config/batteries"
+  batteries_path: "/api/config/batteries"
   verify_tls: false
   timeout_s: 6
 
