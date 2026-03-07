@@ -102,7 +102,22 @@ describe("BacktestService daily history", () => {
     const fullDay = createDay("2026-03-05");
     const partialDay = createDay("2026-03-06", 13);
     const storage = {
-      listAllHistoryAsc: () => toHistoryRecords([...fullDay, ...partialDay]),
+      listHistoryDayStatsBefore: () => [
+        {
+          date: "2026-03-06",
+          firstTimestamp: "2026-03-06T00:00:00.000Z",
+          lastTimestamp: "2026-03-06T12:55:00.000Z",
+          pointCount: partialDay.length,
+        },
+        {
+          date: "2026-03-05",
+          firstTimestamp: "2026-03-05T00:00:00.000Z",
+          lastTimestamp: "2026-03-05T23:55:00.000Z",
+          pointCount: fullDay.length,
+        },
+      ],
+      listHistoryRangeAsc: (startInclusive: string, endExclusive: string) =>
+        toHistoryRecords(fullDay.filter((point) => point.timestamp >= startInclusive && point.timestamp < endExclusive)),
       listDailyBacktestSummaries: () => [],
       upsertDailyBacktestSummaries: () => undefined,
     } as unknown as StorageService;
@@ -142,12 +157,34 @@ describe("BacktestService daily history", () => {
       },
     ]);
     const upsertDailyBacktestSummaries = vi.fn();
+    const listHistoryRangeAsc = vi.fn((startInclusive: string, endExclusive: string) => {
+      const points = [...createDay("2026-03-05"), ...createDay("2026-03-06"), ...createDay("2026-03-07")]
+        .filter((point) => point.timestamp >= startInclusive && point.timestamp < endExclusive);
+      return toHistoryRecords(points);
+    });
+    const listHistoryDayStatsBefore = vi.fn(() => [
+      {
+        date: "2026-03-07",
+        firstTimestamp: "2026-03-07T00:00:00.000Z",
+        lastTimestamp: "2026-03-07T23:55:00.000Z",
+        pointCount: 288,
+      },
+      {
+        date: "2026-03-06",
+        firstTimestamp: "2026-03-06T00:00:00.000Z",
+        lastTimestamp: "2026-03-06T23:55:00.000Z",
+        pointCount: 288,
+      },
+      {
+        date: "2026-03-05",
+        firstTimestamp: "2026-03-05T00:00:00.000Z",
+        lastTimestamp: "2026-03-05T23:55:00.000Z",
+        pointCount: 288,
+      },
+    ]);
     const storage = {
-      listAllHistoryAsc: () => toHistoryRecords([
-        ...createDay("2026-03-05"),
-        ...createDay("2026-03-06"),
-        ...createDay("2026-03-07"),
-      ]),
+      listHistoryDayStatsBefore,
+      listHistoryRangeAsc,
       listDailyBacktestSummaries,
       upsertDailyBacktestSummaries,
     } as unknown as StorageService;
@@ -159,6 +196,10 @@ describe("BacktestService daily history", () => {
     expect(page.entries[0]?.result.intervals.length).toBeGreaterThan(0);
     expect(page.entries[1]?.result.intervals).toHaveLength(0);
     expect(page.entries[1]?.result.actual_total_cost_eur).toBe(12);
+    expect(listHistoryDayStatsBefore).toHaveBeenCalledTimes(1);
+    expect(listHistoryRangeAsc).toHaveBeenCalledTimes(2);
+    expect(listHistoryRangeAsc).toHaveBeenNthCalledWith(1, "2026-03-07T00:00:00.000Z", "2026-03-08T00:00:00.000Z");
+    expect(listHistoryRangeAsc).toHaveBeenNthCalledWith(2, "2026-03-08T00:00:00.000Z", "2026-03-09T00:00:00.000Z");
     expect(listDailyBacktestSummaries).toHaveBeenCalledTimes(1);
     expect(upsertDailyBacktestSummaries).not.toHaveBeenCalled();
   });

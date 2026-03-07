@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { BacktestResultSummary, HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
-import { StorageService } from "../storage/storage.service";
+import { StorageService, type HistoryDayStatRecord } from "../storage/storage.service";
 import { normalizeHistoryList } from "./history.serializer";
 
 const WATTS_PER_KW = 1000;
@@ -35,10 +35,10 @@ export interface DailyBacktestEntry {
 }
 
 interface DailyHistoryIndex {
-  byDay: Map<string, HistoryPoint[]>;
   today: string;
   yesterday: string;
   availableDays: string[];
+  completeDays: Set<string>;
 }
 
 @Injectable()
@@ -79,7 +79,7 @@ export class BacktestService {
         }
       }
 
-      const liveEntry = this.buildDailyEntry(date, index.byDay, config, {
+      const liveEntry = this.buildDailyEntry(date, config, {
         snapshot,
         fallbackMarginalPrice: snapshotMarginalPrice,
       });
@@ -116,7 +116,7 @@ export class BacktestService {
     const summaries: { date: string; configFingerprint: string; payload: BacktestResultSummary }[] = [];
 
     for (const date of targetDates) {
-      const entry = this.buildDailyEntry(date, index.byDay, config);
+      const entry = this.buildDailyEntry(date, config);
       if (!entry) {
         continue;
       }
@@ -180,25 +180,21 @@ export class BacktestService {
   }
 
   private loadDailyHistoryIndex(today = new Date().toISOString().slice(0, 10)): DailyHistoryIndex {
-    const records = this.storage.listAllHistoryAsc();
-    const allPoints = normalizeHistoryList(records.map((r) => r.payload));
-    const byDay = new Map<string, HistoryPoint[]>();
-    for (const point of allPoints) {
-      const day = point.timestamp.slice(0, 10);
-      const bucket = byDay.get(day) ?? [];
-      bucket.push(point);
-      byDay.set(day, bucket);
-    }
-
-    const availableDays = [...byDay.keys()]
-      .filter((day) => day < today && this.isCompleteUtcDay(byDay.get(day) ?? []))
-      .sort((a, b) => b.localeCompare(a));
+    const stats = this.storage.listHistoryDayStatsBefore(today);
+    const completeDays = new Set(
+      stats
+        .filter((stat) => this.isCompleteUtcDayStat(stat))
+        .map((stat) => stat.date),
+    );
+    const availableDays = stats
+      .map((stat) => stat.date)
+      .filter((date) => completeDays.has(date));
 
     return {
-      byDay,
       today,
       yesterday: this.previousUtcDate(today),
       availableDays,
+      completeDays,
     };
   }
 
@@ -206,27 +202,25 @@ export class BacktestService {
     if (date >= index.yesterday) {
       return false;
     }
-    const nextDayPoints = index.byDay.get(this.nextUtcDate(date));
-    return nextDayPoints != null && this.isCompleteUtcDay(nextDayPoints);
+    return index.completeDays.has(this.nextUtcDate(date));
   }
 
   private buildDailyEntry(
     date: string,
-    byDay: Map<string, HistoryPoint[]>,
     config: SimulationConfig,
     options?: {
       snapshot?: SnapshotPayload;
       fallbackMarginalPrice?: number;
     },
   ): DailyBacktestEntry | null {
-    const points = byDay.get(date);
-    if (!points || points.length < 2) {
+    const points = this.loadUtcDayHistory(date);
+    if (points.length < 2) {
       return null;
     }
     const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
-    const nextDayPoints = byDay.get(this.nextUtcDate(date));
+    const nextDayPoints = this.loadUtcDayHistory(this.nextUtcDate(date));
     const marginalPrice =
-      (nextDayPoints != null && nextDayPoints.length >= 2
+      (nextDayPoints.length >= 2
         ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFeeEur)
         : null) ?? options?.fallbackMarginalPrice ?? null;
 
@@ -244,6 +238,13 @@ export class BacktestService {
     return {date, result};
   }
 
+  private loadUtcDayHistory(date: string): HistoryPoint[] {
+    const start = `${date}T00:00:00.000Z`;
+    const end = `${this.nextUtcDate(date)}T00:00:00.000Z`;
+    const records = this.storage.listHistoryRangeAsc(start, end);
+    return normalizeHistoryList(records.map((record) => record.payload));
+  }
+
   private isCompleteUtcDay(points: HistoryPoint[]): boolean {
     if (points.length < 2) {
       return false;
@@ -254,6 +255,20 @@ export class BacktestService {
     const dayEnd = dayStart + HOURS_24 * MS_PER_HOUR;
     const firstPoint = new Date(points[0].timestamp).getTime();
     const lastPoint = new Date(points[points.length - 1].timestamp).getTime();
+    const boundaryToleranceMs = MS_PER_HOUR * 2;
+
+    return firstPoint - dayStart <= boundaryToleranceMs && dayEnd - lastPoint <= boundaryToleranceMs;
+  }
+
+  private isCompleteUtcDayStat(stat: HistoryDayStatRecord): boolean {
+    if (stat.pointCount < 2) {
+      return false;
+    }
+
+    const dayStart = new Date(`${stat.date}T00:00:00Z`).getTime();
+    const dayEnd = dayStart + HOURS_24 * MS_PER_HOUR;
+    const firstPoint = new Date(stat.firstTimestamp).getTime();
+    const lastPoint = new Date(stat.lastTimestamp).getTime();
     const boundaryToleranceMs = MS_PER_HOUR * 2;
 
     return firstPoint - dayStart <= boundaryToleranceMs && dayEnd - lastPoint <= boundaryToleranceMs;
