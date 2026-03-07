@@ -40,7 +40,7 @@ WORKDIR /app/backend
 
 # Create a minimal package.json that includes only the native module we need at runtime
 COPY backend/package.json package.json
-RUN node -e "const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const v=pkg.dependencies['better-sqlite3'];fs.writeFileSync('package.json', JSON.stringify({name: pkg.name+'-runtime', private:true, version: pkg.version, type:'commonjs', dependencies:{'better-sqlite3': v}}, null, 2));"
+RUN node -e "const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const v=pkg.dependencies['better-sqlite3'];fs.writeFileSync('package.json', JSON.stringify({name: pkg.name+'-runtime', private:true, version: pkg.version, type:'commonjs', dependencies:{'better-sqlite3': v}, pnpm:{onlyBuiltDependencies:['better-sqlite3']}}, null, 2));"
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --prod --shamefully-hoist
 
