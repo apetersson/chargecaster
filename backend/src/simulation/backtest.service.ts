@@ -1,15 +1,18 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { BacktestResultSummary, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
-import { StorageService } from "../storage/storage.service";
+import { StorageService, type HistoryDayStatRecord } from "../storage/storage.service";
 import {
   DAILY_BACKTEST_STRATEGY,
   type BacktestResult,
   type DailyBacktestEntry,
+  type DailyHistoryIndex,
   type DailyBacktestStrategy,
 } from "./daily-backtest.strategy";
 
 const BACKTEST_CACHE_VERSION = 1;
+const MS_PER_HOUR = 3600_000;
+const HOURS_24 = 24;
 
 @Injectable()
 export class BacktestService {
@@ -30,11 +33,11 @@ export class BacktestService {
     limit: number,
     skip: number,
   ): { entries: DailyBacktestEntry[]; hasMore: boolean } {
-    const index = this.strategy.loadDailyHistoryIndex();
+    const index = this.loadDailyHistoryIndex();
     const hasMore = skip + limit < index.availableDays.length;
     const pageDays = index.availableDays.slice(skip, skip + limit);
     const configFingerprint = this.buildCacheFingerprint(config);
-    const cachedDates = pageDays.filter((date) => this.strategy.isCacheEligibleDay(date, index));
+    const cachedDates = pageDays.filter((date) => this.isCacheEligibleDay(date, index));
     const cachedSummaries = this.storage.listDailyBacktestSummaries(configFingerprint, cachedDates);
     const cachedByDate = new Map(cachedSummaries.map((entry) => [entry.date, entry.payload]));
     const summariesToCache: { date: string; configFingerprint: string; payload: BacktestResultSummary }[] = [];
@@ -55,7 +58,7 @@ export class BacktestService {
       }
       entries.push(liveEntry);
 
-      if (date !== index.yesterday && this.strategy.isCacheEligibleDay(date, index)) {
+      if (date !== index.yesterday && this.isCacheEligibleDay(date, index)) {
         summariesToCache.push({
           date,
           configFingerprint,
@@ -76,10 +79,10 @@ export class BacktestService {
     config: SimulationConfig,
     options?: { dates?: string[]; today?: string; missingOnly?: boolean },
   ): { materialized: number; skipped: number } {
-    const index = this.strategy.loadDailyHistoryIndex(options?.today);
+    const index = this.loadDailyHistoryIndex(options?.today);
     const configFingerprint = this.buildCacheFingerprint(config);
     const requestedDates = options?.dates ?? index.availableDays;
-    let targetDates = requestedDates.filter((date) => this.strategy.isCacheEligibleDay(date, index));
+    let targetDates = requestedDates.filter((date) => this.isCacheEligibleDay(date, index));
 
     if (options?.missingOnly && targetDates.length > 0) {
       const existingDates = new Set(
@@ -120,6 +123,58 @@ export class BacktestService {
       config,
     });
     return createHash("sha256").update(serialized).digest("hex");
+  }
+
+  private loadDailyHistoryIndex(today = new Date().toISOString().slice(0, 10)): DailyHistoryIndex {
+    const stats = this.storage.listHistoryDayStatsBefore(today);
+    const completeDays = new Set(
+      stats
+        .filter((stat) => this.isCompleteUtcDayStat(stat))
+        .map((stat) => stat.date),
+    );
+    const availableDays = stats
+      .map((stat) => stat.date)
+      .filter((date) => completeDays.has(date));
+
+    return {
+      today,
+      yesterday: this.previousUtcDate(today),
+      availableDays,
+      completeDays,
+    };
+  }
+
+  private isCacheEligibleDay(date: string, index: DailyHistoryIndex): boolean {
+    if (date >= index.yesterday) {
+      return false;
+    }
+    return index.completeDays.has(this.nextUtcDate(date));
+  }
+
+  private nextUtcDate(date: string): string {
+    const value = new Date(`${date}T00:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + 1);
+    return value.toISOString().slice(0, 10);
+  }
+
+  private previousUtcDate(date: string): string {
+    const value = new Date(`${date}T00:00:00Z`);
+    value.setUTCDate(value.getUTCDate() - 1);
+    return value.toISOString().slice(0, 10);
+  }
+
+  private isCompleteUtcDayStat(stat: HistoryDayStatRecord): boolean {
+    if (stat.pointCount < 2) {
+      return false;
+    }
+
+    const dayStart = new Date(`${stat.date}T00:00:00Z`).getTime();
+    const dayEnd = dayStart + HOURS_24 * MS_PER_HOUR;
+    const firstPoint = new Date(stat.firstTimestamp).getTime();
+    const lastPoint = new Date(stat.lastTimestamp).getTime();
+    const boundaryToleranceMs = MS_PER_HOUR * 2;
+
+    return firstPoint - dayStart <= boundaryToleranceMs && dayEnd - lastPoint <= boundaryToleranceMs;
   }
 
   private toSummary(result: BacktestResult): BacktestResultSummary {
