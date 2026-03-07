@@ -212,6 +212,81 @@ describe("BacktestService daily history", () => {
     expect(listDailyBacktestSummaries).toHaveBeenCalledTimes(1);
     expect(upsertDailyBacktestSummaries).not.toHaveBeenCalled();
   });
+
+  it("recomputes interval detail for a cached day when a detail view is requested", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T12:00:00.000Z"));
+
+    const cachedSummary = {
+      generated_at: "2026-03-08T00:00:00.000Z",
+      actual_total_cost_eur: 12,
+      simulated_total_cost_eur: 10,
+      simulated_start_soc_percent: 50,
+      actual_final_soc_percent: 50,
+      simulated_final_soc_percent: 40,
+      soc_value_adjustment_eur: 0.5,
+      adjusted_actual_cost_eur: 11.5,
+      adjusted_simulated_cost_eur: 10,
+      savings_eur: -1.5,
+      avg_price_eur_per_kwh: 0.25,
+      history_points_used: 288,
+      span_hours: 23.9,
+    };
+    const listDailyBacktestSummaries = vi.fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          date: "2026-03-06",
+          configFingerprint: "cached",
+          updatedAt: "2026-03-08T00:01:00.000Z",
+          payload: cachedSummary,
+          strategy: "continuous",
+          simulatedStartSocPercent: 50,
+          simulatedFinalSocPercent: 40,
+        },
+      ]);
+    const upsertDailyBacktestSummaries = vi.fn();
+    const listHistoryRangeAsc = vi.fn((startInclusive: string, endExclusive: string) => {
+      const points = [...createDay("2026-03-05"), ...createDay("2026-03-06"), ...createDay("2026-03-07")]
+        .filter((point) => point.timestamp >= startInclusive && point.timestamp < endExclusive);
+      return toHistoryRecords(points);
+    });
+    const storage = {
+      listHistoryDayStatsBefore: () => [
+        {
+          date: "2026-03-07",
+          firstTimestamp: "2026-03-07T00:00:00.000Z",
+          lastTimestamp: "2026-03-07T23:55:00.000Z",
+          pointCount: 288,
+        },
+        {
+          date: "2026-03-06",
+          firstTimestamp: "2026-03-06T00:00:00.000Z",
+          lastTimestamp: "2026-03-06T23:55:00.000Z",
+          pointCount: 288,
+        },
+        {
+          date: "2026-03-05",
+          firstTimestamp: "2026-03-05T00:00:00.000Z",
+          lastTimestamp: "2026-03-05T23:55:00.000Z",
+          pointCount: 288,
+        },
+      ],
+      listHistoryRangeAsc,
+      listDailyBacktestSummaries,
+      upsertDailyBacktestSummaries,
+    } as unknown as StorageService;
+
+    const service = createService(storage);
+    const detail = service.getDailyHistoryDetail(snapshot, config, "2026-03-06");
+
+    expect(detail?.date).toBe("2026-03-06");
+    expect(detail?.result.intervals.length).toBeGreaterThan(0);
+    expect(detail?.result.intervals[0]?.end_timestamp).toBeTruthy();
+    expect(detail?.result.intervals[0]?.cumulative_savings_eur).toBeTypeOf("number");
+    expect(listHistoryRangeAsc).toHaveBeenCalled();
+    expect(upsertDailyBacktestSummaries).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("BacktestService inferred site demand", () => {
@@ -256,11 +331,70 @@ describe("BacktestService inferred site demand", () => {
     expect(result.simulated_total_cost_eur).toBeCloseTo(0.625, 6);
     expect(result.intervals[0]?.site_demand_power_w).toBeCloseTo(9000, 6);
     expect(result.intervals[0]?.synthetic_hidden_load_w).toBeCloseTo(5000, 6);
+    expect(result.intervals[0]?.simulated_soc_start_percent).toBeCloseTo(20, 6);
     expect(result.intervals[0]?.simulated_grid_power_w).toBeCloseTo(2500, 6);
+    expect(result.intervals[0]?.cumulative_savings_eur).toBeCloseTo(0, 6);
+    expect(result.intervals[0]?.actual_charge_from_grid_w).toBeCloseTo(0, 6);
+    expect(result.intervals[0]?.actual_charge_from_solar_w).toBeCloseTo(0, 6);
+    expect(result.intervals[0]?.simulated_charge_from_solar_w).toBeCloseTo(0, 6);
   });
 });
 
 describe("BacktestService continuous daily carry", () => {
+  it("does not treat inherited start-of-day SOC advantage as same-day profit", () => {
+    const dayPoints: HistoryPoint[] = [
+      {
+        timestamp: "2026-03-06T00:00:00.000Z",
+        battery_soc_percent: 70,
+        price_eur_per_kwh: 0.2,
+        grid_power_w: 0,
+        solar_power_w: 0,
+        solar_energy_wh: 0,
+        home_power_w: 0,
+        ev_charge_power_w: null,
+        site_demand_power_w: null,
+      },
+      {
+        timestamp: "2026-03-06T00:05:00.000Z",
+        battery_soc_percent: 70,
+        price_eur_per_kwh: 0.2,
+        grid_power_w: 0,
+        solar_power_w: 0,
+        solar_energy_wh: 0,
+        home_power_w: 0,
+        ev_charge_power_w: null,
+        site_demand_power_w: null,
+      },
+    ];
+    const nextDayPoints: HistoryPoint[] = [
+      createHistoryPoint("2026-03-07T00:00:00.000Z", 70),
+      createHistoryPoint("2026-03-07T00:05:00.000Z", 70),
+    ];
+    const storage = {
+      listHistoryRangeAsc: (startInclusive: string, endExclusive: string) => {
+        if (startInclusive === "2026-03-06T00:00:00.000Z" && endExclusive === "2026-03-07T00:00:00.000Z") {
+          return toHistoryRecords(dayPoints);
+        }
+        if (startInclusive === "2026-03-07T00:00:00.000Z" && endExclusive === "2026-03-08T00:00:00.000Z") {
+          return toHistoryRecords(nextDayPoints);
+        }
+        return [];
+      },
+    } as Pick<StorageService, "listHistoryRangeAsc"> as StorageService;
+
+    const strategy = new ContinuousBacktestStrategy(storage);
+    const entry = strategy.buildDailyEntry("2026-03-06", config, {
+      initialSimSocPercent: 5,
+    });
+
+    expect(entry).not.toBeNull();
+    expect(entry?.result.simulated_start_soc_percent).toBe(5);
+    expect(entry?.result.soc_value_adjustment_eur).toBeCloseTo(0, 6);
+    expect(entry?.result.savings_eur).toBeCloseTo(0, 6);
+    expect(entry?.result.intervals[0]?.inventory_value_eur).toBeCloseTo(0, 6);
+    expect(entry?.result.intervals[0]?.cumulative_savings_eur).toBeCloseTo(0, 6);
+  });
+
   it("carries simulated SOC across consecutive days instead of resetting at midnight", () => {
     const createLowLoadDay = (date: string) => {
       const points = createDay(date);
@@ -490,6 +624,104 @@ describe("StorageService listAllHistoryAsc", () => {
       expect(rows).toHaveLength(0);
     } finally {
       migratedStorage.onModuleDestroy();
+      if (previousStoragePath == null) {
+        delete process.env.CHARGECASTER_STORAGE_PATH;
+      } else {
+        process.env.CHARGECASTER_STORAGE_PATH = previousStoragePath;
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears existing daily backtest summaries exactly once for the relative-SOC migration", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
+    const dbPath = join(tempDir, "backend.sqlite");
+    const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
+    process.env.CHARGECASTER_STORAGE_PATH = dbPath;
+
+    const initialStorage = new StorageService();
+
+    try {
+      initialStorage.upsertDailyBacktestSummaries([
+        {
+          date: "2026-03-05",
+          configFingerprint: "continuous",
+          strategy: "continuous",
+          simulatedStartSocPercent: 5,
+          simulatedFinalSocPercent: 5,
+          payload: {
+            generated_at: "2026-03-08T00:00:00.000Z",
+            actual_total_cost_eur: 1,
+            simulated_total_cost_eur: 1,
+            simulated_start_soc_percent: 5,
+            actual_final_soc_percent: 20,
+            simulated_final_soc_percent: 5,
+            soc_value_adjustment_eur: 1,
+            adjusted_actual_cost_eur: 0,
+            adjusted_simulated_cost_eur: 1,
+            savings_eur: 1,
+            avg_price_eur_per_kwh: 0.2,
+            history_points_used: 288,
+            span_hours: 24,
+          },
+        },
+      ]);
+      const rawDb = (initialStorage as unknown as { db: { exec: (sql: string) => void } }).db;
+      rawDb.exec(`
+        DELETE FROM app_migrations
+        WHERE id = '2026-03-07-reset-daily-backtest-summaries-for-relative-soc'
+      `);
+    } finally {
+      initialStorage.onModuleDestroy();
+    }
+
+    const migratedStorage = new StorageService();
+
+    try {
+      const rows = migratedStorage.listDailyBacktestSummaries("continuous", ["2026-03-05"]);
+      expect(rows).toHaveLength(0);
+    } finally {
+      migratedStorage.onModuleDestroy();
+    }
+
+    const reopenedStorage = new StorageService();
+
+    try {
+      reopenedStorage.upsertDailyBacktestSummaries([
+        {
+          date: "2026-03-05",
+          configFingerprint: "continuous",
+          strategy: "continuous",
+          simulatedStartSocPercent: 5,
+          simulatedFinalSocPercent: 5,
+          payload: {
+            generated_at: "2026-03-08T00:00:00.000Z",
+            actual_total_cost_eur: 1,
+            simulated_total_cost_eur: 1,
+            simulated_start_soc_percent: 5,
+            actual_final_soc_percent: 20,
+            simulated_final_soc_percent: 5,
+            soc_value_adjustment_eur: 0,
+            adjusted_actual_cost_eur: 1,
+            adjusted_simulated_cost_eur: 1,
+            savings_eur: 0,
+            avg_price_eur_per_kwh: 0.2,
+            history_points_used: 288,
+            span_hours: 24,
+          },
+        },
+      ]);
+    } finally {
+      reopenedStorage.onModuleDestroy();
+    }
+
+    const finalStorage = new StorageService();
+
+    try {
+      const rows = finalStorage.listDailyBacktestSummaries("continuous", ["2026-03-05"]);
+      expect(rows).toHaveLength(1);
+    } finally {
+      finalStorage.onModuleDestroy();
       if (previousStoragePath == null) {
         delete process.env.CHARGECASTER_STORAGE_PATH;
       } else {

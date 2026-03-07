@@ -158,6 +158,14 @@ export class TrpcRouter {
             const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
             return this.backtestService.runDailyHistory(snapshot, simConfig, input.limit, input.skip);
           }),
+        backtestHistoryDetail: t.procedure
+          .input(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }))
+          .query(({ input }) => {
+            this.logger.log(`tRPC.dashboard.backtestHistoryDetail requested (date=${input.date})`);
+            const snapshot = this.simulationService.ensureSeedFromFixture();
+            const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
+            return this.backtestService.getDailyHistoryDetail(snapshot, simConfig, input.date);
+          }),
       }),
     });
   }

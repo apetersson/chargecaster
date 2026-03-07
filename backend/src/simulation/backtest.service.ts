@@ -10,7 +10,7 @@ import {
   type DailyBacktestStrategy,
 } from "./daily-backtest.strategy";
 
-const BACKTEST_CACHE_VERSION = 1;
+const BACKTEST_CACHE_VERSION = 2;
 const MS_PER_HOUR = 3600_000;
 const HOURS_24 = 24;
 
@@ -49,6 +49,31 @@ export class BacktestService {
 
     this.logger.log(`Daily backtest: skip=${skip} limit=${limit} -> ${computed.entries.length} days, hasMore=${hasMore}`);
     return {entries: computed.entries, hasMore};
+  }
+
+  getDailyHistoryDetail(
+    snapshot: SnapshotPayload,
+    config: SimulationConfig,
+    date: string,
+  ): DailyBacktestEntry | null {
+    const index = this.loadDailyHistoryIndex();
+    if (!index.completeDays.has(date)) {
+      this.logger.warn(`Daily backtest detail requested for incomplete or missing day ${date}`);
+      return null;
+    }
+
+    const configFingerprint = this.buildCacheFingerprint(config);
+    const computed = this.buildEntriesForDates([date], config, index, configFingerprint, {
+      snapshot,
+      cachedSummaries: [],
+    });
+    if (computed.summariesToCache.length > 0) {
+      this.storage.upsertDailyBacktestSummaries(computed.summariesToCache);
+    }
+
+    const detail = computed.entries[0] ?? null;
+    this.logger.log(`Daily backtest detail: date=${date} -> ${detail ? "hit" : "miss"}`);
+    return detail;
   }
 
   materializeHistoricalDailyBacktests(
