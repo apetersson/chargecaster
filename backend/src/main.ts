@@ -19,6 +19,7 @@ import { setRuntimeConfig } from "./config/runtime-config";
 import type { ConfigDocument } from "./config/schemas";
 import { SimulationService } from "./simulation/simulation.service";
 import { SimulationSeedService } from "./config/simulation-seed.service";
+import { BacktestMaterializationService } from "./simulation/backtest-materialization.service";
 import { TrpcRouter } from "./trpc/trpc.router";
 import { requireFroniusConnectionConfig } from "./fronius/fronius.service";
 
@@ -46,6 +47,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   const trpcRouter = app.get(TrpcRouter);
   const simulationService = app.get(SimulationService);
   const configSeedService = app.get(SimulationSeedService);
+  const backtestMaterializationService = app.get(BacktestMaterializationService);
   await fastify.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
     trpcOptions: {
@@ -123,6 +125,8 @@ async function bootstrap(): Promise<NestFastifyApplication> {
         .join("\n");
       logger.log(`tRPC procedures:\n${formatted}`);
     }
+
+    void backtestMaterializationService.start();
   }
 
   return app;

@@ -1,11 +1,13 @@
+import { createHash } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import type { HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
+import type { BacktestResultSummary, HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
 import { normalizeHistoryList } from "./history.serializer";
 
 const WATTS_PER_KW = 1000;
 const MS_PER_HOUR = 3600_000;
 const HOURS_24 = 24;
+const BACKTEST_CACHE_VERSION = 1;
 
 export interface BacktestInterval {
   timestamp: string;
@@ -23,25 +25,20 @@ export interface BacktestInterval {
   simulated_cost_eur: number;
 }
 
-export interface BacktestResult {
-  generated_at: string;
+export interface BacktestResult extends BacktestResultSummary {
   intervals: BacktestInterval[];
-  actual_total_cost_eur: number;
-  simulated_total_cost_eur: number;
-  actual_final_soc_percent: number;
-  simulated_final_soc_percent: number;
-  soc_value_adjustment_eur: number;
-  adjusted_actual_cost_eur: number;
-  adjusted_simulated_cost_eur: number;
-  savings_eur: number;
-  avg_price_eur_per_kwh: number;
-  history_points_used: number;
-  span_hours: number;
 }
 
 export interface DailyBacktestEntry {
   date: string;
   result: BacktestResult;
+}
+
+interface DailyHistoryIndex {
+  byDay: Map<string, HistoryPoint[]>;
+  today: string;
+  yesterday: string;
+  availableDays: string[];
 }
 
 @Injectable()
@@ -54,7 +51,7 @@ export class BacktestService {
 
   run(snapshot: SnapshotPayload, config: SimulationConfig): BacktestResult {
     const history = this.loadLast24hHistory();
-    return this.runForHistory(history, snapshot, config);
+    return this.runForHistory(history, config, {snapshot});
   }
 
   runDailyHistory(
@@ -63,52 +60,90 @@ export class BacktestService {
     limit: number,
     skip: number,
   ): { entries: DailyBacktestEntry[]; hasMore: boolean } {
-    const records = this.storage.listAllHistoryAsc();
-    const allPoints = normalizeHistoryList(records.map((r) => r.payload));
-
-    // Group history points by UTC calendar day (00:00–23:59:59)
-    const byDay = new Map<string, HistoryPoint[]>();
-    for (const point of allPoints) {
-      const day = point.timestamp.slice(0, 10); // "YYYY-MM-DD" UTC
-      let bucket = byDay.get(day);
-      if (!bucket) {
-        bucket = [];
-        byDay.set(day, bucket);
-      }
-      bucket.push(point);
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    // Collect past UTC days with near-midnight coverage, newest-first.
-    const availableDays = [...byDay.keys()]
-      .filter((day) => day < today && this.isCompleteUtcDay(byDay.get(day) ?? []))
-      .sort((a, b) => b.localeCompare(a));
-
-    const hasMore = skip + limit < availableDays.length;
-    const pageDays = availableDays.slice(skip, skip + limit);
-
-    const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
-    // Snapshot-based marginal price is a fallback when next-day history is unavailable
+    const index = this.loadDailyHistoryIndex();
+    const hasMore = skip + limit < index.availableDays.length;
+    const pageDays = index.availableDays.slice(skip, skip + limit);
+    const configFingerprint = this.buildCacheFingerprint(config);
     const snapshotMarginalPrice = this.deriveMarginalDischargePrice(snapshot, config);
-
+    const cachedDates = pageDays.filter((date) => this.isCacheEligibleDay(date, index));
+    const cachedSummaries = this.storage.listDailyBacktestSummaries(configFingerprint, cachedDates);
+    const cachedByDate = new Map(cachedSummaries.map((entry) => [entry.date, entry.payload]));
+    const summariesToCache: { date: string; configFingerprint: string; payload: BacktestResultSummary }[] = [];
     const entries: DailyBacktestEntry[] = [];
     for (const date of pageDays) {
-      const points = byDay.get(date)!;
-      // Marginal discharge price = time-weighted avg price of the FOLLOWING day
-      const nextDay = this.nextUtcDate(date);
-      const nextDayPoints = byDay.get(nextDay);
-      const marginalPrice =
-        (nextDayPoints != null && nextDayPoints.length >= 2
-          ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFeeEur)
-          : null) ?? snapshotMarginalPrice;
+      if (date !== index.yesterday) {
+        const cached = cachedByDate.get(date);
+        if (cached) {
+          entries.push({date, result: this.inflateSummary(cached)});
+          continue;
+        }
+      }
 
-      const result = this.runForHistory(points, snapshot, config, marginalPrice);
-      if (result.history_points_used < 2) continue;
-      entries.push({ date, result });
+      const liveEntry = this.buildDailyEntry(date, index.byDay, config, {
+        snapshot,
+        fallbackMarginalPrice: snapshotMarginalPrice,
+      });
+      if (!liveEntry) {
+        continue;
+      }
+      entries.push(liveEntry);
+
+      if (date !== index.yesterday && this.isCacheEligibleDay(date, index)) {
+        summariesToCache.push({
+          date,
+          configFingerprint,
+          payload: this.toSummary(liveEntry.result),
+        });
+      }
+    }
+
+    if (summariesToCache.length > 0) {
+      this.storage.upsertDailyBacktestSummaries(summariesToCache);
     }
 
     this.logger.log(`Daily backtest: skip=${skip} limit=${limit} → ${entries.length} days, hasMore=${hasMore}`);
     return { entries, hasMore };
+  }
+
+  materializeHistoricalDailyBacktests(
+    config: SimulationConfig,
+    options?: { dates?: string[]; today?: string },
+  ): { materialized: number; skipped: number } {
+    const index = this.loadDailyHistoryIndex(options?.today);
+    const configFingerprint = this.buildCacheFingerprint(config);
+    const requestedDates = options?.dates ?? index.availableDays;
+    const targetDates = requestedDates.filter((date) => this.isCacheEligibleDay(date, index));
+    const summaries: { date: string; configFingerprint: string; payload: BacktestResultSummary }[] = [];
+
+    for (const date of targetDates) {
+      const entry = this.buildDailyEntry(date, index.byDay, config);
+      if (!entry) {
+        continue;
+      }
+      summaries.push({
+        date,
+        configFingerprint,
+        payload: this.toSummary(entry.result),
+      });
+    }
+
+    if (summaries.length > 0) {
+      this.storage.upsertDailyBacktestSummaries(summaries);
+    }
+
+    const skipped = requestedDates.length - summaries.length;
+    this.logger.log(
+      `Materialized ${summaries.length} daily backtests (requested=${requestedDates.length}, skipped=${skipped})`,
+    );
+    return {materialized: summaries.length, skipped};
+  }
+
+  buildCacheFingerprint(config: SimulationConfig): string {
+    const serialized = JSON.stringify({
+      version: BACKTEST_CACHE_VERSION,
+      config,
+    });
+    return createHash("sha256").update(serialized).digest("hex");
   }
 
   /** Time-weighted average of (price_eur_per_kwh + gridFee) over a set of history points. */
@@ -138,6 +173,77 @@ export class BacktestService {
     return d.toISOString().slice(0, 10);
   }
 
+  private previousUtcDate(date: string): string {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+
+  private loadDailyHistoryIndex(today = new Date().toISOString().slice(0, 10)): DailyHistoryIndex {
+    const records = this.storage.listAllHistoryAsc();
+    const allPoints = normalizeHistoryList(records.map((r) => r.payload));
+    const byDay = new Map<string, HistoryPoint[]>();
+    for (const point of allPoints) {
+      const day = point.timestamp.slice(0, 10);
+      const bucket = byDay.get(day) ?? [];
+      bucket.push(point);
+      byDay.set(day, bucket);
+    }
+
+    const availableDays = [...byDay.keys()]
+      .filter((day) => day < today && this.isCompleteUtcDay(byDay.get(day) ?? []))
+      .sort((a, b) => b.localeCompare(a));
+
+    return {
+      byDay,
+      today,
+      yesterday: this.previousUtcDate(today),
+      availableDays,
+    };
+  }
+
+  private isCacheEligibleDay(date: string, index: DailyHistoryIndex): boolean {
+    if (date >= index.yesterday) {
+      return false;
+    }
+    const nextDayPoints = index.byDay.get(this.nextUtcDate(date));
+    return nextDayPoints != null && this.isCompleteUtcDay(nextDayPoints);
+  }
+
+  private buildDailyEntry(
+    date: string,
+    byDay: Map<string, HistoryPoint[]>,
+    config: SimulationConfig,
+    options?: {
+      snapshot?: SnapshotPayload;
+      fallbackMarginalPrice?: number;
+    },
+  ): DailyBacktestEntry | null {
+    const points = byDay.get(date);
+    if (!points || points.length < 2) {
+      return null;
+    }
+    const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
+    const nextDayPoints = byDay.get(this.nextUtcDate(date));
+    const marginalPrice =
+      (nextDayPoints != null && nextDayPoints.length >= 2
+        ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFeeEur)
+        : null) ?? options?.fallbackMarginalPrice ?? null;
+
+    if (marginalPrice == null && !options?.snapshot) {
+      return null;
+    }
+
+    const result = this.runForHistory(points, config, {
+      snapshot: options?.snapshot,
+      marginalPrice: marginalPrice ?? undefined,
+    });
+    if (result.history_points_used < 2) {
+      return null;
+    }
+    return {date, result};
+  }
+
   private isCompleteUtcDay(points: HistoryPoint[]): boolean {
     if (points.length < 2) {
       return false;
@@ -155,9 +261,11 @@ export class BacktestService {
 
   private runForHistory(
     history: HistoryPoint[],
-    snapshot: SnapshotPayload,
     config: SimulationConfig,
-    precomputedMarginalPrice?: number,
+    options?: {
+      snapshot?: SnapshotPayload;
+      marginalPrice?: number;
+    },
   ): BacktestResult {
     if (history.length < 2) {
       return this.emptyResult("Not enough history data for backtest");
@@ -309,7 +417,11 @@ export class BacktestService {
     // Value remaining SOC at the marginal discharge price: the weighted-average price of
     // eras where the simulation expects the battery to actually discharge (strategy=auto with
     // negative grid_energy). This reflects what the stored energy is truly worth.
-    const marginalPrice = precomputedMarginalPrice ?? this.deriveMarginalDischargePrice(snapshot, config);
+    const marginalPrice =
+      options?.marginalPrice ?? (options?.snapshot ? this.deriveMarginalDischargePrice(options.snapshot, config) : null);
+    if (marginalPrice == null) {
+      return this.emptyResult("Missing marginal price for backtest");
+    }
     const actualFinalSoc = history[history.length - 1].battery_soc_percent ?? simSocPercent;
     const simFinalSoc = simSocPercent;
 
@@ -345,6 +457,30 @@ export class BacktestService {
       avg_price_eur_per_kwh: marginalPrice,
       history_points_used: history.length,
       span_hours: spanHours,
+    };
+  }
+
+  private toSummary(result: BacktestResult): BacktestResultSummary {
+    return {
+      generated_at: result.generated_at,
+      actual_total_cost_eur: result.actual_total_cost_eur,
+      simulated_total_cost_eur: result.simulated_total_cost_eur,
+      actual_final_soc_percent: result.actual_final_soc_percent,
+      simulated_final_soc_percent: result.simulated_final_soc_percent,
+      soc_value_adjustment_eur: result.soc_value_adjustment_eur,
+      adjusted_actual_cost_eur: result.adjusted_actual_cost_eur,
+      adjusted_simulated_cost_eur: result.adjusted_simulated_cost_eur,
+      savings_eur: result.savings_eur,
+      avg_price_eur_per_kwh: result.avg_price_eur_per_kwh,
+      history_points_used: result.history_points_used,
+      span_hours: result.span_hours,
+    };
+  }
+
+  private inflateSummary(summary: BacktestResultSummary): BacktestResult {
+    return {
+      ...summary,
+      intervals: [],
     };
   }
 

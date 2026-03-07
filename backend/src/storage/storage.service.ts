@@ -4,8 +4,8 @@ import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import type { Database } from "better-sqlite3";
 import DatabaseConstructor from "better-sqlite3";
 
-import type { HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
-import { historyPointSchema, snapshotPayloadSchema } from "@chargecaster/domain";
+import type { BacktestResultSummary, HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
+import { backtestResultSummarySchema, historyPointSchema, snapshotPayloadSchema } from "@chargecaster/domain";
 
 export interface SnapshotRecord {
   id: number;
@@ -17,6 +17,13 @@ export interface HistoryRecord {
   id: number;
   timestamp: string;
   payload: HistoryPoint;
+}
+
+export interface DailyBacktestSummaryRecord {
+  date: string;
+  configFingerprint: string;
+  updatedAt: string;
+  payload: BacktestResultSummary;
 }
 
 @Injectable()
@@ -113,6 +120,60 @@ export class StorageService implements OnModuleDestroy {
     }));
   }
 
+  upsertDailyBacktestSummaries(entries: {
+    date: string;
+    configFingerprint: string;
+    payload: BacktestResultSummary;
+  }[]): void {
+    if (!entries.length) {
+      return;
+    }
+    this.logger.log(`Upserting ${entries.length} daily backtest summaries`);
+    const stmt = this.db.prepare(`
+      INSERT INTO daily_backtest_summaries (date, config_fingerprint, updated_at, payload)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(date, config_fingerprint) DO UPDATE SET
+        updated_at = excluded.updated_at,
+        payload = excluded.payload
+    `);
+    const txn = this.db.transaction((items: typeof entries) => {
+      const updatedAt = new Date().toISOString();
+      for (const entry of items) {
+        stmt.run(entry.date, entry.configFingerprint, updatedAt, JSON.stringify(entry.payload));
+      }
+    });
+    txn(entries);
+  }
+
+  listDailyBacktestSummaries(configFingerprint: string, dates: string[]): DailyBacktestSummaryRecord[] {
+    if (!dates.length) {
+      return [];
+    }
+    this.logger.verbose(
+      `Listing daily backtest summaries (config=${configFingerprint.slice(0, 8)}, dates=${dates.length})`,
+    );
+    const placeholders = dates.map(() => "?").join(", ");
+    const stmt = this.db.prepare(`
+      SELECT date, config_fingerprint, updated_at, payload
+      FROM daily_backtest_summaries
+      WHERE config_fingerprint = ?
+        AND date IN (${placeholders})
+      ORDER BY date DESC
+    `);
+    const rows = stmt.all(configFingerprint, ...dates) as {
+      date: string;
+      config_fingerprint: string;
+      updated_at: string;
+      payload: string;
+    }[];
+    return rows.map((row) => ({
+      date: row.date,
+      configFingerprint: row.config_fingerprint,
+      updatedAt: row.updated_at,
+      payload: backtestResultSummarySchema.parse(JSON.parse(row.payload)),
+    }));
+  }
+
   private migrate(): void {
     this.logger.verbose("Ensuring storage schema is up to date");
     this.db.exec(`
@@ -133,6 +194,21 @@ export class StorageService implements OnModuleDestroy {
             payload   TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history (timestamp DESC);
+    `);
+
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_backtest_summaries
+        (
+            date               TEXT NOT NULL,
+            config_fingerprint TEXT NOT NULL,
+            updated_at         TEXT NOT NULL,
+            payload            TEXT NOT NULL,
+            PRIMARY KEY (date, config_fingerprint)
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_backtest_summaries_date
+          ON daily_backtest_summaries (date DESC);
+        CREATE INDEX IF NOT EXISTS idx_daily_backtest_summaries_config
+          ON daily_backtest_summaries (config_fingerprint, date DESC);
     `);
   }
 }
