@@ -150,6 +150,12 @@ export class TrpcRouter {
           const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
           return this.backtestService.run(snapshot, simConfig);
         }),
+        backtestHistory: t.procedure.query(() => {
+          this.logger.log("tRPC.dashboard.backtestHistory requested");
+          const snapshot = this.simulationService.ensureSeedFromFixture();
+          const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
+          return this.backtestService.runDailyHistory(snapshot, simConfig);
+        }),
       }),
     });
   }

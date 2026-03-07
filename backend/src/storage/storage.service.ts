@@ -96,6 +96,19 @@ export class StorageService implements OnModuleDestroy {
     }));
   }
 
+  listAllHistoryAsc(limit = 15000): HistoryRecord[] {
+    this.logger.verbose(`Listing all history entries ASC (limit=${limit})`);
+    const stmt = this.db.prepare(
+      "SELECT id, timestamp, payload FROM history ORDER BY timestamp ASC LIMIT ?",
+    );
+    const rows = stmt.all(limit) as { id: number; timestamp: string; payload: string }[];
+    return rows.map((row) => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      payload: historyPointSchema.parse(JSON.parse(row.payload)),
+    }));
+  }
+
   private migrate(): void {
     this.logger.verbose("Ensuring storage schema is up to date");
     this.db.exec(`
