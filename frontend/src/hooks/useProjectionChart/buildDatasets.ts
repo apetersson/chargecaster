@@ -1,3 +1,4 @@
+import { buildDerivedForecastEras } from "@chargecaster/domain";
 import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
 import type { ChartDataset } from "./chartSetup";
 
@@ -6,9 +7,7 @@ import {
   addPoint,
   attachHistoryIntervals,
   buildCombinedSeries,
-  buildFutureEras,
   computeTimeRangeMs,
-  derivePowerFromEnergy,
   ensureBounds,
   isFiniteNumber,
   parseTimestamp,
@@ -31,6 +30,10 @@ import type {
   ProjectionPoint,
   TimeRangeMs,
 } from "./types";
+
+const eraStartMs = (era: DerivedEra): number => era.slot.start.getTime();
+const eraEndMs = (era: DerivedEra): number => era.slot.end.getTime();
+const eraMidpointMs = (era: DerivedEra): number => era.slot.midpoint().getTime();
 
 const resolveInitialSoCPercent = (
   summary: SnapshotSummary | null,
@@ -79,10 +82,10 @@ const buildSoCSeries = (
   let currentSoCPercent = resolveInitialSoCPercent(summary, historyPoints);
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    addPoint(futurePoints, {x: era.startMs, y: currentSoCPercent, source: "forecast"});
-    const targetSoCPercent = era.oracle?.end_soc_percent ?? era.oracle?.target_soc_percent ?? null;
+    addPoint(futurePoints, {x: eraStartMs(era), y: currentSoCPercent, source: "forecast"});
+    const targetSoCPercent = era.targetSoc?.percent ?? null;
     const endSoCPercent = isFiniteNumber(targetSoCPercent) ? targetSoCPercent : currentSoCPercent;
-    addPoint(futurePoints, {x: era.endMs, y: endSoCPercent, source: "forecast"});
+    addPoint(futurePoints, {x: eraEndMs(era), y: endSoCPercent, source: "forecast"});
     currentSoCPercent = endSoCPercent;
   }
 
@@ -125,14 +128,11 @@ const buildGridSeries = (
 
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    const power = derivePowerFromEnergy(
-      era.oracle?.grid_energy_wh ?? null,
-      era.slot.duration.hours,
-    );
+    const power = era.gridPower?.watts ?? null;
     if (!isFiniteNumber(power)) {
       continue;
     }
-    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
+    const midpoint = eraMidpointMs(era);
     futurePoints.push({x: midpoint, y: power, source: "forecast"});
   }
 
@@ -183,11 +183,14 @@ const buildSolarSeries = (
   };
 
   for (const era of futureEras) {
-    const hasSolar = isFiniteNumber(era.solarAverageW);
+    const solarAverage = era.solarAveragePower?.watts ?? null;
+    const startMs = eraStartMs(era);
+    const endMs = eraEndMs(era);
+    const hasSolar = isFiniteNumber(solarAverage);
 
     if (!hasSolar) {
       if (hadActiveSegment) {
-        pushGapPoint(futurePoints, era.startMs);
+        pushGapPoint(futurePoints, startMs);
         hadActiveSegment = false;
       }
       lastDataEraEnd = null;
@@ -195,24 +198,23 @@ const buildSolarSeries = (
     }
 
     if (lastDataEraEnd !== null) {
-      const gapDuration = era.startMs - lastDataEraEnd;
+      const gapDuration = startMs - lastDataEraEnd;
       if (gapDuration > GAP_THRESHOLD_MS) {
-        pushGapPoint(futurePoints, era.startMs);
+        pushGapPoint(futurePoints, startMs);
         hadActiveSegment = false;
       }
     }
 
     if (!hadActiveSegment && futurePoints.length) {
-      pushGapPoint(futurePoints, era.startMs);
+      pushGapPoint(futurePoints, startMs);
     }
 
-    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
-    const solarAverage = era.solarAverageW as number;
+    const midpoint = eraMidpointMs(era);
 
     const anchor = findAnchorPoint();
     let startValue = solarAverage;
     if (anchor && Number.isFinite(anchor.y) && anchor.x <= midpoint) {
-      const clampedStart = Math.max(anchor.x, Math.min(midpoint, era.startMs));
+      const clampedStart = Math.max(anchor.x, Math.min(midpoint, startMs));
       const denominator = midpoint - anchor.x;
       const numerator = clampedStart - anchor.x;
       if (denominator > 0 && numerator >= 0) {
@@ -221,10 +223,10 @@ const buildSolarSeries = (
       }
     }
 
-    addPoint(futurePoints, {x: era.startMs, y: startValue, source: "forecast"});
+    addPoint(futurePoints, {x: startMs, y: startValue, source: "forecast"});
     addPoint(futurePoints, {x: midpoint, y: solarAverage, source: "forecast"});
     hadActiveSegment = true;
-    lastDataEraEnd = era.endMs;
+    lastDataEraEnd = endMs;
   }
 
   return buildCombinedSeries(historyPoints, futurePoints, {allowContinuous: true});
@@ -233,24 +235,15 @@ const buildSolarSeries = (
 const buildDemandSeries = (
   history: HistoryPoint[],
   futureEras: DerivedEra[],
-  summary: SnapshotSummary | null,
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.home_power_w ?? null))
     .filter((p): p is ProjectionPoint => p !== null);
 
-  const r = typeof summary?.solar_direct_use_ratio === "number" && Number.isFinite(summary.solar_direct_use_ratio)
-    ? summary.solar_direct_use_ratio
-    : 0.6;
-  const bp = typeof summary?.house_load_w === "number" && Number.isFinite(summary.house_load_w)
-    ? summary.house_load_w
-    : 0;
-
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    const midpoint = era.startMs + (era.endMs - era.startMs) / 2;
-    const solarAvg = isFiniteNumber(era.solarAverageW) ? era.solarAverageW : 0;
-    const demand = bp + r * solarAvg;
+    const midpoint = eraMidpointMs(era);
+    const demand = era.demandPower.watts;
     futurePoints.push({x: midpoint, y: demand, source: "forecast"});
   }
   return buildCombinedSeries(historyPoints, futurePoints);
@@ -264,7 +257,7 @@ const buildPriceSeries = (
     .map((entry) => toHistoryPoint(entry.timestamp, resolvePriceValue(entry)))
     .filter((point): point is ProjectionPoint => point !== null);
   const sortedHistory = historyPoints.sort((a, b) => a.x - b.x);
-  const firstFutureStart = futureEras[0]?.startMs;
+  const firstFutureStart = futureEras[0] ? eraStartMs(futureEras[0]) : undefined;
   attachHistoryIntervals(sortedHistory, firstFutureStart);
 
   const nowMs = Date.now();
@@ -289,13 +282,14 @@ const buildPriceSeries = (
 
   const futurePoints: ProjectionPoint[] = [];
   for (const era of futureEras) {
-    if (!isFiniteNumber(era.priceCtPerKwh)) {
+    const price = era.price?.ctPerKwh ?? null;
+    if (!isFiniteNumber(price)) {
       continue;
     }
     futurePoints.push({
-      x: era.startMs,
-      xEnd: era.endMs,
-      y: era.priceCtPerKwh,
+      x: eraStartMs(era),
+      xEnd: eraEndMs(era),
+      y: price,
       source: "forecast",
       strategy: era.oracle?.strategy,
     });
@@ -352,11 +346,11 @@ export const buildDatasets = (
   timeRangeMs: TimeRangeMs;
   legendGroups: LegendGroup[];
 } => {
-  const futureEras = buildFutureEras(forecast, oracleEntries);
+  const futureEras = buildDerivedForecastEras(forecast, oracleEntries, summary);
   const {series: socSeries, currentMarker} = buildSoCSeries(history, futureEras, summary);
   const gridSeries = buildGridSeries(history, futureEras);
   const solarSeries = buildSolarSeries(history, futureEras);
-  const demandSeries = buildDemandSeries(history, futureEras, summary);
+  const demandSeries = buildDemandSeries(history, futureEras);
   const priceSeries = buildPriceSeries(history, futureEras);
   const powerSeries = [...gridSeries, ...solarSeries, ...demandSeries];
 

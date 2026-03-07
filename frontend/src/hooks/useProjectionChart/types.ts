@@ -1,6 +1,6 @@
-import { TimeSlot } from "@chargecaster/domain";
+import type { ForecastDerivedEra } from "@chargecaster/domain";
 import type { ScatterDataPoint } from "chart.js";
-import type { ForecastEra, OracleEntry } from "../../types";
+import type { OracleEntry } from "../../types";
 
 export type SeriesSource = "history" | "forecast" | "gap";
 
@@ -20,15 +20,7 @@ export interface AxisBounds {
   dataMax: number | null;
 }
 
-export interface DerivedEra {
-  era: ForecastEra;
-  oracle?: OracleEntry;
-  slot: TimeSlot;
-  startMs: number;
-  endMs: number;
-  priceCtPerKwh: number | null;
-  solarAverageW: number | null;
-}
+export type DerivedEra = ForecastDerivedEra;
 
 export interface LegendGroup {
   label: string;
