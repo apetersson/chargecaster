@@ -14,7 +14,6 @@ import { Duration, Energy, EnergyPrice, Percentage, TariffSlot, TimeSlot } from 
 import { StorageService } from "../storage/storage.service";
 import { parseEvccState } from "../config/schemas";
 import { normalizeHistoryList } from "./history.serializer";
-import { BacktestSavingsService } from "./backtest.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { clampRatio, gridFee, simulateOptimalSchedule } from "./optimal-schedule";
 
@@ -42,7 +41,6 @@ export class SimulationService {
 
   constructor(
     @Inject(StorageService) private readonly storageRef: StorageService,
-    @Inject(BacktestSavingsService) private readonly backtestService: BacktestSavingsService,
   ) {
   }
 
@@ -225,7 +223,6 @@ export class SimulationService {
       active_control_savings_eur: Number.isFinite(autoResult.projected_cost_eur) && Number.isFinite(result.projected_cost_eur)
         ? autoResult.projected_cost_eur - result.projected_cost_eur
         : null,
-      backtested_savings_eur: null,
       projected_grid_power_w: result.projected_grid_power_w,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
@@ -244,7 +241,6 @@ export class SimulationService {
       solar_power_w: null,
       solar_energy_wh: null,
       home_power_w: null,
-      backtested_savings_eur: null,
     };
 
     const observedGridPower = input.observations?.gridPowerW;
@@ -281,18 +277,6 @@ export class SimulationService {
     const observedHomePower = input.observations?.homePowerW;
     if (observedHomePower != null) {
       historyEntry.home_power_w = observedHomePower;
-    }
-
-    const backtestHistoryCandidates = this.storageRef.listHistory(500);
-    const backtestResult = this.backtestService.calculate(input.config, {
-      history: backtestHistoryCandidates.map((item) => item.payload),
-      extraEntries: [historyEntry],
-      referenceTimestamp: result.timestamp,
-      endValuationPriceEurPerKwh: result.average_price_eur_per_kwh,
-    });
-    if (backtestResult) {
-      snapshot.backtested_savings_eur = backtestResult.savingsEur;
-      historyEntry.backtested_savings_eur = backtestResult.savingsEur;
     }
 
     this.storageRef.replaceSnapshot(structuredClone(snapshot));
