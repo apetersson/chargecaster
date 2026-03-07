@@ -12,6 +12,8 @@ export interface BacktestInterval {
   duration_hours: number;
   price_eur_per_kwh: number;
   home_power_w: number;
+  site_demand_power_w: number;
+  synthetic_hidden_load_w: number;
   solar_power_w: number;
   actual_grid_power_w: number;
   actual_soc_percent: number;
@@ -77,9 +79,9 @@ export class BacktestService {
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    // Collect complete past days newest-first
+    // Collect past UTC days with near-midnight coverage, newest-first.
     const availableDays = [...byDay.keys()]
-      .filter((day) => day < today && (byDay.get(day)?.length ?? 0) >= 2)
+      .filter((day) => day < today && this.isCompleteUtcDay(byDay.get(day) ?? []))
       .sort((a, b) => b.localeCompare(a));
 
     const hasMore = skip + limit < availableDays.length;
@@ -136,6 +138,21 @@ export class BacktestService {
     return d.toISOString().slice(0, 10);
   }
 
+  private isCompleteUtcDay(points: HistoryPoint[]): boolean {
+    if (points.length < 2) {
+      return false;
+    }
+
+    const day = points[0].timestamp.slice(0, 10);
+    const dayStart = new Date(`${day}T00:00:00Z`).getTime();
+    const dayEnd = dayStart + HOURS_24 * MS_PER_HOUR;
+    const firstPoint = new Date(points[0].timestamp).getTime();
+    const lastPoint = new Date(points[points.length - 1].timestamp).getTime();
+    const boundaryToleranceMs = MS_PER_HOUR * 2;
+
+    return firstPoint - dayStart <= boundaryToleranceMs && dayEnd - lastPoint <= boundaryToleranceMs;
+  }
+
   private runForHistory(
     history: HistoryPoint[],
     snapshot: SnapshotPayload,
@@ -190,13 +207,34 @@ export class BacktestService {
       const homePowerW = current.home_power_w != null && Number.isFinite(current.home_power_w)
         ? current.home_power_w
         : houseLoadWFallback;
+      const evChargePowerW = current.ev_charge_power_w != null && Number.isFinite(current.ev_charge_power_w)
+        ? Math.max(0, current.ev_charge_power_w)
+        : null;
       const solarPowerW = current.solar_power_w != null && Number.isFinite(current.solar_power_w)
         ? Math.max(0, current.solar_power_w)
         : 0;
+      const actualSocPercent = current.battery_soc_percent ?? 50;
+      const nextSocPercent = next.battery_soc_percent ?? actualSocPercent;
+      const inferredBatteryPowerW = this.inferObservedBatteryPowerW(
+        actualSocPercent,
+        nextSocPercent,
+        capacityKwh,
+        durationHours,
+      );
+      const measuredSiteDemandW = current.site_demand_power_w != null && Number.isFinite(current.site_demand_power_w)
+        ? Math.max(0, current.site_demand_power_w)
+        : evChargePowerW != null
+          ? homePowerW + evChargePowerW
+          : null;
+      const syntheticSiteDemandW = Math.max(
+        homePowerW,
+        actualGridPowerWOrFallback(current.grid_power_w, homePowerW, solarPowerW) + solarPowerW + inferredBatteryPowerW,
+      );
+      const siteDemandW = measuredSiteDemandW ?? syntheticSiteDemandW;
+      const hiddenLoadW = Math.max(0, siteDemandW - homePowerW);
       const actualGridPowerW = current.grid_power_w != null && Number.isFinite(current.grid_power_w)
         ? current.grid_power_w
-        : homePowerW - solarPowerW;
-      const actualSocPercent = current.battery_soc_percent ?? 50;
+        : siteDemandW - solarPowerW - inferredBatteryPowerW;
 
       // Actual cost: positive grid = import, negative = export
       const actualGridKwh = (actualGridPowerW / WATTS_PER_KW) * durationHours;
@@ -204,8 +242,8 @@ export class BacktestService {
         ? actualGridKwh * importPriceEur
         : actualGridKwh * feedInTariffEur;
 
-      // Simulate "auto" mode: battery covers net load, charges from solar surplus, never from grid
-      const netLoadW = homePowerW - solarPowerW;
+      // Simulate "auto" mode against the total site demand, not EVCC's wallbox-excluded home power.
+      const netLoadW = siteDemandW - solarPowerW;
 
       let simGridPowerW: number;
       if (netLoadW > 0) {
@@ -252,6 +290,8 @@ export class BacktestService {
         duration_hours: durationHours,
         price_eur_per_kwh: priceEur,
         home_power_w: homePowerW,
+        site_demand_power_w: siteDemandW,
+        synthetic_hidden_load_w: measuredSiteDemandW == null ? hiddenLoadW : 0,
         solar_power_w: solarPowerW,
         actual_grid_power_w: actualGridPowerW,
         actual_soc_percent: actualSocPercent,
@@ -398,4 +438,27 @@ export class BacktestService {
       span_hours: 0,
     };
   }
+
+  private inferObservedBatteryPowerW(
+    currentSocPercent: number,
+    nextSocPercent: number,
+    capacityKwh: number,
+    durationHours: number,
+  ): number {
+    if (!Number.isFinite(currentSocPercent) || !Number.isFinite(nextSocPercent) || durationHours <= 0) {
+      return 0;
+    }
+    const storedEnergyDeltaKwh = ((nextSocPercent - currentSocPercent) / 100) * capacityKwh;
+    return -(storedEnergyDeltaKwh / durationHours) * WATTS_PER_KW;
+  }
+}
+
+function actualGridPowerWOrFallback(
+  rawGridPowerW: number | null | undefined,
+  homePowerW: number,
+  solarPowerW: number,
+): number {
+  return rawGridPowerW != null && Number.isFinite(rawGridPowerW)
+    ? rawGridPowerW
+    : homePowerW - solarPowerW;
 }

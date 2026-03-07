@@ -33,6 +33,10 @@ const getErrorMessage = (error: unknown): string => {
   return "Unknown error";
 };
 
+const readOptionalHistoryNumber = (entry: object, key: "ev_charge_power_w" | "site_demand_power_w"): number | null => {
+  const value = (entry as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+};
 
 function App(): JSX.Element {
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
@@ -67,7 +71,13 @@ function App(): JSX.Element {
         ]);
 
         setSummary(summaryData);
-        setHistory(historyData.entries);
+        setHistory(historyData.entries.map((entry) => {
+          return {
+            ...entry,
+            ev_charge_power_w: readOptionalHistoryNumber(entry, "ev_charge_power_w"),
+            site_demand_power_w: readOptionalHistoryNumber(entry, "site_demand_power_w"),
+          };
+        }));
         setForecast(forecastData.eras);
         setOracleEntries(oracleData.entries);
         setError(null);

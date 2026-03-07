@@ -28,4 +28,21 @@ describe("configuration schema parsers", () => {
     expect(parsed.solarPowerW).toBeCloseTo(450, 3);
     expect(parsed.priceSnapshot).toBeCloseTo(0.32, 5);
   });
+
+  it("deduplicates overlapping EVCC forecast arrays", () => {
+    const raw = JSON.parse(readFileSync(join(process.cwd(), "test", "fixtures", "evcc-state.json"), "utf-8")) as unknown;
+    const parsed = parseEvccState(raw);
+
+    expect(parsed.forecast).toHaveLength(21);
+    expect(new Set(parsed.forecast.map((entry) => `${entry.start}|${entry.end}|${entry.value ?? entry.price}`)).size).toBe(21);
+  });
+
+  it("derives EV charge and total site demand from loadpoints", () => {
+    const raw = JSON.parse(readFileSync(fixturePath("solar-confusion.json"), "utf-8")) as unknown;
+    const parsed = parseEvccState(raw);
+
+    expect(parsed.homePowerW).toBeCloseTo(1292.276, 3);
+    expect(parsed.evChargePowerW).toBeCloseTo(10984.894, 3);
+    expect(parsed.siteDemandPowerW).toBeCloseTo(12277.17, 2);
+  });
 });

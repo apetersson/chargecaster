@@ -33,6 +33,11 @@ const dashboard = trpcClient.dashboard as Record<string, unknown> as {
   backtestHistory: { query: (input: { limit: number; skip: number }) => Promise<DailyBacktestPage> };
 };
 
+function formatSignedNumber(value: number, unit = ""): string {
+  const sign = value >= 0 ? "+" : "-";
+  return `${sign}${formatNumber(Math.abs(value), unit)}`;
+}
+
 function BacktestCard(): JSX.Element | null {
   const [data, setData] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -145,8 +150,10 @@ function BacktestCard(): JSX.Element | null {
         </div>
         <div className="metric">
           <span className="label">Active Control Savings</span>
-          <span className={`value small ${savingsPositive ? "" : "negative"}`}>
-            {savingsPositive ? "-" : "+"}{formatNumber(Math.abs(data.savings_eur), " EUR")}
+          <span
+            className={`value small ${savingsPositive ? "positive" : "negative"}`}
+          >
+            {formatSignedNumber(data.savings_eur, " EUR")}
           </span>
         </div>
         <div className="metric">
@@ -248,7 +255,7 @@ function DailyHistorySection({ entries, hasMore, loading, error, onLoad, onLoadM
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.soc_value_adjustment_eur, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.avg_price_eur_per_kwh * 100, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right", color: pos ? "var(--positive, #4caf50)" : "var(--negative, #f44336)" }}>
-                    {pos ? "-" : "+"}{formatNumber(Math.abs(result.savings_eur), "")}
+                    {formatSignedNumber(result.savings_eur)}
                   </td>
                 </tr>
               );
@@ -258,7 +265,7 @@ function DailyHistorySection({ entries, hasMore, loading, error, onLoad, onLoadM
             <tr style={{ borderTop: "1px solid var(--border, #333)", fontWeight: 600 }}>
               <td colSpan={10} style={{ padding: "4px 6px", textAlign: "right" }}>Total savings</td>
               <td style={{ padding: "4px 6px", textAlign: "right", color: totalSavings > 0 ? "var(--positive, #4caf50)" : "var(--negative, #f44336)" }}>
-                {totalSavings > 0 ? "-" : "+"}{formatNumber(Math.abs(totalSavings), " EUR")}
+                {formatSignedNumber(totalSavings, " EUR")}
               </td>
             </tr>
           </tfoot>

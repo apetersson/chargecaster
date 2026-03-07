@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EvccDataService } from "../src/config/evcc-data.service";
 
 const fixturePath = join(process.cwd(), "fixtures", "evcc-state-sample.json");
+const solarConfusionFixturePath = join(process.cwd(), "fixtures", "solar-confusion.json");
 
 const loadFixture = () => JSON.parse(readFileSync(fixturePath, "utf-8")) as unknown;
+const loadSolarConfusionFixture = () => JSON.parse(readFileSync(solarConfusionFixturePath, "utf-8")) as unknown;
 
 type FetchResult = Awaited<ReturnType<typeof global.fetch>>;
 
@@ -35,6 +37,19 @@ describe("EvccDataService", () => {
     expect(result.solarForecast.length).toBeGreaterThan(0);
     expect(result.priceSnapshot).not.toBeNull();
     expect(typeof result.batterySoc).toBe("number");
+  });
+
+  it("returns total demand including EV charging when loadpoints are present", async () => {
+    const payload = loadSolarConfusionFixture();
+    vi.spyOn(global, "fetch").mockResolvedValueOnce(createResponse(payload) as unknown as FetchResult);
+
+    const warnings: string[] = [];
+    const result = await service.collect({enabled: true, base_url: "http://example.com"}, warnings);
+
+    expect(warnings).toHaveLength(0);
+    expect(result.homePowerW).toBeCloseTo(1292.276, 3);
+    expect(result.evChargePowerW).toBeCloseTo(10984.894, 3);
+    expect(result.siteDemandPowerW).toBeCloseTo(12277.17, 2);
   });
 
   it("returns empty result when EVCC is disabled", async () => {

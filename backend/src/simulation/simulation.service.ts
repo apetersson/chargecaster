@@ -32,6 +32,8 @@ export interface SimulationInput {
     gridPowerW?: number | null;
     solarPowerW?: number | null;
     homePowerW?: number | null;
+    evChargePowerW?: number | null;
+    siteDemandPowerW?: number | null;
   };
 }
 
@@ -241,6 +243,8 @@ export class SimulationService {
       solar_power_w: null,
       solar_energy_wh: null,
       home_power_w: null,
+      ev_charge_power_w: null,
+      site_demand_power_w: null,
     };
 
     const observedGridPower = input.observations?.gridPowerW;
@@ -277,6 +281,18 @@ export class SimulationService {
     const observedHomePower = input.observations?.homePowerW;
     if (observedHomePower != null) {
       historyEntry.home_power_w = observedHomePower;
+    }
+
+    const observedEvChargePower = input.observations?.evChargePowerW;
+    if (observedEvChargePower != null) {
+      historyEntry.ev_charge_power_w = observedEvChargePower;
+    }
+
+    const observedSiteDemandPower = input.observations?.siteDemandPowerW;
+    if (observedSiteDemandPower != null) {
+      historyEntry.site_demand_power_w = observedSiteDemandPower;
+    } else if (historyEntry.home_power_w != null) {
+      historyEntry.site_demand_power_w = historyEntry.home_power_w + Math.max(0, historyEntry.ev_charge_power_w ?? 0);
     }
 
     this.storageRef.replaceSnapshot(structuredClone(snapshot));

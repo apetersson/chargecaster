@@ -20,6 +20,8 @@ export interface PreparedSimulation {
   liveGridPowerW: number | null;
   liveSolarPowerW: number | null;
   liveHomePowerW: number | null;
+  liveEvChargePowerW: number | null;
+  liveSiteDemandPowerW: number | null;
   intervalSeconds: number | null;
 }
 
@@ -252,6 +254,8 @@ export class SimulationPreparationService {
       liveGridPowerW: evccResult.gridPowerW,
       liveSolarPowerW: evccResult.solarPowerW,
       liveHomePowerW: evccResult.homePowerW,
+      liveEvChargePowerW: evccResult.evChargePowerW,
+      liveSiteDemandPowerW: evccResult.siteDemandPowerW,
       intervalSeconds: this.configFactory.getIntervalSeconds(simulationConfig),
     };
   }

@@ -23,6 +23,8 @@ export class EvccDataService {
     gridPowerW: number | null;
     solarPowerW: number | null;
     homePowerW: number | null;
+    evChargePowerW: number | null;
+    siteDemandPowerW: number | null;
   }> {
     const {
       enabled = true,
@@ -78,6 +80,8 @@ export class EvccDataService {
         gridPowerW: parsed.gridPowerW,
         solarPowerW: parsed.solarPowerW,
         homePowerW: parsed.homePowerW,
+        evChargePowerW: parsed.evChargePowerW,
+        siteDemandPowerW: parsed.siteDemandPowerW,
       };
     } catch (error) {
       const message = `EVCC data fetch failed: ${describeError(error)}`;
@@ -95,6 +99,8 @@ export class EvccDataService {
     gridPowerW: number | null;
     solarPowerW: number | null;
     homePowerW: number | null;
+    evChargePowerW: number | null;
+    siteDemandPowerW: number | null;
   } {
     return {
       forecast: [],
@@ -104,6 +110,8 @@ export class EvccDataService {
       gridPowerW: null,
       solarPowerW: null,
       homePowerW: null,
+      evChargePowerW: null,
+      siteDemandPowerW: null,
     };
   }
 
