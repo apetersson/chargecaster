@@ -4,44 +4,45 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends build-essential python3 \
   && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable
+RUN npm install -g pnpm
 
 WORKDIR /app
 
 # Install workspace dependencies using the root lockfile
-COPY package.json yarn.lock ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY backend/package.json backend/package.json
 COPY frontend/package.json frontend/package.json
 COPY packages/domain/package.json packages/domain/package.json
-RUN yarn install --frozen-lockfile --check-files
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 # Build domain first so dependents can rely on dist outputs
 COPY packages/domain/ packages/domain/
-RUN yarn workspace @chargecaster/domain build
+RUN pnpm --filter @chargecaster/domain build
 
 # Build frontend
 COPY frontend/ frontend/
 ARG VITE_TRPC_URL=/trpc
 ENV VITE_TRPC_URL=${VITE_TRPC_URL}
-RUN yarn workspace chargecaster-frontend build
+RUN pnpm --filter chargecaster-frontend build
 
 # Bundle backend with esbuild (externalize native better-sqlite3)
 COPY backend/ backend/
-RUN yarn workspace chargecaster-backend bundle \
-  && yarn cache clean --force || true
+RUN pnpm --filter chargecaster-backend bundle \
+  && pnpm store prune || true
 
 
 FROM node:20-bookworm-slim AS native-deps
 
-RUN corepack enable
+RUN npm install -g pnpm
 
 WORKDIR /app/backend
 
 # Create a minimal package.json that includes only the native module we need at runtime
 COPY backend/package.json package.json
 RUN node -e "const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const v=pkg.dependencies['better-sqlite3'];fs.writeFileSync('package.json', JSON.stringify({name: pkg.name+'-runtime', private:true, version: pkg.version, type:'commonjs', dependencies:{'better-sqlite3': v}}, null, 2));"
-RUN yarn install --production --check-files \
-  && yarn cache clean --force || true
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --prod --shamefully-hoist
 
 
 FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runtime

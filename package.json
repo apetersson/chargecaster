@@ -3,25 +3,23 @@
   "private": true,
   "type": "module",
   "license": "UNLICENSED",
-  "workspaces": [
-    "backend",
-    "frontend",
-    "packages/domain"
-  ],
   "scripts": {
-    "bootstrap": "yarn install",
-    "build:domain": "yarn workspace @chargecaster/domain build",
-    "lint:backend": "yarn workspace chargecaster-backend lint",
-    "typecheck:backend": "yarn workspace chargecaster-backend typecheck",
-    "build:backend": "yarn workspace chargecaster-backend build",
-    "lint:frontend": "yarn workspace chargecaster-frontend lint",
-    "typecheck:frontend": "yarn workspace chargecaster-frontend typecheck",
-    "build:frontend": "yarn workspace chargecaster-frontend build",
-    "lint:all": "yarn lint:backend && yarn lint:frontend",
-    "typecheck:all": "yarn typecheck:backend && yarn typecheck:frontend",
-    "build:all": "yarn build:domain && yarn build:backend && yarn build:frontend"
+    "bootstrap": "pnpm install",
+    "build:domain": "pnpm --filter @chargecaster/domain build",
+    "lint:backend": "pnpm --filter chargecaster-backend lint",
+    "typecheck:backend": "pnpm --filter chargecaster-backend typecheck",
+    "build:backend": "pnpm --filter chargecaster-backend build",
+    "lint:frontend": "pnpm --filter chargecaster-frontend lint",
+    "typecheck:frontend": "pnpm --filter chargecaster-frontend typecheck",
+    "build:frontend": "pnpm --filter chargecaster-frontend build",
+    "lint:all": "pnpm run lint:backend && pnpm run lint:frontend",
+    "typecheck:all": "pnpm run typecheck:backend && pnpm run typecheck:frontend",
+    "build:all": "pnpm run build:domain && pnpm run build:backend && pnpm run build:frontend"
   },
   "devDependencies": {
     "jiti": "^2.6.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@nestjs/core", "better-sqlite3", "esbuild"]
   }
 }
