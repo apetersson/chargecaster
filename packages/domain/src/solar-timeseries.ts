@@ -1,4 +1,3 @@
-import { Duration } from "./duration";
 import { Energy } from "./energy";
 import { Power } from "./power";
 import { TimeSlot } from "./time-slot";

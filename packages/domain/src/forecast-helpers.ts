@@ -1,6 +1,6 @@
 import { Duration } from "./duration";
 import { Energy } from "./energy";
-import { clampRatio, energyFromPower, powerFromEnergy } from "./battery-math";
+import { clampRatio, powerFromEnergy } from "./battery-math";
 import { Percentage } from "./percentage";
 import { Power } from "./power";
 import { EnergyPrice } from "./price";
@@ -89,7 +89,7 @@ export function derivePriceSnapshot(
   slots: PriceSlot[],
   gridFee: EnergyPrice = EnergyPrice.fromEurPerKwh(0),
 ): EnergyPrice | null {
-  const firstSlot = slots[0];
+  const firstSlot = slots.at(0);
   if (!firstSlot) {
     return null;
   }
