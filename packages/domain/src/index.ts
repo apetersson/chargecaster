@@ -28,6 +28,4 @@ export type {
   OracleEntry,
   OracleResponse,
   SnapshotSummary,
-  BacktestSeriesResponse,
-  BacktestSeriesPoint,
 } from "./simulation";

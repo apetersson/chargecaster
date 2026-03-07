@@ -71,10 +71,6 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
           <span className="value small">{formatNumber(data.active_control_savings_eur, " €")}</span>
         </div>
         <div className="metric">
-          <span className="label">Past 24h Savings</span>
-          <span className="value small">{formatNumber(data.backtested_savings_eur, " €")}</span>
-        </div>
-        <div className="metric">
           <span className="label">Projected Grid Power</span>
           <span className="value small">{formatNumber(data.projected_grid_power_w, " W")}</span>
         </div>

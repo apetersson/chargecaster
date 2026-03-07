@@ -10,8 +10,6 @@ export type {
   OracleEntry,
   OracleResponse,
   SnapshotSummary,
-  BacktestSeriesResponse,
-  BacktestSeriesPoint,
 } from "@chargecaster/domain";
 
 export type RouterOutputs = inferRouterOutputs<AppRouter>;

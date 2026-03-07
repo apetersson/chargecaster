@@ -61,7 +61,6 @@ export const historyPointSchema = z
     solar_power_w: nullableNumberSchema.optional().default(null),
     solar_energy_wh: nullableNumberSchema.optional().default(null),
     home_power_w: nullableNumberSchema.optional().default(null),
-    backtested_savings_eur: nullableNumberSchema.optional().default(null),
   })
   .strip();
 
@@ -128,7 +127,6 @@ export const snapshotPayloadSchema = z.object({
   baseline_cost_eur: nullableNumberSchema,
   basic_battery_cost_eur: nullableNumberSchema.optional(),
   active_control_savings_eur: nullableNumberSchema.optional(),
-  backtested_savings_eur: nullableNumberSchema.optional(),
   projected_savings_eur: nullableNumberSchema,
   projected_grid_power_w: nullableNumberSchema,
   forecast_hours: nullableNumberSchema,
@@ -158,7 +156,6 @@ export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   baseline_cost_eur: true,
   basic_battery_cost_eur: true,
   active_control_savings_eur: true,
-  backtested_savings_eur: true,
   projected_savings_eur: true,
   projected_grid_power_w: true,
   forecast_hours: true,
@@ -244,28 +241,3 @@ export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
 
 export type PriceSlot = TariffSlot;
 
-export const backtestSeriesPointSchema = z.object({
-  start: requiredTimestampSchema,
-  end: requiredTimestampSchema,
-  price_ct_per_kwh: nullableNumberSchema.optional(),
-  price_eur_per_kwh: nullableNumberSchema,
-  grid_power_smart_w: nullableNumberSchema,
-  grid_power_dumb_w: nullableNumberSchema,
-  soc_smart_percent: nullableNumberSchema,
-  soc_dumb_percent: nullableNumberSchema,
-  cost_smart_eur: nullableNumberSchema,
-  cost_dumb_eur: nullableNumberSchema,
-  savings_eur: nullableNumberSchema,
-  savings_cum_eur: nullableNumberSchema.optional(),
-});
-
-export type BacktestSeriesPoint = z.infer<typeof backtestSeriesPointSchema>;
-
-export const backtestSeriesResponseSchema = z.object({
-  generated_at: requiredTimestampSchema,
-  window_start: requiredTimestampSchema,
-  window_end: requiredTimestampSchema,
-  points: z.array(backtestSeriesPointSchema),
-});
-
-export type BacktestSeriesResponse = z.infer<typeof backtestSeriesResponseSchema>;

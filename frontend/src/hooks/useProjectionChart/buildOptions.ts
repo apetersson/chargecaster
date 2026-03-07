@@ -17,7 +17,6 @@ interface BuildOptionsConfig {
   timeRangeMs: TimeRangeMs;
   legendGroups: LegendGroup[];
   responsive?: { isMobile?: boolean; showPowerAxisLabels?: boolean; showPriceAxisLabels?: boolean };
-  // Label for the right-hand value axis. Defaults to 'ct/kWh' (tariff). For backtest savings, pass 'ct'.
   valueAxisUnit?: string;
 }
 

@@ -3,15 +3,11 @@ import { initTRPC, type AnyProcedure, type AnyRouter, type ProcedureType } from 
 import { z } from "zod";
 
 import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
-import type { BacktestSeriesResponse } from "@chargecaster/domain";
 import { SimulationService } from "../simulation/simulation.service";
 import { ForecastService } from "../simulation/forecast.service";
 import { HistoryService } from "../simulation/history.service";
 import { SummaryService } from "../simulation/summary.service";
 import { OracleService } from "../simulation/oracle.service";
-import { BacktestSavingsService } from "../simulation/backtest.service";
-import { SimulationConfigFactory } from "../config/simulation-config.factory";
-import { RuntimeConfigService } from "../config/runtime-config.service";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -91,9 +87,6 @@ export class TrpcRouter {
     @Inject(HistoryService) private readonly historyService: HistoryService,
     @Inject(SummaryService) private readonly summaryService: SummaryService,
     @Inject(OracleService) private readonly oracleService: OracleService,
-    @Inject(BacktestSavingsService) private readonly backtestService: BacktestSavingsService,
-    @Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService,
-    @Inject(SimulationConfigFactory) private readonly configFactory: SimulationConfigFactory,
   ) {
     this.router = t.router({
       health: t.procedure.query(() => {
@@ -118,18 +111,6 @@ export class TrpcRouter {
         oracle: t.procedure.query(() => {
           this.logger.log("tRPC.dashboard.oracle requested");
           return this.oracleService.build(this.simulationService.ensureSeedFromFixture());
-        }),
-        backtest24h: t.procedure.query((): BacktestSeriesResponse => {
-          this.logger.log("tRPC.dashboard.backtest24h requested");
-          this.logger.verbose("Loading runtime config for backtest calculations");
-          const doc = this.configState.getDocument();
-          const simConfig = this.configFactory.create(doc);
-          const series = this.backtestService.buildSeries(simConfig, { windowHours: 24, historyLimit: 1000 });
-          if (series) {
-            return series;
-          }
-          const nowIso = new Date().toISOString();
-          return { generated_at: nowIso, window_start: nowIso, window_end: nowIso, points: [] };
         }),
         snapshot: t.procedure.query(({ctx}) => {
           const service = ctx.simulationService ?? this.simulationService;
