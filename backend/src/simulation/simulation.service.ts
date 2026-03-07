@@ -10,12 +10,19 @@ import type {
   SimulationConfig,
   SnapshotPayload,
 } from "@chargecaster/domain";
-import { Duration, Energy, EnergyPrice, Percentage, TariffSlot, TimeSlot } from "@chargecaster/domain";
+import {
+  Duration,
+  Energy,
+  EnergyPrice,
+  TimeSlot,
+  clampRatio,
+  normalizePriceSlots,
+} from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
 import { parseEvccState } from "../config/schemas";
 import { normalizeHistoryList } from "./history.serializer";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
-import { clampRatio, gridFee, simulateOptimalSchedule } from "./optimal-schedule";
+import { gridFee, simulateOptimalSchedule } from "./optimal-schedule";
 
 const DEFAULT_SLOT_DURATION = Duration.fromHours(1);
 
@@ -149,7 +156,7 @@ export class SimulationService {
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
 
-    const directUseRatio = Percentage.fromRatio(clampRatio(input.config.solar?.direct_use_ratio ?? 0));
+    const directUseRatio = clampRatio(input.config.solar?.direct_use_ratio ?? 0);
     const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
 
     // Run the DP-based optimiser with the caller's grid and export preferences
@@ -391,59 +398,6 @@ function normalizeSocLabel(value: number | null | undefined): string | null {
   return `${rounded.toFixed(1)}%`;
 }
 
-function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
-  const slotsByStart = new Map<number, TariffSlot>();
-  for (const entry of raw) {
-    const startValue = entry.start ?? entry.from;
-    if (!startValue) {
-      continue;
-    }
-    const start = parseTimestamp(startValue);
-    if (!start) {
-      continue;
-    }
-
-    const explicitEnd = parseTimestamp(entry.end ?? entry.to);
-    const durationHours = Number(entry.duration_hours ?? entry.durationHours ?? NaN);
-    const durationMinutes = Number(entry.duration_minutes ?? entry.durationMinutes ?? NaN);
-
-    let slotDuration: Duration | null = null;
-    if (explicitEnd && explicitEnd.getTime() > start.getTime()) {
-      const between = Duration.between(start, explicitEnd);
-      slotDuration = between.milliseconds > 0 ? between : null;
-    }
-    if (!slotDuration && Number.isFinite(durationHours) && durationHours > 0) {
-      slotDuration = Duration.fromHours(durationHours);
-    }
-    if (!slotDuration && Number.isFinite(durationMinutes) && durationMinutes > 0) {
-      slotDuration = Duration.fromMinutes(durationMinutes);
-    }
-    slotDuration ??= DEFAULT_SLOT_DURATION;
-
-    if (slotDuration.milliseconds === 0) {
-      continue;
-    }
-
-    const energyPrice =
-      EnergyPrice.tryFromValue(entry.price, entry.unit) ??
-      EnergyPrice.tryFromValue(entry.value, entry.value_unit);
-    if (!energyPrice) {
-      continue;
-    }
-
-    const rawEraId = entry.era_id ?? entry.eraId;
-    const eraId = typeof rawEraId === "string" && rawEraId.length > 0 ? rawEraId : undefined;
-    const slotTime = TimeSlot.fromStartAndDuration(start, slotDuration);
-    const slot = TariffSlot.fromTimeSlot(slotTime, energyPrice, eraId);
-    const key = slot.start.getTime();
-    const existing = slotsByStart.get(key);
-    if (!existing || slot.price < existing.price) {
-      slotsByStart.set(key, slot);
-    }
-  }
-  return [...slotsByStart.values()].sort((a, b) => a.start.getTime() - b.start.getTime());
-}
-
 interface SolarSlot {
   slot: TimeSlot;
   energy: Energy;
@@ -525,6 +479,5 @@ function extractForecastFromState(state: unknown): RawForecastEntry[] {
 
 export {
   extractForecastFromState,
-  normalizePriceSlots,
   simulateOptimalSchedule,
 };

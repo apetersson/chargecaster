@@ -2,12 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
+import { EnergyPrice, normalizePriceSlots, TariffSlot } from "@chargecaster/domain";
 
 import type { PriceSlot, SimulationConfig } from "@chargecaster/domain";
 import { parseEvccState } from "../src/config/schemas";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "../src/simulation/solar";
-import { normalizePriceSlots, simulateOptimalSchedule } from "../src/simulation/simulation.service";
+import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
 
 function createSlot(hour: number, price: number): PriceSlot {
   const start = new Date(Date.UTC(2025, 0, 1, hour, 0, 0));

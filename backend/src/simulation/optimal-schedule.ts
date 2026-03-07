@@ -1,8 +1,17 @@
 import type { OracleEntry, PriceSlot, SimulationConfig } from "@chargecaster/domain";
+import {
+  clampRatio,
+  computeGridEnergyCostEur,
+  Duration,
+  Energy,
+  EnergyPrice,
+  Power,
+  energyFromPower,
+  powerFromEnergy,
+} from "@chargecaster/domain";
 
 const SOC_STEPS = 100;
 const EPSILON = 1e-9;
-const WATTS_PER_KW = 1000;
 const GRID_CHARGE_STRATEGY_THRESHOLD_KWH = 0.05;
 const HOLD_ENERGY_THRESHOLD_KWH = 0.02;
 
@@ -31,35 +40,9 @@ export interface SimulationOutput {
   timestamp: string;
 }
 
-export function clampRatio(value: unknown): number {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return 0;
-  }
-  if (numeric <= 0) {
-    return 0;
-  }
-  if (numeric >= 1) {
-    return 1;
-  }
-  return numeric;
-}
-
 export function gridFee(cfg: SimulationConfig): number {
   const value = cfg.price.grid_fee_eur_per_kwh ?? 0;
   return Number(value) || 0;
-}
-
-function computeSlotCost(gridEnergyKwh: number, importPrice: number, feedInTariff: number): number {
-  if (!Number.isFinite(gridEnergyKwh) || Number.isNaN(gridEnergyKwh)) {
-    return 0;
-  }
-  const priceImport = Number.isFinite(importPrice) ? importPrice : 0;
-  const priceFeedIn = Number.isFinite(feedInTariff) ? feedInTariff : 0;
-  if (gridEnergyKwh >= 0) {
-    return priceImport * gridEnergyKwh;
-  }
-  return priceFeedIn * gridEnergyKwh;
 }
 
 export enum TransitionKind {
@@ -164,7 +147,7 @@ function prepareSimulationContext(
 
   const normalizedOptions = {
     solarGenerationPerSlotKwh: options.solarGenerationKwhPerSlot ?? [],
-    directUseRatio: clampRatio(options.pvDirectUseRatio ?? solar?.direct_use_ratio ?? 0),
+    directUseRatio: clampRatio(options.pvDirectUseRatio ?? solar?.direct_use_ratio ?? 0).ratio,
     feedInTariff: Math.max(
       0,
       Number(options.feedInTariffEurPerKwh ?? price.feed_in_tariff_eur_per_kwh ?? 0),
@@ -291,7 +274,7 @@ function buildSlotProfiles(params: {
 }): SlotProfile[] {
   return params.slots.map((slot, index) => {
     const durationHours = slot.durationHours;
-    const loadEnergyKwh = (params.houseLoadW / WATTS_PER_KW) * durationHours;
+    const loadEnergyKwh = energyKwhFromPowerWatts(params.houseLoadW, durationHours);
     const solarGenerationKwh = params.solarGenerationPerSlotKwh[index] ?? 0;
     const directTargetKwh = Math.max(0, solarGenerationKwh * params.directUseRatio);
     const directUseEnergyKwh = Math.min(loadEnergyKwh, directTargetKwh);
@@ -301,19 +284,19 @@ function buildSlotProfiles(params: {
     const baselineGridEnergyKwh = loadAfterDirectUseKwh - availableSolarKwh;
     const baselineGridImportKwh = Math.max(0, baselineGridEnergyKwh);
     const gridChargeLimitKwh = params.allowGridChargeFromGrid && params.maxChargePowerW > 0
-      ? (params.maxChargePowerW / WATTS_PER_KW) * durationHours
+      ? energyKwhFromPowerWatts(params.maxChargePowerW, durationHours)
       : 0;
     const solarChargeLimitKwh = availableSolarKwh <= 0
       ? 0
       : params.maxSolarChargePowerW != null
         ? Math.min(
           availableSolarKwh,
-          (params.maxSolarChargePowerW / WATTS_PER_KW) * durationHours,
+          energyKwhFromPowerWatts(params.maxSolarChargePowerW, durationHours),
         )
         : availableSolarKwh;
     const dischargeLimitKwh = params.maxDischargePowerW == null
       ? Number.POSITIVE_INFINITY
-      : (params.maxDischargePowerW / WATTS_PER_KW) * durationHours;
+      : energyKwhFromPowerWatts(params.maxDischargePowerW, durationHours);
 
     return {
       index,
@@ -468,7 +451,7 @@ function evaluateStateTransitions(
     }
 
     // Keep the transition with the lowest total (slot + future) cost.
-    const slotCost = computeSlotCost(gridEnergyKwh, priceTotal, feedInTariff);
+    const slotCost = computeGridCostEur(gridEnergyKwh, priceTotal, feedInTariff);
     const totalCost = slotCost + costToGoNextRow[nextSoCStep];
     if (totalCost < bestCost) {
       bestCost = totalCost;
@@ -531,9 +514,7 @@ function buildSimulationOutput(
   const adjustedCost = costTotal - context.avgPriceEurPerKwh * finalEnergy;
   const adjustedBaseline = baselineCost - context.avgPriceEurPerKwh * finalEnergy;
   const projectedSavings = adjustedBaseline - adjustedCost;
-  const projectedGridPowerW = context.totalDurationHours > 0
-    ? (gridEnergyTotalKwh / context.totalDurationHours) * WATTS_PER_KW
-    : 0;
+  const projectedGridPowerW = powerWattsFromEnergyKwh(gridEnergyTotalKwh, context.totalDurationHours);
 
   const shouldChargeFromGrid = gridChargeTotalKwh > 0.001;
   const hasOracleEntries = oracleEntries.length > 0;
@@ -588,7 +569,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     let deltaSoCSteps = transition.deltaSoCSteps;
     let energyChangeKwh = deltaSoCSteps * energyPerStepKwh;
     const importPrice = profile.priceTotal;
-    baselineCost += computeSlotCost(profile.baselineGridEnergyKwh, importPrice, feedInTariff);
+    baselineCost += computeGridCostEur(profile.baselineGridEnergyKwh, importPrice, feedInTariff);
     let gridEnergyKwh = profile.loadAfterDirectUseKwh + energyChangeKwh - profile.availableSolarKwh;
 
     // During rollout we adapt transitions again if solar surplus would otherwise force an export
@@ -610,7 +591,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       gridEnergyKwh = 0;
     }
 
-    costTotal += computeSlotCost(gridEnergyKwh, importPrice, feedInTariff);
+    costTotal += computeGridCostEur(gridEnergyKwh, importPrice, feedInTariff);
     gridEnergyTotalKwh += gridEnergyKwh;
     const baselineGridImportKwh = profile.baselineGridImportKwh;
     const gridImportKwh = Math.max(0, gridEnergyKwh);
@@ -628,7 +609,9 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
         : profile.slot.start.toISOString();
     const startSocPercent = socStepIter * context.socPercentStep;
     const endSocPercent = nextSoCStep * context.socPercentStep;
-    const normalizedGridEnergyWh = Number.isFinite(gridEnergyKwh) ? gridEnergyKwh * WATTS_PER_KW : null;
+    const normalizedGridEnergyWh = Number.isFinite(gridEnergyKwh)
+      ? gridEnergyKwh * 1000
+      : null;
     const isHoldTransition =
       Math.abs(deltaSoCSteps) === 0 &&
       Math.abs(energyChangeKwh) <= HOLD_ENERGY_THRESHOLD_KWH &&
@@ -651,6 +634,22 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
   }
 
   return {socPathSteps, costTotal, baselineCost, gridEnergyTotalKwh, gridChargeTotalKwh, oracleEntries};
+}
+
+function energyKwhFromPowerWatts(powerWatts: number, durationHours: number): number {
+  return energyFromPower(Power.fromWatts(powerWatts), Duration.fromHours(durationHours)).kilowattHours;
+}
+
+function powerWattsFromEnergyKwh(energyKwh: number, durationHours: number): number {
+  return powerFromEnergy(Energy.fromKilowattHours(energyKwh), Duration.fromHours(durationHours)).watts;
+}
+
+function computeGridCostEur(gridEnergyKwh: number, importPriceEur: number, feedInTariffEur: number): number {
+  return computeGridEnergyCostEur(
+    Energy.fromKilowattHours(gridEnergyKwh),
+    EnergyPrice.fromEurPerKwh(importPriceEur),
+    EnergyPrice.fromEurPerKwh(feedInTariffEur),
+  );
 }
 
 function adjustForPvExportDuringRollout(
