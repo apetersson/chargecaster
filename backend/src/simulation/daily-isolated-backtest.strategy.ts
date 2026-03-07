@@ -125,6 +125,11 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
     const feedInTariffEur = Math.max(0, Number(config.price.feed_in_tariff_eur_per_kwh ?? 0));
     const houseLoadWFallback = Number(config.logic.house_load_w ?? 1200);
+    const marginalPrice =
+      options?.marginalPrice ?? (options?.snapshot ? this.deriveMarginalDischargePrice(options.snapshot, config) : null);
+    if (marginalPrice == null) {
+      return this.emptyResult("Missing marginal price for backtest");
+    }
 
     const firstSoc = history[0].battery_soc_percent;
     if (firstSoc == null || !Number.isFinite(firstSoc)) {
@@ -134,9 +139,11 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     let simSocPercent = Number.isFinite(options?.initialSimSocPercent)
       ? Number(options?.initialSimSocPercent)
       : firstSoc;
+    const initialRelativeSocDiffPercent = firstSoc - simSocPercent;
     const intervals: BacktestResult["intervals"] = [];
     let actualTotalCost = 0;
     let simulatedTotalCost = 0;
+    let cumulativeCashSavings = 0;
 
     for (let i = 0; i < history.length - 1; i += 1) {
       const current = history[i];
@@ -191,6 +198,12 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
         : actualGridKwh * feedInTariffEur;
 
       const netLoadW = siteDemandW - solarPowerW;
+      const simulatedSocStartPercent = simSocPercent;
+      const actualChargePowerW = Math.max(0, -inferredBatteryPowerW);
+      const actualSolarSurplusW = Math.max(0, solarPowerW - siteDemandW);
+      const actualChargeFromSolarW = Math.min(actualChargePowerW, actualSolarSurplusW);
+      const actualChargeFromGridW = Math.max(0, actualChargePowerW - actualChargeFromSolarW);
+      let simulatedChargeFromSolarW = 0;
 
       let simGridPowerW: number;
       if (netLoadW > 0) {
@@ -214,6 +227,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
           : headroomKwh;
         const surplusKwh = (surplusW / WATTS_PER_KW) * durationHours;
         const chargeKwh = Math.max(0, Math.min(surplusKwh, headroomKwh, maxChargeKwh));
+        simulatedChargeFromSolarW = durationHours > 0 ? (chargeKwh / durationHours) * WATTS_PER_KW : 0;
 
         const socGain = (chargeKwh / capacityKwh) * 100;
         simSocPercent = Math.min(100, simSocPercent + socGain);
@@ -229,9 +243,14 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
 
       actualTotalCost += actualCost;
       simulatedTotalCost += simCost;
+      const cashSavings = simCost - actualCost;
+      cumulativeCashSavings += cashSavings;
+      const relativeSocDiffPercent = (nextSocPercent - simSocPercent) - initialRelativeSocDiffPercent;
+      const inventoryValue = (relativeSocDiffPercent / 100) * capacityKwh * marginalPrice;
 
       intervals.push({
         timestamp: current.timestamp,
+        end_timestamp: next.timestamp,
         duration_hours: durationHours,
         price_eur_per_kwh: priceEur,
         home_power_w: homePowerW,
@@ -240,26 +259,28 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
         solar_power_w: solarPowerW,
         actual_grid_power_w: actualGridPowerW,
         actual_soc_percent: actualSocPercent,
+        simulated_soc_start_percent: simulatedSocStartPercent,
         simulated_soc_percent: simSocPercent,
         simulated_grid_power_w: simGridPowerW,
         actual_cost_eur: actualCost,
         simulated_cost_eur: simCost,
+        cash_savings_eur: cashSavings,
+        cumulative_cash_savings_eur: cumulativeCashSavings,
+        inventory_value_eur: inventoryValue,
+        cumulative_savings_eur: cumulativeCashSavings + inventoryValue,
+        actual_charge_from_solar_w: actualChargeFromSolarW,
+        actual_charge_from_grid_w: actualChargeFromGridW,
+        simulated_charge_from_solar_w: simulatedChargeFromSolarW,
       });
     }
 
     if (intervals.length === 0) {
       return this.emptyResult("No valid intervals in history");
     }
-
-    const marginalPrice =
-      options?.marginalPrice ?? (options?.snapshot ? this.deriveMarginalDischargePrice(options.snapshot, config) : null);
-    if (marginalPrice == null) {
-      return this.emptyResult("Missing marginal price for backtest");
-    }
     const actualFinalSoc = history[history.length - 1].battery_soc_percent ?? simSocPercent;
     const simFinalSoc = simSocPercent;
 
-    const socDiffPercent = actualFinalSoc - simFinalSoc;
+    const socDiffPercent = (actualFinalSoc - simFinalSoc) - initialRelativeSocDiffPercent;
     const socDiffKwh = (socDiffPercent / 100) * capacityKwh;
     const socValueAdj = socDiffKwh * marginalPrice;
 

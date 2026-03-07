@@ -7,6 +7,9 @@ import DatabaseConstructor from "better-sqlite3";
 import type { BacktestResultSummary, HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
 import { backtestResultSummarySchema, historyPointSchema, snapshotPayloadSchema } from "@chargecaster/domain";
 
+const RESET_DAILY_BACKTEST_SUMMARIES_FOR_RELATIVE_SOC_MIGRATION =
+  "2026-03-07-reset-daily-backtest-summaries-for-relative-soc";
+
 export interface SnapshotRecord {
   id: number;
   timestamp: string;
@@ -302,6 +305,13 @@ export class StorageService implements OnModuleDestroy {
         CREATE INDEX IF NOT EXISTS idx_daily_backtest_summaries_config
           ON daily_backtest_summaries (config_fingerprint, date DESC);
     `);
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS app_migrations
+        (
+            id         TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );
+    `);
 
     const hadStrategyColumn = this.tableHasColumn("daily_backtest_summaries", "strategy");
     const hadSimStartColumn = this.tableHasColumn("daily_backtest_summaries", "simulated_start_soc_percent");
@@ -338,6 +348,11 @@ export class StorageService implements OnModuleDestroy {
     if (deleted > 0) {
       this.logger.log(`Removed ${deleted} non-continuous daily backtest summaries`);
     }
+
+    this.applyOneTimeMigration(RESET_DAILY_BACKTEST_SUMMARIES_FOR_RELATIVE_SOC_MIGRATION, () => {
+      const cleared = this.db.prepare("DELETE FROM daily_backtest_summaries").run().changes;
+      this.logger.log(`Cleared ${cleared} daily backtest summaries for relative-SOC accounting migration`);
+    });
   }
 
   private tableHasColumn(table: string, column: string): boolean {
@@ -350,5 +365,18 @@ export class StorageService implements OnModuleDestroy {
       return;
     }
     this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+
+  private applyOneTimeMigration(id: string, action: () => void): void {
+    const existing = this.db.prepare("SELECT id FROM app_migrations WHERE id = ?").get(id) as { id: string } | undefined;
+    if (existing) {
+      return;
+    }
+
+    const txn = this.db.transaction(() => {
+      action();
+      this.db.prepare("INSERT INTO app_migrations (id, applied_at) VALUES (?, ?)").run(id, new Date().toISOString());
+    });
+    txn();
   }
 }
