@@ -7,6 +7,8 @@ import { SummaryService } from "./simulation/summary.service";
 import { OracleService } from "./simulation/oracle.service";
 import { BacktestService } from "./simulation/backtest.service";
 import { BacktestMaterializationService } from "./simulation/backtest-materialization.service";
+import { DAILY_BACKTEST_STRATEGY } from "./simulation/daily-backtest.strategy";
+import { DailyIsolatedBacktestStrategy } from "./simulation/daily-isolated-backtest.strategy";
 import { ConfigFileService } from "./config/config-file.service";
 import { SimulationPreparationService } from "./config/simulation-preparation.service";
 import { SimulationSeedService } from "./config/simulation-seed.service";
@@ -27,6 +29,11 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     HistoryService,
     SummaryService,
     OracleService,
+    DailyIsolatedBacktestStrategy,
+    {
+      provide: DAILY_BACKTEST_STRATEGY,
+      useExisting: DailyIsolatedBacktestStrategy,
+    },
     BacktestService,
     BacktestMaterializationService,
     SimulationSeedService,
