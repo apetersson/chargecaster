@@ -35,10 +35,12 @@ export interface DailyHistoryIndex {
 export interface BuildDailyBacktestOptions {
   snapshot?: SnapshotPayload;
   fallbackMarginalPrice?: number;
+  initialSimSocPercent?: number | null;
 }
 
 export interface DailyBacktestStrategy {
   readonly name: string;
+  readonly requiresSequentialState: boolean;
   run(snapshot: SnapshotPayload, config: SimulationConfig): BacktestResult;
   buildDailyEntry(date: string, config: SimulationConfig, options?: BuildDailyBacktestOptions): DailyBacktestEntry | null;
 }

@@ -15,8 +15,9 @@ const HOURS_24 = 24;
 
 @Injectable()
 export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
-  readonly name = "daily-isolated";
-  private readonly logger = new Logger(DailyIsolatedBacktestStrategy.name);
+  readonly name: string = "daily-isolated";
+  readonly requiresSequentialState: boolean = false;
+  protected readonly logger = new Logger(DailyIsolatedBacktestStrategy.name);
 
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
@@ -36,13 +37,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     if (points.length < 2) {
       return null;
     }
-    const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
-    const nextDayPoints = this.loadUtcDayHistory(this.nextUtcDate(date));
-    const marginalPrice =
-      (nextDayPoints.length >= 2
-        ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFeeEur)
-        : null) ?? options?.fallbackMarginalPrice ?? null;
-
+    const marginalPrice = this.resolveMarginalPrice(date, config, options);
     if (marginalPrice == null && !options?.snapshot) {
       return null;
     }
@@ -57,7 +52,19 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     return {date, result};
   }
 
-  private deriveMarginalPriceFromHistory(points: HistoryPoint[], gridFeeEur: number): number | null {
+  protected resolveMarginalPrice(
+    date: string,
+    config: SimulationConfig,
+    options?: BuildDailyBacktestOptions,
+  ): number | null {
+    const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
+    const nextDayPoints = this.loadUtcDayHistory(this.nextUtcDate(date));
+    return (nextDayPoints.length >= 2
+      ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFeeEur)
+      : null) ?? options?.fallbackMarginalPrice ?? null;
+  }
+
+  protected deriveMarginalPriceFromHistory(points: HistoryPoint[], gridFeeEur: number): number | null {
     let totalWeightedPrice = 0;
     let totalHours = 0;
     for (let i = 0; i < points.length - 1; i += 1) {
@@ -77,25 +84,26 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     return totalHours > 0 ? totalWeightedPrice / totalHours : null;
   }
 
-  private nextUtcDate(date: string): string {
+  protected nextUtcDate(date: string): string {
     const value = new Date(`${date}T00:00:00Z`);
     value.setUTCDate(value.getUTCDate() + 1);
     return value.toISOString().slice(0, 10);
   }
 
-  private loadUtcDayHistory(date: string): HistoryPoint[] {
+  protected loadUtcDayHistory(date: string): HistoryPoint[] {
     const start = `${date}T00:00:00.000Z`;
     const end = `${this.nextUtcDate(date)}T00:00:00.000Z`;
     const records = this.storage.listHistoryRangeAsc(start, end);
     return normalizeHistoryList(records.map((record) => record.payload));
   }
 
-  private runForHistory(
+  protected runForHistory(
     history: HistoryPoint[],
     config: SimulationConfig,
     options?: {
       snapshot?: SnapshotPayload;
       marginalPrice?: number;
+      initialSimSocPercent?: number | null;
     },
   ): BacktestResult {
     if (history.length < 2) {
@@ -123,7 +131,9 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       return this.emptyResult("First history point has no SOC");
     }
 
-    let simSocPercent = firstSoc;
+    let simSocPercent = Number.isFinite(options?.initialSimSocPercent)
+      ? Number(options?.initialSimSocPercent)
+      : firstSoc;
     const intervals: BacktestResult["intervals"] = [];
     let actualTotalCost = 0;
     let simulatedTotalCost = 0;
@@ -284,14 +294,14 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     };
   }
 
-  private loadLast24hHistory(): HistoryPoint[] {
+  protected loadLast24hHistory(): HistoryPoint[] {
     const records = this.storage.listHistory(500);
     const allPoints = normalizeHistoryList(records.map((record) => record.payload));
     const cutoff = Date.now() - HOURS_24 * MS_PER_HOUR;
     return allPoints.filter((point) => new Date(point.timestamp).getTime() >= cutoff);
   }
 
-  private deriveMarginalDischargePrice(snapshot: SnapshotPayload, config: SimulationConfig): number {
+  protected deriveMarginalDischargePrice(snapshot: SnapshotPayload, config: SimulationConfig): number {
     const gridFee = Number(config.price.grid_fee_eur_per_kwh ?? 0);
     const eras = snapshot.forecast_eras;
     const oracle = snapshot.oracle_entries;
@@ -351,7 +361,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       : gridFee;
   }
 
-  private emptyResult(reason: string): BacktestResult {
+  protected emptyResult(reason: string): BacktestResult {
     this.logger.warn(`Backtest skipped: ${reason}`);
     return {
       generated_at: new Date().toISOString(),
@@ -370,7 +380,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     };
   }
 
-  private inferObservedBatteryPowerW(
+  protected inferObservedBatteryPowerW(
     currentSocPercent: number,
     nextSocPercent: number,
     capacityKwh: number,

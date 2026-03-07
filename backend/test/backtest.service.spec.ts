@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
 import { BacktestService } from "../src/simulation/backtest.service";
-import { DailyIsolatedBacktestStrategy } from "../src/simulation/daily-isolated-backtest.strategy";
+import { ContinuousBacktestStrategy } from "../src/simulation/continuous-backtest.strategy";
 import { StorageService, type HistoryRecord } from "../src/storage/storage.service";
 
 function createHistoryPoint(timestamp: string, batterySocPercent = 50): HistoryPoint {
@@ -99,7 +99,7 @@ afterEach(() => {
 });
 
 function createService(storage: StorageService): BacktestService {
-  return new BacktestService(storage, new DailyIsolatedBacktestStrategy(storage));
+  return new BacktestService(storage, new ContinuousBacktestStrategy(storage));
 }
 
 describe("BacktestService daily history", () => {
@@ -253,6 +253,70 @@ describe("BacktestService inferred site demand", () => {
     expect(result.intervals[0]?.site_demand_power_w).toBeCloseTo(9000, 6);
     expect(result.intervals[0]?.synthetic_hidden_load_w).toBeCloseTo(5000, 6);
     expect(result.intervals[0]?.simulated_grid_power_w).toBeCloseTo(2500, 6);
+  });
+});
+
+describe("BacktestService continuous daily carry", () => {
+  it("carries simulated SOC across consecutive days instead of resetting at midnight", () => {
+    const createLowLoadDay = (date: string) => {
+      const points = createDay(date);
+      return points.map((point) => ({
+        ...point,
+        battery_soc_percent: 80,
+        solar_power_w: 2400,
+        home_power_w: 0,
+        grid_power_w: -2400,
+      }));
+    };
+    const createHighLoadDay = (date: string) => {
+      const points = createDay(date);
+      return points.map((point) => ({
+        ...point,
+        battery_soc_percent: 80,
+        solar_power_w: 0,
+        home_power_w: 4200,
+        grid_power_w: 4200,
+      }));
+    };
+
+    const allPoints = [
+      ...createLowLoadDay("2026-03-05"),
+      ...createHighLoadDay("2026-03-06"),
+      ...createDay("2026-03-07"),
+    ];
+    const storage = {
+      listHistoryDayStatsBefore: () => [
+        {
+          date: "2026-03-07",
+          firstTimestamp: "2026-03-07T00:00:00.000Z",
+          lastTimestamp: "2026-03-07T23:55:00.000Z",
+          pointCount: 288,
+        },
+        {
+          date: "2026-03-06",
+          firstTimestamp: "2026-03-06T00:00:00.000Z",
+          lastTimestamp: "2026-03-06T23:55:00.000Z",
+          pointCount: 288,
+        },
+        {
+          date: "2026-03-05",
+          firstTimestamp: "2026-03-05T00:00:00.000Z",
+          lastTimestamp: "2026-03-05T23:55:00.000Z",
+          pointCount: 288,
+        },
+      ],
+      listHistoryRangeAsc: (startInclusive: string, endExclusive: string) =>
+        toHistoryRecords(allPoints.filter((point) => point.timestamp >= startInclusive && point.timestamp < endExclusive)),
+      listDailyBacktestSummaries: () => [],
+      upsertDailyBacktestSummaries: () => undefined,
+    } as unknown as StorageService;
+
+    const service = createService(storage);
+    const page = service.runDailyHistory(snapshot, config, 2, 0);
+    const latestDay = page.entries.find((entry) => entry.date === "2026-03-06");
+
+    expect(latestDay?.result.intervals[0]?.simulated_soc_percent).toBeGreaterThan(80);
+    expect(latestDay?.result.simulated_final_soc_percent).toBe(5);
   });
 });
 
