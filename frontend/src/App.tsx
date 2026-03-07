@@ -116,7 +116,7 @@ function App(): JSX.Element {
       <section className="card chart">
         <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
           <div style={{display: "flex", alignItems: "center", gap: 8}}>
-            <h2 style={{marginRight: 8}}>SOC over time</h2>
+            <h2 style={{marginRight: 8}}>Charge Planning</h2>
           </div>
           <div className="chart-controls" role="group" aria-label="Chart display">
             <button
