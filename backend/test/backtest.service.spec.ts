@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
 import { BacktestService } from "../src/simulation/backtest.service";
+import { DailyIsolatedBacktestStrategy } from "../src/simulation/daily-isolated-backtest.strategy";
 import { StorageService, type HistoryRecord } from "../src/storage/storage.service";
 
 function createHistoryPoint(timestamp: string, batterySocPercent = 50): HistoryPoint {
@@ -97,6 +98,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function createService(storage: StorageService): BacktestService {
+  return new BacktestService(storage, new DailyIsolatedBacktestStrategy(storage));
+}
+
 describe("BacktestService daily history", () => {
   it("skips partial UTC days near the history boundary", () => {
     const fullDay = createDay("2026-03-05");
@@ -122,7 +127,7 @@ describe("BacktestService daily history", () => {
       upsertDailyBacktestSummaries: () => undefined,
     } as unknown as StorageService;
 
-    const service = new BacktestService(storage);
+    const service = createService(storage);
     const page = service.runDailyHistory(snapshot, config, 7, 0);
 
     expect(page.hasMore).toBe(false);
@@ -189,7 +194,7 @@ describe("BacktestService daily history", () => {
       upsertDailyBacktestSummaries,
     } as unknown as StorageService;
 
-    const service = new BacktestService(storage);
+    const service = createService(storage);
     const page = service.runDailyHistory(snapshot, config, 2, 0);
 
     expect(page.entries.map((entry) => entry.date)).toEqual(["2026-03-07", "2026-03-06"]);
@@ -239,7 +244,7 @@ describe("BacktestService inferred site demand", () => {
       listHistory: () => toHistoryRecords(history),
     } as Pick<StorageService, "listHistory"> as StorageService;
 
-    const service = new BacktestService(storage);
+    const service = createService(storage);
     const result = service.run(snapshot, config);
 
     expect(result.history_points_used).toBe(2);
@@ -290,7 +295,7 @@ describe("StorageService listAllHistoryAsc", () => {
     process.env.CHARGECASTER_STORAGE_PATH = dbPath;
 
     const storage = new StorageService();
-    const service = new BacktestService(storage);
+    const service = createService(storage);
 
     try {
       storage.appendHistory([
@@ -323,7 +328,7 @@ describe("StorageService listAllHistoryAsc", () => {
     process.env.CHARGECASTER_STORAGE_PATH = dbPath;
 
     const storage = new StorageService();
-    const service = new BacktestService(storage);
+    const service = createService(storage);
 
     try {
       storage.appendHistory([
