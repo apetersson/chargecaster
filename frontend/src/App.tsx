@@ -4,6 +4,7 @@ import HistoryTable from "./components/HistoryTable";
 import MessageList from "./components/MessageList";
 import SummaryCards from "./components/SummaryCards";
 import TrajectoryTable from "./components/TrajectoryTable";
+import BacktestCard from "./components/BacktestCard";
 import { trpcClient } from "./api/trpc";
 import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChart";
 import type {
@@ -132,6 +133,8 @@ function App(): JSX.Element {
       </section>
 
       <SummaryCards data={summary}/>
+
+      <BacktestCard />
 
       <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries} summary={summary}/>
 

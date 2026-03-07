@@ -8,6 +8,9 @@ import { ForecastService } from "../simulation/forecast.service";
 import { HistoryService } from "../simulation/history.service";
 import { SummaryService } from "../simulation/summary.service";
 import { OracleService } from "../simulation/oracle.service";
+import { BacktestService } from "../simulation/backtest.service";
+import { RuntimeConfigService } from "../config/runtime-config.service";
+import { SimulationConfigFactory } from "../config/simulation-config.factory";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -87,6 +90,9 @@ export class TrpcRouter {
     @Inject(HistoryService) private readonly historyService: HistoryService,
     @Inject(SummaryService) private readonly summaryService: SummaryService,
     @Inject(OracleService) private readonly oracleService: OracleService,
+    @Inject(BacktestService) private readonly backtestService: BacktestService,
+    @Inject(RuntimeConfigService) private readonly runtimeConfig: RuntimeConfigService,
+    @Inject(SimulationConfigFactory) private readonly configFactory: SimulationConfigFactory,
   ) {
     this.router = t.router({
       health: t.procedure.query(() => {
@@ -137,6 +143,12 @@ export class TrpcRouter {
           const service = ctx.simulationService ?? this.simulationService;
           this.logger.log("tRPC.dashboard.loadFixture requested");
           return service.ensureSeedFromFixture();
+        }),
+        backtest: t.procedure.query(() => {
+          this.logger.log("tRPC.dashboard.backtest requested");
+          const snapshot = this.simulationService.ensureSeedFromFixture();
+          const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
+          return this.backtestService.run(snapshot, simConfig);
         }),
       }),
     });
