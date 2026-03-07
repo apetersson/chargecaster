@@ -22,6 +22,9 @@ export interface HistoryRecord {
 export interface DailyBacktestSummaryRecord {
   date: string;
   configFingerprint: string;
+  strategy: string;
+  simulatedStartSocPercent: number;
+  simulatedFinalSocPercent: number;
   updatedAt: string;
   payload: BacktestResultSummary;
 }
@@ -174,6 +177,9 @@ export class StorageService implements OnModuleDestroy {
   upsertDailyBacktestSummaries(entries: {
     date: string;
     configFingerprint: string;
+    strategy: string;
+    simulatedStartSocPercent: number;
+    simulatedFinalSocPercent: number;
     payload: BacktestResultSummary;
   }[]): void {
     if (!entries.length) {
@@ -181,16 +187,35 @@ export class StorageService implements OnModuleDestroy {
     }
     this.logger.log(`Upserting ${entries.length} daily backtest summaries`);
     const stmt = this.db.prepare(`
-      INSERT INTO daily_backtest_summaries (date, config_fingerprint, updated_at, payload)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO daily_backtest_summaries (
+        date,
+        config_fingerprint,
+        strategy,
+        simulated_start_soc_percent,
+        simulated_final_soc_percent,
+        updated_at,
+        payload
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(date, config_fingerprint) DO UPDATE SET
+        strategy = excluded.strategy,
+        simulated_start_soc_percent = excluded.simulated_start_soc_percent,
+        simulated_final_soc_percent = excluded.simulated_final_soc_percent,
         updated_at = excluded.updated_at,
         payload = excluded.payload
     `);
     const txn = this.db.transaction((items: typeof entries) => {
       const updatedAt = new Date().toISOString();
       for (const entry of items) {
-        stmt.run(entry.date, entry.configFingerprint, updatedAt, JSON.stringify(entry.payload));
+        stmt.run(
+          entry.date,
+          entry.configFingerprint,
+          entry.strategy,
+          entry.simulatedStartSocPercent,
+          entry.simulatedFinalSocPercent,
+          updatedAt,
+          JSON.stringify(entry.payload),
+        );
       }
     });
     txn(entries);
@@ -205,7 +230,14 @@ export class StorageService implements OnModuleDestroy {
     );
     const placeholders = dates.map(() => "?").join(", ");
     const stmt = this.db.prepare(`
-      SELECT date, config_fingerprint, updated_at, payload
+      SELECT
+        date,
+        config_fingerprint,
+        strategy,
+        simulated_start_soc_percent,
+        simulated_final_soc_percent,
+        updated_at,
+        payload
       FROM daily_backtest_summaries
       WHERE config_fingerprint = ?
         AND date IN (${placeholders})
@@ -214,12 +246,18 @@ export class StorageService implements OnModuleDestroy {
     const rows = stmt.all(configFingerprint, ...dates) as {
       date: string;
       config_fingerprint: string;
+      strategy: string;
+      simulated_start_soc_percent: number;
+      simulated_final_soc_percent: number;
       updated_at: string;
       payload: string;
     }[];
     return rows.map((row) => ({
       date: row.date,
       configFingerprint: row.config_fingerprint,
+      strategy: row.strategy,
+      simulatedStartSocPercent: row.simulated_start_soc_percent,
+      simulatedFinalSocPercent: row.simulated_final_soc_percent,
       updatedAt: row.updated_at,
       payload: backtestResultSummarySchema.parse(JSON.parse(row.payload)),
     }));
@@ -252,6 +290,9 @@ export class StorageService implements OnModuleDestroy {
         (
             date               TEXT NOT NULL,
             config_fingerprint TEXT NOT NULL,
+            strategy           TEXT NOT NULL DEFAULT 'continuous',
+            simulated_start_soc_percent REAL NOT NULL DEFAULT 0,
+            simulated_final_soc_percent REAL NOT NULL DEFAULT 0,
             updated_at         TEXT NOT NULL,
             payload            TEXT NOT NULL,
             PRIMARY KEY (date, config_fingerprint)
@@ -261,5 +302,53 @@ export class StorageService implements OnModuleDestroy {
         CREATE INDEX IF NOT EXISTS idx_daily_backtest_summaries_config
           ON daily_backtest_summaries (config_fingerprint, date DESC);
     `);
+
+    const hadStrategyColumn = this.tableHasColumn("daily_backtest_summaries", "strategy");
+    const hadSimStartColumn = this.tableHasColumn("daily_backtest_summaries", "simulated_start_soc_percent");
+    const hadSimFinalColumn = this.tableHasColumn("daily_backtest_summaries", "simulated_final_soc_percent");
+
+    this.addColumnIfMissing(
+      "daily_backtest_summaries",
+      "strategy",
+      "TEXT NOT NULL DEFAULT 'continuous'",
+    );
+    this.addColumnIfMissing(
+      "daily_backtest_summaries",
+      "simulated_start_soc_percent",
+      "REAL NOT NULL DEFAULT 0",
+    );
+    this.addColumnIfMissing(
+      "daily_backtest_summaries",
+      "simulated_final_soc_percent",
+      "REAL NOT NULL DEFAULT 0",
+    );
+
+    if (!hadStrategyColumn || !hadSimStartColumn || !hadSimFinalColumn) {
+      const deleted = this.db.prepare("DELETE FROM daily_backtest_summaries").run().changes;
+      if (deleted > 0) {
+        this.logger.log(`Cleared ${deleted} legacy daily backtest summaries after continuous migration`);
+      }
+      return;
+    }
+
+    const deleted = this.db.prepare(`
+      DELETE FROM daily_backtest_summaries
+      WHERE strategy IS NULL OR strategy != 'continuous'
+    `).run().changes;
+    if (deleted > 0) {
+      this.logger.log(`Removed ${deleted} non-continuous daily backtest summaries`);
+    }
+  }
+
+  private tableHasColumn(table: string, column: string): boolean {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    return rows.some((row) => row.name === column);
+  }
+
+  private addColumnIfMissing(table: string, column: string, definition: string): void {
+    if (this.tableHasColumn(table, column)) {
+      return;
+    }
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
