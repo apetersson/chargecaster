@@ -10,7 +10,7 @@ fronius:
 
 evcc:
   enabled: true
-  base_url: http://biene.internal:7070
+  base_url: http://hamster.internal:7070
 
 price:
   grid_fee_eur_per_kwh: 0.11
