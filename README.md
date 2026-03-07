@@ -38,7 +38,7 @@ API while a Vite bundle renders the UI.
 
 ## Prerequisites
 
-- **Node.js 20+** and **Yarn 1.22+** for development builds.
+- **Node.js 20+** and **pnpm 9+** for development builds (`npm install -g pnpm` or via [corepack](https://pnpm.io/installation#using-corepack)).
 - **Docker 24+** (optional) for container workflows.
 - Native build tools (`xcode-select --install` on macOS or `build-essential` + `python3` on Debian/Ubuntu) for
   `better-sqlite3`.
@@ -52,12 +52,14 @@ Quickstart (two terminals):
 Terminal A – API/backend (API‑only)
 
 ```bash
+# From the repo root — installs all workspaces
+pnpm install
+
 cd backend
-yarn install
 # Dev mode with auto‑reload (tsx)
-yarn backend:dev:api
+pnpm backend:dev:api
 # or single run without static files
-yarn start:api
+pnpm start:api
 ```
 
 Notes:
@@ -70,9 +72,8 @@ Notes:
 Terminal B – Web/frontend (Vite)
 
 ```bash
-cd ../frontend
-yarn install
-VITE_TRPC_URL=http://localhost:4000/trpc yarn dev
+cd frontend
+VITE_TRPC_URL=http://localhost:4000/trpc pnpm dev
 ```
 
 - Serves the dashboard at `http://localhost:5173`.
@@ -83,25 +84,21 @@ is persisted to `data/db/backend.sqlite` so subsequent loads reuse the latest op
 
 ### Lint / Typecheck / Build (all subprojects)
 
-Option A — Workspaces (recommended):
+From the repo root (workspaces):
 
 ```bash
-yarn bootstrap
-yarn lint:all
-yarn typecheck:all
-yarn build:all
+pnpm install
+pnpm lint:all
+pnpm typecheck:all
+pnpm build:all
 ```
 
-Option B — Per project:
-
-```bash
-(cd packages/domain  && yarn install && yarn build)
-(cd backend          && yarn install && yarn lint && yarn typecheck && yarn build)
-(cd frontend         && yarn install && yarn lint && yarn typecheck && yarn build)
-```
+> **Note on `better-sqlite3`**: pnpm 10 requires explicit build-script approval. The root `package.json`
+> already includes `pnpm.onlyBuiltDependencies` for `better-sqlite3`. If the native addon is missing
+> after a fresh install, run `pnpm rebuild better-sqlite3`.
 
 In dev mode the backend and frontend import the domain package via TS path aliases; for production builds, the domain
-package should be built first so `dist/` is available (handled by `yarn build:all`).
+package should be built first so `dist/` is available (handled by `pnpm build:all`).
 
 ---
 
@@ -131,19 +128,18 @@ Backend:
 
 ```bash
 cd backend
-yarn lint
-yarn typecheck
-yarn test
-yarn test:e2e
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm test:e2e
 ```
 
 Frontend:
 
 ```bash
 cd frontend
-yarn lint
-yarn test        # if suites exist
-yarn build
+pnpm lint
+pnpm build
 ```
 
 ---
@@ -250,9 +246,9 @@ Environment flags:
 
 - **Resetting state**: stop the container and delete `data/db/backend.sqlite`; the backend will reseed from fixtures.
 - **CORS errors**: ensure the frontend points to the same origin or update Fastify CORS rules in `backend/src/main.ts`.
-- **better-sqlite3 build failures**: confirm build tooling is installed before running `yarn install` or building the
-  Docker image.
-- **Updating dependencies**: run `yarn upgrade` in each project and rebuild the Docker image.
+- **better-sqlite3 build failures**: confirm build tooling is installed, then run `pnpm rebuild better-sqlite3`. The
+  Docker build runs this automatically via `onlyBuiltDependencies`.
+- **Updating dependencies**: run `pnpm update` from the repo root and rebuild the Docker image.
 
 ---
 

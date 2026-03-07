@@ -37,6 +37,11 @@ export interface BacktestResult {
   span_hours: number;
 }
 
+export interface DailyBacktestEntry {
+  date: string;
+  result: BacktestResult;
+}
+
 @Injectable()
 export class BacktestService {
   private readonly logger = new Logger(BacktestService.name);
@@ -47,6 +52,47 @@ export class BacktestService {
 
   run(snapshot: SnapshotPayload, config: SimulationConfig): BacktestResult {
     const history = this.loadLast24hHistory();
+    return this.runForHistory(history, snapshot, config);
+  }
+
+  runDailyHistory(snapshot: SnapshotPayload, config: SimulationConfig): DailyBacktestEntry[] {
+    const records = this.storage.listAllHistoryAsc();
+    const allPoints = normalizeHistoryList(records.map((r) => r.payload));
+
+    const byDay = new Map<string, HistoryPoint[]>();
+    for (const point of allPoints) {
+      const day = point.timestamp.slice(0, 10); // "YYYY-MM-DD" UTC
+      let bucket = byDay.get(day);
+      if (!bucket) {
+        bucket = [];
+        byDay.set(day, bucket);
+      }
+      bucket.push(point);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const marginalPrice = this.deriveMarginalDischargePrice(snapshot, config);
+
+    const results: DailyBacktestEntry[] = [];
+    for (const [date, points] of byDay) {
+      if (date >= today) continue; // skip today and future
+      if (points.length < 2) continue;
+      const result = this.runForHistory(points, snapshot, config, marginalPrice);
+      if (result.history_points_used < 2) continue;
+      results.push({ date, result });
+    }
+
+    results.sort((a, b) => a.date.localeCompare(b.date));
+    this.logger.log(`Daily backtest: computed ${results.length} calendar days`);
+    return results;
+  }
+
+  private runForHistory(
+    history: HistoryPoint[],
+    snapshot: SnapshotPayload,
+    config: SimulationConfig,
+    precomputedMarginalPrice?: number,
+  ): BacktestResult {
     if (history.length < 2) {
       return this.emptyResult("Not enough history data for backtest");
     }
@@ -174,7 +220,7 @@ export class BacktestService {
     // Value remaining SOC at the marginal discharge price: the weighted-average price of
     // eras where the simulation expects the battery to actually discharge (strategy=auto with
     // negative grid_energy). This reflects what the stored energy is truly worth.
-    const marginalPrice = this.deriveMarginalDischargePrice(snapshot, config);
+    const marginalPrice = precomputedMarginalPrice ?? this.deriveMarginalDischargePrice(snapshot, config);
     const actualFinalSoc = history[history.length - 1].battery_soc_percent ?? simSocPercent;
     const simFinalSoc = simSocPercent;
 
