@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import { type JSX, useMemo } from "react";
 
 import type { HistoryPoint } from "../types";
 import { formatDate, formatNumber, formatPercent } from "../utils/format";
@@ -7,14 +7,18 @@ type HistoryTableProps = {
   history: HistoryPoint[];
 };
 
+function sortHistoryRows(history: HistoryPoint[]): HistoryPoint[] {
+  return [...history].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+}
+
 function HistoryTable({history}: HistoryTableProps): JSX.Element | null {
-  if (!history.length) {
+  const rows = useMemo(() => sortHistoryRows(history), [history]);
+
+  if (!rows.length) {
     return null;
   }
-
-  const rows = [...history].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
 
   return (
     <section className="card">

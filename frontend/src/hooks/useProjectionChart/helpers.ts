@@ -1,14 +1,7 @@
-import { TimeSlot } from "@chargecaster/domain";
-
-import type {
-  ForecastEra,
-  ForecastSourcePayload,
-  HistoryPoint,
-  OracleEntry,
-} from "../../types";
+import type { HistoryPoint } from "../../types";
 
 import { DEFAULT_POWER_BOUNDS, DEFAULT_PRICE_BOUNDS, DEFAULT_SLOT_DURATION_MS, GAP_THRESHOLD_MS } from "./constants";
-import type { AxisBounds, DerivedEra, ProjectionPoint, TimeRangeMs } from "./types";
+import type { AxisBounds, ProjectionPoint, TimeRangeMs } from "./types";
 
 export const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -58,135 +51,6 @@ export const pushGapPoint = (target: ProjectionPoint[], time: number | null | un
     return;
   }
   target.push({x: time, y: Number.NaN, source: "gap"});
-};
-
-export const buildOracleLookup = (entries: OracleEntry[]): Map<string, OracleEntry> => {
-  const lookup = new Map<string, OracleEntry>();
-  for (const entry of entries) {
-    if (entry.era_id.length === 0) {
-      continue;
-    }
-    lookup.set(entry.era_id, entry);
-    const timestamp = parseTimestamp(entry.era_id);
-    if (timestamp !== null) {
-      lookup.set(String(timestamp), entry);
-    }
-  }
-  return lookup;
-};
-
-export const resolveOracleEntry = (
-  era: ForecastEra,
-  lookup: Map<string, OracleEntry>,
-): OracleEntry | undefined => {
-  if (era.era_id.length > 0) {
-    const direct = lookup.get(era.era_id);
-    if (direct) {
-      return direct;
-    }
-    const normalizedEraId = parseTimestamp(era.era_id);
-    if (normalizedEraId !== null) {
-      const byEraIdTimestamp = lookup.get(String(normalizedEraId));
-      if (byEraIdTimestamp) {
-        return byEraIdTimestamp;
-      }
-    }
-  }
-
-  const startTimestamp = parseTimestamp(era.start);
-  if (startTimestamp !== null) {
-    const byStart = lookup.get(String(startTimestamp));
-    if (byStart) {
-      return byStart;
-    }
-  }
-
-  return undefined;
-};
-
-export const derivePowerFromEnergy = (
-  energyWh: number | null | undefined,
-  durationHours?: number | null,
-): number | null => {
-  if (!isFiniteNumber(energyWh)) {
-    return null;
-  }
-  const hours = typeof durationHours === "number" && durationHours > 0 ? durationHours : 1;
-  if (hours <= 0) {
-    return null;
-  }
-  const power = energyWh / hours;
-  return Number.isFinite(power) ? power : null;
-};
-
-export const extractCostPrice = (era: ForecastEra): number | null => {
-  const costSource = era.sources.find(
-    (source): source is Extract<ForecastSourcePayload, { type: "cost" }> => source.type === "cost",
-  );
-  if (!costSource) {
-    return null;
-  }
-  const priceWithFee = costSource.payload.price_with_fee_ct_per_kwh;
-  if (Number.isFinite(priceWithFee)) {
-    return priceWithFee;
-  }
-  const backupPrice = costSource.payload.price_ct_per_kwh;
-  return Number.isFinite(backupPrice) ? backupPrice : null;
-};
-
-export const extractSolarAverageWatts = (era: ForecastEra, slot: TimeSlot | null): number | null => {
-  const solarSource = era.sources.find(
-    (source): source is Extract<ForecastSourcePayload, { type: "solar" }> => source.type === "solar",
-  );
-  if (!solarSource) {
-    return null;
-  }
-  const energyWh = solarSource.payload.energy_wh;
-  const durationHours = slot?.duration.hours ?? null;
-  if (durationHours && durationHours > 0) {
-    return solarSource.payload.average_power_w ?? energyWh / durationHours;
-  }
-  return solarSource.payload.average_power_w ?? null;
-};
-
-export const buildFutureEras = (forecast: ForecastEra[], oracleEntries: OracleEntry[]): DerivedEra[] => {
-  const oracleLookup = buildOracleLookup(oracleEntries);
-
-  const now = Date.now();
-  const derived: DerivedEra[] = [];
-  for (const era of forecast) {
-    const startMs = parseTimestamp(era.start);
-    if (startMs === null) {
-      continue;
-    }
-    const rawEndMs = parseTimestamp(era.end);
-    const endMs = rawEndMs ?? startMs + DEFAULT_SLOT_DURATION_MS;
-    if (endMs <= Math.max(startMs, now)) {
-      continue;
-    }
-    let slot: TimeSlot;
-    try {
-      slot = TimeSlot.fromDates(new Date(startMs), new Date(endMs));
-    } catch (error) {
-      void error;
-      continue;
-    }
-    const price = extractCostPrice(era);
-    const solarAverage = extractSolarAverageWatts(era, slot);
-    const oracle = resolveOracleEntry(era, oracleLookup);
-
-    derived.push({
-      era,
-      oracle,
-      slot,
-      startMs,
-      endMs,
-      priceCtPerKwh: price,
-      solarAverageW: solarAverage,
-    });
-  }
-
-  return derived.sort((a, b) => a.startMs - b.startMs);
 };
 
 export const sortChronologically = (points: ProjectionPoint[]): ProjectionPoint[] =>
@@ -312,14 +176,19 @@ export const attachHistoryIntervals = (
   historyPoints: ProjectionPoint[],
   futureStart: number | undefined,
 ): void => {
-  const fallbackStart = (current: ProjectionPoint) =>
-    typeof futureStart === "number" ? futureStart : current.x + DEFAULT_SLOT_DURATION_MS;
+  const fallbackStart = (currentX: number) =>
+    typeof futureStart === "number" ? futureStart : currentX + DEFAULT_SLOT_DURATION_MS;
 
   for (let i = 0; i < historyPoints.length; i += 1) {
     const current = historyPoints[i];
+    const currentX = Number(current.x);
+    if (!Number.isFinite(currentX)) {
+      continue;
+    }
     const next = i + 1 < historyPoints.length ? historyPoints[i + 1] : null;
-    const rawEnd = next ? next.x : fallbackStart(current);
-    current.xEnd = rawEnd >= current.x ? rawEnd : current.x + DEFAULT_SLOT_DURATION_MS;
+    const nextX = next ? Number(next.x) : Number.NaN;
+    const rawEnd = Number.isFinite(nextX) ? nextX : fallbackStart(currentX);
+    current.xEnd = rawEnd >= currentX ? rawEnd : currentX + DEFAULT_SLOT_DURATION_MS;
   }
 };
 
