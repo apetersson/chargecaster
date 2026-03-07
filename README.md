@@ -47,37 +47,38 @@ API while a Vite bundle renders the UI.
 
 ## Local Development
 
-Quickstart (two terminals):
-
-Terminal A – API/backend (API‑only)
+**One-command quickstart** (backend + frontend together):
 
 ```bash
-# From the repo root — installs all workspaces
 pnpm install
-
-cd backend
-# Dev mode with auto‑reload (tsx)
-pnpm backend:dev:api
-# or single run without static files
-pnpm start:api
+pnpm dev
 ```
 
-Notes:
+- Backend API at `http://localhost:4000`, frontend at `http://localhost:5173`.
+- Uses `concurrently` to run both processes with colour-coded output.
 
-- Binds to `http://localhost:4000`.
-- Reads `config.local.yaml` by default, or `CHARGECASTER_CONFIG` if set.
-- The backend uses TS path aliases to import the domain package from source (`../packages/domain/src`), so no pre‑build
-  is required in dev.
+Or two separate terminals if you prefer:
 
-Terminal B – Web/frontend (Vite)
+Terminal A – API/backend
+
+```bash
+cd backend
+pnpm backend:dev:api
+```
+
+Terminal B – Web/frontend
 
 ```bash
 cd frontend
 VITE_TRPC_URL=http://localhost:4000/trpc pnpm dev
 ```
 
-- Serves the dashboard at `http://localhost:5173`.
-- Uses `VITE_TRPC_URL` to point to the backend tRPC endpoint (e.g. `http://localhost:4000/trpc`).
+Notes:
+
+- Backend binds to `http://localhost:4000`.
+- Reads `config.local.yaml` by default, or `CHARGECASTER_CONFIG` if set.
+- The backend uses TS path aliases to import the domain package from source (`../packages/domain/src`), so no pre‑build
+  is required in dev.
 
 The dashboard batches tRPC calls such as `dashboard.summary`, `dashboard.history`, and `dashboard.oracle`. Snapshot data
 is persisted to `data/db/backend.sqlite` so subsequent loads reuse the latest optimiser output.

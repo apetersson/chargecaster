@@ -14,12 +14,18 @@
     "build:frontend": "pnpm --filter chargecaster-frontend build",
     "lint:all": "pnpm run lint:backend && pnpm run lint:frontend",
     "typecheck:all": "pnpm run typecheck:backend && pnpm run typecheck:frontend",
-    "build:all": "pnpm run build:domain && pnpm run build:backend && pnpm run build:frontend"
+    "build:all": "pnpm run build:domain && pnpm run build:backend && pnpm run build:frontend",
+    "dev": "concurrently -n backend,frontend -c blue,green \"pnpm --filter chargecaster-backend backend:dev:api\" \"VITE_TRPC_URL=http://localhost:4000/trpc pnpm --filter chargecaster-frontend dev\""
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "jiti": "^2.6.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@nestjs/core", "better-sqlite3", "esbuild"]
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }

@@ -55,10 +55,16 @@ export class BacktestService {
     return this.runForHistory(history, snapshot, config);
   }
 
-  runDailyHistory(snapshot: SnapshotPayload, config: SimulationConfig): DailyBacktestEntry[] {
+  runDailyHistory(
+    snapshot: SnapshotPayload,
+    config: SimulationConfig,
+    limit: number,
+    skip: number,
+  ): { entries: DailyBacktestEntry[]; hasMore: boolean } {
     const records = this.storage.listAllHistoryAsc();
     const allPoints = normalizeHistoryList(records.map((r) => r.payload));
 
+    // Group history points by UTC calendar day (00:00–23:59:59)
     const byDay = new Map<string, HistoryPoint[]>();
     for (const point of allPoints) {
       const day = point.timestamp.slice(0, 10); // "YYYY-MM-DD" UTC
@@ -71,20 +77,63 @@ export class BacktestService {
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const marginalPrice = this.deriveMarginalDischargePrice(snapshot, config);
+    // Collect complete past days newest-first
+    const availableDays = [...byDay.keys()]
+      .filter((day) => day < today && (byDay.get(day)?.length ?? 0) >= 2)
+      .sort((a, b) => b.localeCompare(a));
 
-    const results: DailyBacktestEntry[] = [];
-    for (const [date, points] of byDay) {
-      if (date >= today) continue; // skip today and future
-      if (points.length < 2) continue;
+    const hasMore = skip + limit < availableDays.length;
+    const pageDays = availableDays.slice(skip, skip + limit);
+
+    const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
+    // Snapshot-based marginal price is a fallback when next-day history is unavailable
+    const snapshotMarginalPrice = this.deriveMarginalDischargePrice(snapshot, config);
+
+    const entries: DailyBacktestEntry[] = [];
+    for (const date of pageDays) {
+      const points = byDay.get(date)!;
+      // Marginal discharge price = time-weighted avg price of the FOLLOWING day
+      const nextDay = this.nextUtcDate(date);
+      const nextDayPoints = byDay.get(nextDay);
+      const marginalPrice =
+        (nextDayPoints != null && nextDayPoints.length >= 2
+          ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFeeEur)
+          : null) ?? snapshotMarginalPrice;
+
       const result = this.runForHistory(points, snapshot, config, marginalPrice);
       if (result.history_points_used < 2) continue;
-      results.push({ date, result });
+      entries.push({ date, result });
     }
 
-    results.sort((a, b) => a.date.localeCompare(b.date));
-    this.logger.log(`Daily backtest: computed ${results.length} calendar days`);
-    return results;
+    this.logger.log(`Daily backtest: skip=${skip} limit=${limit} → ${entries.length} days, hasMore=${hasMore}`);
+    return { entries, hasMore };
+  }
+
+  /** Time-weighted average of (price_eur_per_kwh + gridFee) over a set of history points. */
+  private deriveMarginalPriceFromHistory(points: HistoryPoint[], gridFeeEur: number): number | null {
+    let totalWeightedPrice = 0;
+    let totalHours = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p = points[i];
+      if (p.price_eur_per_kwh == null || !Number.isFinite(p.price_eur_per_kwh)) {
+        continue;
+      }
+      const t0 = new Date(p.timestamp).getTime();
+      const t1 = new Date(points[i + 1].timestamp).getTime();
+      const hours = (t1 - t0) / MS_PER_HOUR;
+      if (hours <= 0 || hours > 2) {
+        continue;
+      }
+      totalWeightedPrice += (p.price_eur_per_kwh + gridFeeEur) * hours;
+      totalHours += hours;
+    }
+    return totalHours > 0 ? totalWeightedPrice / totalHours : null;
+  }
+
+  private nextUtcDate(date: string): string {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
   }
 
   private runForHistory(
