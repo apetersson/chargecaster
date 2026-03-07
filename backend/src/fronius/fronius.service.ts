@@ -123,7 +123,7 @@ export class FroniusService {
 
       const targetLabel = payload.target ? `${payload.target.percent.toFixed(1)}%` : "n/a";
       this.logger.verbose(`Fronius payload: ${JSON.stringify(payload.body)}`);
-      let lastError: unknown = null;
+      let lastError: Error | null = null;
       for (const [index, url] of urlCandidates.entries()) {
         const pathHint = new URL(url).pathname;
         await this.loginFroniusSession(froniusConfig, pathHint);
@@ -142,7 +142,7 @@ export class FroniusService {
           lastError = null;
           break;
         } catch (error: unknown) {
-          lastError = error;
+          lastError = error instanceof Error ? error : new Error(String(error));
           const canTryFallback = index < urlCandidates.length - 1;
           if (!canTryFallback || !this.isHttp404(error)) {
             throw error;
@@ -408,7 +408,7 @@ export class FroniusService {
     query: Record<string, string> = {},
   ): string[] {
     const preferredPrefix = this.workingCommandsPrefix ?? this.extractApiPrefix(pathHint);
-    const prefixes: Array<"/api" | ""> = preferredPrefix === "/api" ? ["/api", ""] : ["", "/api"];
+    const prefixes: ("/api" | "")[] = preferredPrefix === "/api" ? ["/api", ""] : ["", "/api"];
     const urls = prefixes.map((prefix) => {
       const base = this.buildUrl(host, `${prefix}/commands/${command}`);
       const search = new URLSearchParams(query).toString();
@@ -424,7 +424,7 @@ export class FroniusService {
       "Login",
       {user: config.user},
     );
-    let lastError: unknown = null;
+    let lastError: Error | null = null;
     for (const [index, loginUrl] of loginCandidates.entries()) {
       try {
         this.logger.log(`Logging in Fronius session via ${loginUrl}`);
@@ -432,7 +432,7 @@ export class FroniusService {
         this.workingCommandsPrefix = this.extractApiPrefix(new URL(loginUrl).pathname);
         return;
       } catch (error: unknown) {
-        lastError = error;
+        lastError = error instanceof Error ? error : new Error(String(error));
         const canTryFallback = index < loginCandidates.length - 1;
         if (!canTryFallback || !this.isHttp404(error)) {
           throw error;

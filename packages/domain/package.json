@@ -20,7 +20,7 @@
     "dist-cjs"
   ],
   "scripts": {
-    "build": "yarn clean && tsc -p tsconfig.build.json && tsc -p tsconfig.build.cjs.json && node -e \"const fs=require('fs');fs.mkdirSync('dist-cjs',{recursive:true});fs.writeFileSync('dist-cjs/package.json', JSON.stringify({type:'commonjs'}, null, 2));\"",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc -p tsconfig.build.cjs.json && node -e \"const fs=require('fs');fs.mkdirSync('dist-cjs',{recursive:true});fs.writeFileSync('dist-cjs/package.json', JSON.stringify({type:'commonjs'}, null, 2));\"",
     "clean": "rm -rf dist dist-cjs"
   },
   "engines": {
