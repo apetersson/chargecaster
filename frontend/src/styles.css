@@ -61,6 +61,10 @@ section.card.banner {
     height: 360px;
 }
 
+.history-detail-chart {
+    height: 320px;
+}
+
 @media (max-width: 640px) {
     .chart-viewport {
         height: 280px;
@@ -212,6 +216,38 @@ tr:nth-child(odd) {
 .refresh-button:disabled {
     opacity: 0.6;
     cursor: wait;
+}
+
+.backtest-history-row {
+    cursor: pointer;
+    transition: background 0.18s ease;
+}
+
+.backtest-history-row:hover {
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.backtest-history-row.expanded {
+    background: rgba(56, 189, 248, 0.08);
+}
+
+.backtest-detail-row td {
+    background: rgba(15, 23, 42, 0.38);
+}
+
+.backtest-detail-panel {
+    width: 100%;
+}
+
+.backtest-detail-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.78rem;
+    color: rgba(226, 232, 240, 0.88);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 small.timestamp {
