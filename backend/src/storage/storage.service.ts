@@ -96,12 +96,16 @@ export class StorageService implements OnModuleDestroy {
     }));
   }
 
-  listAllHistoryAsc(limit = 15000): HistoryRecord[] {
-    this.logger.verbose(`Listing all history entries ASC (limit=${limit})`);
-    const stmt = this.db.prepare(
-      "SELECT id, timestamp, payload FROM history ORDER BY timestamp ASC LIMIT ?",
+  listAllHistoryAsc(limit?: number): HistoryRecord[] {
+    this.logger.verbose(
+      limit == null
+        ? "Listing all history entries ASC"
+        : `Listing all history entries ASC (limit=${limit})`,
     );
-    const rows = stmt.all(limit) as { id: number; timestamp: string; payload: string }[];
+    const rows = (limit == null
+      ? this.db.prepare("SELECT id, timestamp, payload FROM history ORDER BY timestamp ASC").all()
+      : this.db.prepare("SELECT id, timestamp, payload FROM history ORDER BY timestamp ASC LIMIT ?").all(limit)
+    ) as { id: number; timestamp: string; payload: string }[];
     return rows.map((row) => ({
       id: row.id,
       timestamp: row.timestamp,

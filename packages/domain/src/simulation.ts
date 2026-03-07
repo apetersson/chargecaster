@@ -61,6 +61,8 @@ export const historyPointSchema = z
     solar_power_w: nullableNumberSchema.optional().default(null),
     solar_energy_wh: nullableNumberSchema.optional().default(null),
     home_power_w: nullableNumberSchema.optional().default(null),
+    ev_charge_power_w: nullableNumberSchema.optional().default(null),
+    site_demand_power_w: nullableNumberSchema.optional().default(null),
   })
   .strip();
 
@@ -240,4 +242,3 @@ export const simulationConfigSchema = z.object({
 export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
 
 export type PriceSlot = TariffSlot;
-

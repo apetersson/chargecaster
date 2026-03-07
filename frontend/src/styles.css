@@ -116,6 +116,14 @@ section.card.banner {
     font-size: 1rem;
 }
 
+.metric .value.positive {
+    color: var(--positive, #4caf50);
+}
+
+.metric .value.negative {
+    color: var(--negative, #f44336);
+}
+
 canvas {
     width: 100% !important;
     height: 100% !important;

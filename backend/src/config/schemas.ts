@@ -127,6 +127,8 @@ export interface ParsedEvccState {
   gridPowerW: number | null;
   solarPowerW: number | null;
   homePowerW: number | null;
+  evChargePowerW: number | null;
+  siteDemandPowerW: number | null;
 }
 
 const forecastArraySchema = z.array(rawForecastEntrySchema);
@@ -247,6 +249,42 @@ const parseSolarTimeseriesValue = (value: unknown): RawSolarEntry[] => {
   return parsed.success ? parsed.data : [];
 };
 
+const createForecastEntryKey = (entry: RawForecastEntry): string =>
+  JSON.stringify({
+    start: entry.start ?? null,
+    from: entry.from ?? null,
+    end: entry.end ?? null,
+    to: entry.to ?? null,
+    price: entry.price ?? null,
+    value: entry.value ?? null,
+    unit: entry.unit ?? null,
+    price_unit: entry.price_unit ?? null,
+    value_unit: entry.value_unit ?? null,
+    price_ct_per_kwh: entry.price_ct_per_kwh ?? null,
+    price_with_fee_ct_per_kwh: entry.price_with_fee_ct_per_kwh ?? null,
+    price_with_fee_eur_per_kwh: entry.price_with_fee_eur_per_kwh ?? null,
+    duration_hours: entry.duration_hours ?? null,
+    durationHours: entry.durationHours ?? null,
+    duration_minutes: entry.duration_minutes ?? null,
+    durationMinutes: entry.durationMinutes ?? null,
+    era_id: entry.era_id ?? null,
+    eraId: entry.eraId ?? null,
+  });
+
+const dedupeForecastEntries = (entries: RawForecastEntry[]): RawForecastEntry[] => {
+  const seen = new Set<string>();
+  const unique: RawForecastEntry[] = [];
+  for (const entry of entries) {
+    const key = createForecastEntryKey(entry);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(entry);
+  }
+  return unique;
+};
+
 export const parseConfigDocument = (input: unknown): ConfigDocument =>
   configDocumentSchema.parse(input ?? {});
 
@@ -344,6 +382,26 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     stateObj.homePower,
   );
 
+  const loadpoints = Array.isArray(stateObj.loadpoints) ? stateObj.loadpoints : [];
+  let evChargePowerW: number | null = null;
+  for (const rawLoadpoint of loadpoints) {
+    if (!isRecord(rawLoadpoint)) {
+      continue;
+    }
+    const chargePowerW = pickFirstNumber(
+      rawLoadpoint.chargePower,
+      rawLoadpoint.charge_power,
+    );
+    if (chargePowerW == null) {
+      continue;
+    }
+    evChargePowerW = (evChargePowerW ?? 0) + Math.max(0, chargePowerW);
+  }
+
+  const siteDemandPowerW = homePowerW != null
+    ? homePowerW + Math.max(0, evChargePowerW ?? 0)
+    : null;
+
   const priceSnapshot = pickFirstNumber(
       site.tariffGrid,
       site.tariffPriceLoadpoints,
@@ -365,12 +423,14 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     })();
 
   return {
-    forecast,
+    forecast: dedupeForecastEntries(forecast),
     solarTimeseries,
     batterySoc,
     priceSnapshot,
     gridPowerW,
     solarPowerW,
     homePowerW,
+    evChargePowerW,
+    siteDemandPowerW,
   };
 };
