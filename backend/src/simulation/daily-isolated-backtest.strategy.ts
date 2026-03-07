@@ -282,6 +282,9 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       intervals,
       actual_total_cost_eur: actualTotalCost,
       simulated_total_cost_eur: simulatedTotalCost,
+      simulated_start_soc_percent: Number.isFinite(options?.initialSimSocPercent)
+        ? Number(options?.initialSimSocPercent)
+        : firstSoc,
       actual_final_soc_percent: actualFinalSoc,
       simulated_final_soc_percent: simFinalSoc,
       soc_value_adjustment_eur: socValueAdj,
@@ -368,6 +371,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       intervals: [],
       actual_total_cost_eur: 0,
       simulated_total_cost_eur: 0,
+      simulated_start_soc_percent: 0,
       actual_final_soc_percent: 0,
       simulated_final_soc_percent: 0,
       soc_value_adjustment_eur: 0,

@@ -143,6 +143,7 @@ describe("BacktestService daily history", () => {
       generated_at: "2026-03-08T00:00:00.000Z",
       actual_total_cost_eur: 12,
       simulated_total_cost_eur: 10,
+      simulated_start_soc_percent: 50,
       actual_final_soc_percent: 50,
       simulated_final_soc_percent: 40,
       soc_value_adjustment_eur: 0.5,
@@ -159,6 +160,9 @@ describe("BacktestService daily history", () => {
         configFingerprint: "cached",
         updatedAt: "2026-03-08T00:01:00.000Z",
         payload: cachedSummary,
+        strategy: "continuous",
+        simulatedStartSocPercent: 50,
+        simulatedFinalSocPercent: 40,
       },
     ]);
     const upsertDailyBacktestSummaries = vi.fn();
@@ -374,6 +378,9 @@ describe("StorageService listAllHistoryAsc", () => {
 
       expect(result.materialized).toBe(2);
       expect(cached.map((entry) => entry.date)).toEqual(["2026-03-06", "2026-03-05"]);
+      expect(cached[0]?.strategy).toBe("continuous");
+      expect(cached[0]?.simulatedStartSocPercent).toBeGreaterThanOrEqual(0);
+      expect(cached[0]?.simulatedFinalSocPercent).toBeGreaterThanOrEqual(0);
     } finally {
       storage.onModuleDestroy();
       if (previousStoragePath == null) {
@@ -410,6 +417,7 @@ describe("StorageService listAllHistoryAsc", () => {
             generated_at: "2026-03-08T00:00:00.000Z",
             actual_total_cost_eur: 1,
             simulated_total_cost_eur: 1,
+            simulated_start_soc_percent: 1,
             actual_final_soc_percent: 1,
             simulated_final_soc_percent: 1,
             soc_value_adjustment_eur: 0,
@@ -420,6 +428,9 @@ describe("StorageService listAllHistoryAsc", () => {
             history_points_used: 288,
             span_hours: 24,
           },
+          strategy: "continuous",
+          simulatedStartSocPercent: 1,
+          simulatedFinalSocPercent: 1,
         },
       ]);
 
@@ -434,6 +445,51 @@ describe("StorageService listAllHistoryAsc", () => {
       expect(cached.find((entry) => entry.date === "2026-03-05")?.payload.actual_total_cost_eur).toBe(1);
     } finally {
       storage.onModuleDestroy();
+      if (previousStoragePath == null) {
+        delete process.env.CHARGECASTER_STORAGE_PATH;
+      } else {
+        process.env.CHARGECASTER_STORAGE_PATH = previousStoragePath;
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears legacy daily backtest summaries when ledger columns are introduced", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
+    const dbPath = join(tempDir, "backend.sqlite");
+    const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
+    process.env.CHARGECASTER_STORAGE_PATH = dbPath;
+
+    const legacyStorage = new StorageService();
+
+    try {
+      const rawDb = (legacyStorage as unknown as { db: { exec: (sql: string) => void } }).db;
+      rawDb.exec("DROP TABLE daily_backtest_summaries");
+      rawDb.exec(`
+        CREATE TABLE daily_backtest_summaries
+        (
+            date               TEXT NOT NULL,
+            config_fingerprint TEXT NOT NULL,
+            updated_at         TEXT NOT NULL,
+            payload            TEXT NOT NULL,
+            PRIMARY KEY (date, config_fingerprint)
+        );
+      `);
+      rawDb.exec(`
+        INSERT INTO daily_backtest_summaries (date, config_fingerprint, updated_at, payload)
+        VALUES ('2026-03-05', 'legacy', '2026-03-08T00:00:00.000Z', '{"generated_at":"2026-03-08T00:00:00.000Z","actual_total_cost_eur":1,"simulated_total_cost_eur":1,"simulated_start_soc_percent":1,"actual_final_soc_percent":1,"simulated_final_soc_percent":1,"soc_value_adjustment_eur":0,"adjusted_actual_cost_eur":1,"adjusted_simulated_cost_eur":1,"savings_eur":0,"avg_price_eur_per_kwh":0.2,"history_points_used":288,"span_hours":24}')
+      `);
+    } finally {
+      legacyStorage.onModuleDestroy();
+    }
+
+    const migratedStorage = new StorageService();
+
+    try {
+      const rows = migratedStorage.listDailyBacktestSummaries("legacy", ["2026-03-05"]);
+      expect(rows).toHaveLength(0);
+    } finally {
+      migratedStorage.onModuleDestroy();
       if (previousStoragePath == null) {
         delete process.env.CHARGECASTER_STORAGE_PATH;
       } else {

@@ -72,6 +72,7 @@ export const backtestResultSummarySchema = z.object({
   generated_at: requiredTimestampSchema,
   actual_total_cost_eur: z.number(),
   simulated_total_cost_eur: z.number(),
+  simulated_start_soc_percent: z.number(),
   actual_final_soc_percent: z.number(),
   simulated_final_soc_percent: z.number(),
   soc_value_adjustment_eur: z.number(),

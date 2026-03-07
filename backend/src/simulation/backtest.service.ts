@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { BacktestResultSummary, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
-import { StorageService, type HistoryDayStatRecord } from "../storage/storage.service";
+import { StorageService, type DailyBacktestSummaryRecord, type HistoryDayStatRecord } from "../storage/storage.service";
 import {
   DAILY_BACKTEST_STRATEGY,
   type BacktestResult,
@@ -96,15 +96,29 @@ export class BacktestService {
     configFingerprint: string,
     options?: {
       snapshot?: SnapshotPayload;
-      cachedSummaries?: { date: string; payload: BacktestResultSummary }[];
+      cachedSummaries?: DailyBacktestSummaryRecord[];
     },
   ): {
     entries: DailyBacktestEntry[];
-    summariesToCache: { date: string; configFingerprint: string; payload: BacktestResultSummary }[];
+    summariesToCache: {
+      date: string;
+      configFingerprint: string;
+      strategy: string;
+      simulatedStartSocPercent: number;
+      simulatedFinalSocPercent: number;
+      payload: BacktestResultSummary;
+    }[];
   } {
-    const cachedByDate = new Map((options?.cachedSummaries ?? []).map((entry) => [entry.date, entry.payload]));
+    const cachedByDate = new Map((options?.cachedSummaries ?? []).map((entry) => [entry.date, entry]));
     const liveByDate = new Map<string, DailyBacktestEntry>();
-    const summariesByDate = new Map<string, { date: string; configFingerprint: string; payload: BacktestResultSummary }>();
+    const summariesByDate = new Map<string, {
+      date: string;
+      configFingerprint: string;
+      strategy: string;
+      simulatedStartSocPercent: number;
+      simulatedFinalSocPercent: number;
+      payload: BacktestResultSummary;
+    }>();
 
     const ensureLiveEntry = (date: string): DailyBacktestEntry | null => {
       const existing = liveByDate.get(date);
@@ -137,6 +151,9 @@ export class BacktestService {
         summariesByDate.set(date, {
           date,
           configFingerprint,
+          strategy: this.strategy.name,
+          simulatedStartSocPercent: entry.result.simulated_start_soc_percent,
+          simulatedFinalSocPercent: entry.result.simulated_final_soc_percent,
           payload: this.toSummary(entry.result),
         });
       }
@@ -155,7 +172,7 @@ export class BacktestService {
     const entries = requestedDates.flatMap((date) => {
       const cached = date !== index.yesterday ? cachedByDate.get(date) : undefined;
       if (cached) {
-        return [{date, result: this.inflateSummary(cached)}];
+        return [{date, result: this.inflateSummary(cached.payload)}];
       }
       const live = liveByDate.get(date);
       return live ? [live] : [];
@@ -168,7 +185,7 @@ export class BacktestService {
     date: string,
     index: DailyHistoryIndex,
     configFingerprint: string,
-    cachedByDate: Map<string, BacktestResultSummary>,
+    cachedByDate: Map<string, DailyBacktestSummaryRecord>,
     liveByDate: Map<string, DailyBacktestEntry>,
     ensureLiveEntry: (date: string) => DailyBacktestEntry | null,
   ): number | null | undefined {
@@ -184,15 +201,15 @@ export class BacktestService {
 
     const cachedPrevious = cachedByDate.get(previousDate);
     if (cachedPrevious) {
-      return cachedPrevious.simulated_final_soc_percent;
+      return cachedPrevious.simulatedFinalSocPercent;
     }
 
     if (this.isCacheEligibleDay(previousDate, index)) {
       const loadedEntries = this.storage.listDailyBacktestSummaries(configFingerprint, [previousDate]);
       if (loadedEntries.length > 0) {
         const loaded = loadedEntries[0];
-        cachedByDate.set(previousDate, loaded.payload);
-        return loaded.payload.simulated_final_soc_percent;
+        cachedByDate.set(previousDate, loaded);
+        return loaded.simulatedFinalSocPercent;
       }
     }
 
@@ -267,6 +284,7 @@ export class BacktestService {
       generated_at: result.generated_at,
       actual_total_cost_eur: result.actual_total_cost_eur,
       simulated_total_cost_eur: result.simulated_total_cost_eur,
+      simulated_start_soc_percent: result.simulated_start_soc_percent,
       actual_final_soc_percent: result.actual_final_soc_percent,
       simulated_final_soc_percent: result.simulated_final_soc_percent,
       soc_value_adjustment_eur: result.soc_value_adjustment_eur,
