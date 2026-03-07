@@ -40,8 +40,6 @@ export interface BuildDailyBacktestOptions {
 export interface DailyBacktestStrategy {
   readonly name: string;
   run(snapshot: SnapshotPayload, config: SimulationConfig): BacktestResult;
-  loadDailyHistoryIndex(today?: string): DailyHistoryIndex;
-  isCacheEligibleDay(date: string, index: DailyHistoryIndex): boolean;
   buildDailyEntry(date: string, config: SimulationConfig, options?: BuildDailyBacktestOptions): DailyBacktestEntry | null;
 }
 

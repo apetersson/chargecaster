@@ -1,13 +1,12 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
-import { StorageService, type HistoryDayStatRecord } from "../storage/storage.service";
+import { StorageService } from "../storage/storage.service";
 import { normalizeHistoryList } from "./history.serializer";
 import type {
   BacktestResult,
   BuildDailyBacktestOptions,
   DailyBacktestEntry,
   DailyBacktestStrategy,
-  DailyHistoryIndex,
 } from "./daily-backtest.strategy";
 
 const WATTS_PER_KW = 1000;
@@ -26,32 +25,6 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
   run(snapshot: SnapshotPayload, config: SimulationConfig): BacktestResult {
     const history = this.loadLast24hHistory();
     return this.runForHistory(history, config, {snapshot});
-  }
-
-  loadDailyHistoryIndex(today = new Date().toISOString().slice(0, 10)): DailyHistoryIndex {
-    const stats = this.storage.listHistoryDayStatsBefore(today);
-    const completeDays = new Set(
-      stats
-        .filter((stat) => this.isCompleteUtcDayStat(stat))
-        .map((stat) => stat.date),
-    );
-    const availableDays = stats
-      .map((stat) => stat.date)
-      .filter((date) => completeDays.has(date));
-
-    return {
-      today,
-      yesterday: this.previousUtcDate(today),
-      availableDays,
-      completeDays,
-    };
-  }
-
-  isCacheEligibleDay(date: string, index: DailyHistoryIndex): boolean {
-    if (date >= index.yesterday) {
-      return false;
-    }
-    return index.completeDays.has(this.nextUtcDate(date));
   }
 
   buildDailyEntry(
@@ -110,31 +83,11 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     return value.toISOString().slice(0, 10);
   }
 
-  private previousUtcDate(date: string): string {
-    const value = new Date(`${date}T00:00:00Z`);
-    value.setUTCDate(value.getUTCDate() - 1);
-    return value.toISOString().slice(0, 10);
-  }
-
   private loadUtcDayHistory(date: string): HistoryPoint[] {
     const start = `${date}T00:00:00.000Z`;
     const end = `${this.nextUtcDate(date)}T00:00:00.000Z`;
     const records = this.storage.listHistoryRangeAsc(start, end);
     return normalizeHistoryList(records.map((record) => record.payload));
-  }
-
-  private isCompleteUtcDayStat(stat: HistoryDayStatRecord): boolean {
-    if (stat.pointCount < 2) {
-      return false;
-    }
-
-    const dayStart = new Date(`${stat.date}T00:00:00Z`).getTime();
-    const dayEnd = dayStart + HOURS_24 * MS_PER_HOUR;
-    const firstPoint = new Date(stat.firstTimestamp).getTime();
-    const lastPoint = new Date(stat.lastTimestamp).getTime();
-    const boundaryToleranceMs = MS_PER_HOUR * 2;
-
-    return firstPoint - dayStart <= boundaryToleranceMs && dayEnd - lastPoint <= boundaryToleranceMs;
   }
 
   private runForHistory(

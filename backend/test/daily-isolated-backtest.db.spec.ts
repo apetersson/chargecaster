@@ -4,11 +4,51 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ConfigFileService } from "../src/config/config-file.service";
 import { SimulationConfigFactory } from "../src/config/simulation-config.factory";
 import { DailyIsolatedBacktestStrategy } from "../src/simulation/daily-isolated-backtest.strategy";
-import { StorageService } from "../src/storage/storage.service";
+import { StorageService, type HistoryDayStatRecord } from "../src/storage/storage.service";
 
 const describeDb = process.env.RUN_DB_BACKTEST === "1" ? describe : describe.skip;
 
 let storage: StorageService | null = null;
+
+function previousUtcDate(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function nextUtcDate(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function isCompleteUtcDayStat(stat: HistoryDayStatRecord): boolean {
+  if (stat.pointCount < 2) {
+    return false;
+  }
+
+  const dayStart = new Date(`${stat.date}T00:00:00Z`).getTime();
+  const dayEnd = dayStart + 24 * 3600_000;
+  const firstPoint = new Date(stat.firstTimestamp).getTime();
+  const lastPoint = new Date(stat.lastTimestamp).getTime();
+  const boundaryToleranceMs = 2 * 3600_000;
+
+  return firstPoint - dayStart <= boundaryToleranceMs && dayEnd - lastPoint <= boundaryToleranceMs;
+}
+
+function listAvailableDays(storageService: StorageService, today = new Date().toISOString().slice(0, 10)): string[] {
+  const yesterday = previousUtcDate(today);
+  const stats = storageService.listHistoryDayStatsBefore(today);
+  const completeDays = new Set(
+    stats
+      .filter((stat) => isCompleteUtcDayStat(stat))
+      .map((stat) => stat.date),
+  );
+
+  return stats
+    .map((stat) => stat.date)
+    .filter((date) => date < yesterday && completeDays.has(date) && completeDays.has(nextUtcDate(date)));
+}
 
 describeDb("DailyIsolatedBacktestStrategy database smoke test", () => {
   afterAll(() => {
@@ -36,7 +76,7 @@ describeDb("DailyIsolatedBacktestStrategy database smoke test", () => {
       const configFactory = new SimulationConfigFactory();
       const document = await configFile.loadDocument(configPath);
       const config = configFactory.create(document);
-      const rows = strategy.loadDailyHistoryIndex().availableDays.slice(0, 7)
+      const rows = listAvailableDays(storage).slice(0, 30)
         .map((date) => strategy.buildDailyEntry(date, config))
         .filter((entry): entry is NonNullable<typeof entry> => entry != null)
         .map((entry) => ({
