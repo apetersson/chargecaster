@@ -6,13 +6,14 @@
   "scripts": {
     "bootstrap": "pnpm install",
     "build:domain": "pnpm --filter @chargecaster/domain build",
+    "lint:domain": "pnpm --filter @chargecaster/domain lint",
     "lint:backend": "pnpm --filter chargecaster-backend lint",
     "typecheck:backend": "pnpm --filter chargecaster-backend typecheck",
     "build:backend": "pnpm --filter chargecaster-backend build",
     "lint:frontend": "pnpm --filter chargecaster-frontend lint",
     "typecheck:frontend": "pnpm --filter chargecaster-frontend typecheck",
     "build:frontend": "pnpm --filter chargecaster-frontend build",
-    "lint:all": "pnpm run lint:backend && pnpm run lint:frontend",
+    "lint:all": "pnpm run lint:domain && pnpm run lint:backend && pnpm run lint:frontend",
     "typecheck:all": "pnpm run typecheck:backend && pnpm run typecheck:frontend",
     "build:all": "pnpm run build:domain && pnpm run build:backend && pnpm run build:frontend",
     "dev": "concurrently -n backend,frontend -c blue,green \"pnpm --filter chargecaster-backend backend:dev:api\" \"VITE_TRPC_URL=http://localhost:4000/trpc pnpm --filter chargecaster-frontend dev\""
