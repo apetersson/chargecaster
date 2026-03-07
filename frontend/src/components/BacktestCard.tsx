@@ -23,9 +23,14 @@ interface DailyBacktestEntry {
   result: BacktestResult;
 }
 
+interface DailyBacktestPage {
+  entries: DailyBacktestEntry[];
+  hasMore: boolean;
+}
+
 const dashboard = trpcClient.dashboard as Record<string, unknown> as {
   backtest: { query: () => Promise<BacktestResult> };
-  backtestHistory: { query: () => Promise<DailyBacktestEntry[]> };
+  backtestHistory: { query: (input: { limit: number; skip: number }) => Promise<DailyBacktestPage> };
 };
 
 function BacktestCard(): JSX.Element | null {
@@ -33,7 +38,8 @@ function BacktestCard(): JSX.Element | null {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [dailyData, setDailyData] = useState<DailyBacktestEntry[] | null>(null);
+  const [dailyEntries, setDailyEntries] = useState<DailyBacktestEntry[] | null>(null);
+  const [dailyHasMore, setDailyHasMore] = useState(false);
   const [dailyLoading, setDailyLoading] = useState(false);
   const [dailyError, setDailyError] = useState<string | null>(null);
 
@@ -53,13 +59,14 @@ function BacktestCard(): JSX.Element | null {
     void run();
   }, []);
 
-  const fetchDailyHistory = useCallback(() => {
+  const loadDailyPage = useCallback((skip: number) => {
     const run = async () => {
       try {
         setDailyLoading(true);
         setDailyError(null);
-        const result = await dashboard.backtestHistory.query();
-        setDailyData(result);
+        const page = await dashboard.backtestHistory.query({ limit: 7, skip });
+        setDailyEntries((prev) => (skip === 0 ? page.entries : [...(prev ?? []), ...page.entries]));
+        setDailyHasMore(page.hasMore);
       } catch (err) {
         setDailyError(err instanceof Error ? err.message : "Failed to load daily history");
       } finally {
@@ -153,32 +160,33 @@ function BacktestCard(): JSX.Element | null {
       </div>
 
       <DailyHistorySection
-        data={dailyData}
+        entries={dailyEntries}
+        hasMore={dailyHasMore}
         loading={dailyLoading}
         error={dailyError}
-        onLoad={fetchDailyHistory}
+        onLoad={() => { loadDailyPage(0); }}
+        onLoadMore={() => { loadDailyPage(dailyEntries?.length ?? 0); }}
       />
     </section>
   );
 }
 
 interface DailyHistorySectionProps {
-  data: DailyBacktestEntry[] | null;
+  entries: DailyBacktestEntry[] | null;
+  hasMore: boolean;
   loading: boolean;
   error: string | null;
   onLoad: () => void;
+  onLoadMore: () => void;
 }
 
-function DailyHistorySection({ data, loading, error, onLoad }: DailyHistorySectionProps): JSX.Element {
-  if (!data && !loading && !error) {
+function DailyHistorySection({ entries, hasMore, loading, error, onLoad, onLoadMore }: DailyHistorySectionProps): JSX.Element {
+  const dividerStyle = { marginTop: "1rem", borderTop: "1px solid var(--border, #333)", paddingTop: "1rem" };
+
+  if (!entries && !loading && !error) {
     return (
-      <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border, #333)", paddingTop: "1rem" }}>
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={onLoad}
-          style={{ fontSize: "0.75rem", padding: "4px 10px" }}
-        >
+      <div style={dividerStyle}>
+        <button type="button" className="refresh-button" onClick={onLoad} style={{ fontSize: "0.75rem", padding: "4px 10px" }}>
           Load Daily History
         </button>
       </div>
@@ -186,42 +194,25 @@ function DailyHistorySection({ data, loading, error, onLoad }: DailyHistorySecti
   }
 
   if (error) {
+    return <div style={dividerStyle}><p className="status err">{error}</p></div>;
+  }
+
+  if (!entries || entries.length === 0) {
     return (
-      <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border, #333)", paddingTop: "1rem" }}>
-        <p className="status err">{error}</p>
+      <div style={dividerStyle}>
+        <p className="status">{loading ? "Computing..." : "No full calendar days in history yet."}</p>
       </div>
     );
   }
 
-  if (loading) {
-    return (
-      <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border, #333)", paddingTop: "1rem" }}>
-        <p className="status">Computing daily history...</p>
-      </div>
-    );
-  }
-
-  if (!data || data.length === 0) {
-    return (
-      <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border, #333)", paddingTop: "1rem" }}>
-        <p className="status">No full calendar days in history yet.</p>
-      </div>
-    );
-  }
-
-  const totalSavings = data.reduce((sum, d) => sum + d.result.savings_eur, 0);
+  const totalSavings = entries.reduce((sum, d) => sum + d.result.savings_eur, 0);
 
   return (
-    <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border, #333)", paddingTop: "1rem" }}>
+    <div style={dividerStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-        <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Daily History ({data.length} days)</span>
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={onLoad}
-          style={{ fontSize: "0.75rem", padding: "4px 8px" }}
-        >
-          Refresh
+        <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Daily History ({entries.length} days)</span>
+        <button type="button" className="refresh-button" onClick={onLoad} disabled={loading} style={{ fontSize: "0.75rem", padding: "4px 8px" }}>
+          {loading ? "..." : "Refresh"}
         </button>
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -234,11 +225,13 @@ function DailyHistorySection({ data, loading, error, onLoad }: DailyHistorySecti
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Auto EUR</th>
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Adj. Actual</th>
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Adj. Auto</th>
+              <th style={{ padding: "4px 6px", fontWeight: 500 }}>Final SOC</th>
+              <th style={{ padding: "4px 6px", fontWeight: 500 }}>Next-day ct/kWh</th>
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Savings</th>
             </tr>
           </thead>
           <tbody>
-            {data.map(({ date, result }) => {
+            {entries.map(({ date, result }) => {
               const pos = result.savings_eur > 0;
               return (
                 <tr key={date} style={{ borderBottom: "1px solid var(--border-subtle, #222)" }}>
@@ -248,6 +241,8 @@ function DailyHistorySection({ data, loading, error, onLoad }: DailyHistorySecti
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.simulated_total_cost_eur, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.adjusted_actual_cost_eur, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.adjusted_simulated_cost_eur, "")}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.actual_final_soc_percent, "%")}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.avg_price_eur_per_kwh * 100, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right", color: pos ? "var(--positive, #4caf50)" : "var(--negative, #f44336)" }}>
                     {pos ? "-" : "+"}{formatNumber(Math.abs(result.savings_eur), "")}
                   </td>
@@ -257,7 +252,7 @@ function DailyHistorySection({ data, loading, error, onLoad }: DailyHistorySecti
           </tbody>
           <tfoot>
             <tr style={{ borderTop: "1px solid var(--border, #333)", fontWeight: 600 }}>
-              <td colSpan={6} style={{ padding: "4px 6px", textAlign: "right" }}>Total savings</td>
+              <td colSpan={8} style={{ padding: "4px 6px", textAlign: "right" }}>Total savings</td>
               <td style={{ padding: "4px 6px", textAlign: "right", color: totalSavings > 0 ? "var(--positive, #4caf50)" : "var(--negative, #f44336)" }}>
                 {totalSavings > 0 ? "-" : "+"}{formatNumber(Math.abs(totalSavings), " EUR")}
               </td>
@@ -265,6 +260,13 @@ function DailyHistorySection({ data, loading, error, onLoad }: DailyHistorySecti
           </tfoot>
         </table>
       </div>
+      {hasMore ? (
+        <div style={{ marginTop: "0.5rem", textAlign: "center" }}>
+          <button type="button" className="refresh-button" onClick={onLoadMore} disabled={loading} style={{ fontSize: "0.75rem", padding: "4px 12px" }}>
+            {loading ? "..." : "Load more"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
