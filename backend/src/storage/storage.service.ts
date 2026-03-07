@@ -26,6 +26,13 @@ export interface DailyBacktestSummaryRecord {
   payload: BacktestResultSummary;
 }
 
+export interface HistoryDayStatRecord {
+  date: string;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  pointCount: number;
+}
+
 @Injectable()
 export class StorageService implements OnModuleDestroy {
   private readonly dbPath: string;
@@ -117,6 +124,50 @@ export class StorageService implements OnModuleDestroy {
       id: row.id,
       timestamp: row.timestamp,
       payload: historyPointSchema.parse(JSON.parse(row.payload)),
+    }));
+  }
+
+  listHistoryRangeAsc(startInclusive: string, endExclusive: string): HistoryRecord[] {
+    this.logger.verbose(`Listing history range ASC (${startInclusive}..${endExclusive})`);
+    const stmt = this.db.prepare(`
+      SELECT id, timestamp, payload
+      FROM history
+      WHERE timestamp >= ?
+        AND timestamp < ?
+      ORDER BY timestamp ASC
+    `);
+    const rows = stmt.all(startInclusive, endExclusive) as { id: number; timestamp: string; payload: string }[];
+    return rows.map((row) => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      payload: historyPointSchema.parse(JSON.parse(row.payload)),
+    }));
+  }
+
+  listHistoryDayStatsBefore(upperExclusiveDate: string): HistoryDayStatRecord[] {
+    this.logger.verbose(`Listing history day stats before ${upperExclusiveDate}`);
+    const stmt = this.db.prepare(`
+      SELECT
+        substr(timestamp, 1, 10) AS date,
+        MIN(timestamp) AS first_timestamp,
+        MAX(timestamp) AS last_timestamp,
+        COUNT(*) AS point_count
+      FROM history
+      WHERE substr(timestamp, 1, 10) < ?
+      GROUP BY substr(timestamp, 1, 10)
+      ORDER BY date DESC
+    `);
+    const rows = stmt.all(upperExclusiveDate) as {
+      date: string;
+      first_timestamp: string;
+      last_timestamp: string;
+      point_count: number;
+    }[];
+    return rows.map((row) => ({
+      date: row.date,
+      firstTimestamp: row.first_timestamp,
+      lastTimestamp: row.last_timestamp,
+      pointCount: row.point_count,
     }));
   }
 
