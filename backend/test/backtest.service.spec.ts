@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
 import { BacktestService } from "../src/simulation/backtest.service";
@@ -93,13 +93,19 @@ const config: SimulationConfig = {
   },
 };
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("BacktestService daily history", () => {
   it("skips partial UTC days near the history boundary", () => {
     const fullDay = createDay("2026-03-05");
     const partialDay = createDay("2026-03-06", 13);
     const storage = {
       listAllHistoryAsc: () => toHistoryRecords([...fullDay, ...partialDay]),
-    } as Pick<StorageService, "listAllHistoryAsc"> as StorageService;
+      listDailyBacktestSummaries: () => [],
+      upsertDailyBacktestSummaries: () => undefined,
+    } as unknown as StorageService;
 
     const service = new BacktestService(storage);
     const page = service.runDailyHistory(snapshot, config, 7, 0);
@@ -107,6 +113,54 @@ describe("BacktestService daily history", () => {
     expect(page.hasMore).toBe(false);
     expect(page.entries).toHaveLength(1);
     expect(page.entries[0]?.date).toBe("2026-03-05");
+  });
+
+  it("uses cached summaries for older days while keeping yesterday live", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T12:00:00.000Z"));
+
+    const cachedSummary = {
+      generated_at: "2026-03-08T00:00:00.000Z",
+      actual_total_cost_eur: 12,
+      simulated_total_cost_eur: 10,
+      actual_final_soc_percent: 50,
+      simulated_final_soc_percent: 40,
+      soc_value_adjustment_eur: 0.5,
+      adjusted_actual_cost_eur: 11.5,
+      adjusted_simulated_cost_eur: 10,
+      savings_eur: -1.5,
+      avg_price_eur_per_kwh: 0.25,
+      history_points_used: 288,
+      span_hours: 23.9,
+    };
+    const listDailyBacktestSummaries = vi.fn().mockReturnValue([
+      {
+        date: "2026-03-06",
+        configFingerprint: "cached",
+        updatedAt: "2026-03-08T00:01:00.000Z",
+        payload: cachedSummary,
+      },
+    ]);
+    const upsertDailyBacktestSummaries = vi.fn();
+    const storage = {
+      listAllHistoryAsc: () => toHistoryRecords([
+        ...createDay("2026-03-05"),
+        ...createDay("2026-03-06"),
+        ...createDay("2026-03-07"),
+      ]),
+      listDailyBacktestSummaries,
+      upsertDailyBacktestSummaries,
+    } as unknown as StorageService;
+
+    const service = new BacktestService(storage);
+    const page = service.runDailyHistory(snapshot, config, 2, 0);
+
+    expect(page.entries.map((entry) => entry.date)).toEqual(["2026-03-07", "2026-03-06"]);
+    expect(page.entries[0]?.result.intervals.length).toBeGreaterThan(0);
+    expect(page.entries[1]?.result.intervals).toHaveLength(0);
+    expect(page.entries[1]?.result.actual_total_cost_eur).toBe(12);
+    expect(listDailyBacktestSummaries).toHaveBeenCalledTimes(1);
+    expect(upsertDailyBacktestSummaries).not.toHaveBeenCalled();
   });
 });
 
@@ -179,6 +233,39 @@ describe("StorageService listAllHistoryAsc", () => {
       expect(stored.at(-1)?.timestamp).toBe(history.at(-1)?.timestamp);
     } finally {
       service.onModuleDestroy();
+      if (previousStoragePath == null) {
+        delete process.env.CHARGECASTER_STORAGE_PATH;
+      } else {
+        process.env.CHARGECASTER_STORAGE_PATH = previousStoragePath;
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("materializes cached daily backtests into a dedicated table", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
+    const dbPath = join(tempDir, "backend.sqlite");
+    const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
+    process.env.CHARGECASTER_STORAGE_PATH = dbPath;
+
+    const storage = new StorageService();
+    const service = new BacktestService(storage);
+
+    try {
+      storage.appendHistory([
+        ...createDay("2026-03-05"),
+        ...createDay("2026-03-06"),
+        ...createDay("2026-03-07"),
+      ]);
+
+      const result = service.materializeHistoricalDailyBacktests(config, {today: "2026-03-08"});
+      const fingerprint = service.buildCacheFingerprint(config);
+      const cached = storage.listDailyBacktestSummaries(fingerprint, ["2026-03-05", "2026-03-06", "2026-03-07"]);
+
+      expect(result.materialized).toBe(2);
+      expect(cached.map((entry) => entry.date)).toEqual(["2026-03-06", "2026-03-05"]);
+    } finally {
+      storage.onModuleDestroy();
       if (previousStoragePath == null) {
         delete process.env.CHARGECASTER_STORAGE_PATH;
       } else {

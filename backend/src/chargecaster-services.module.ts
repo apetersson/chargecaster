@@ -6,6 +6,7 @@ import { HistoryService } from "./simulation/history.service";
 import { SummaryService } from "./simulation/summary.service";
 import { OracleService } from "./simulation/oracle.service";
 import { BacktestService } from "./simulation/backtest.service";
+import { BacktestMaterializationService } from "./simulation/backtest-materialization.service";
 import { ConfigFileService } from "./config/config-file.service";
 import { SimulationPreparationService } from "./config/simulation-preparation.service";
 import { SimulationSeedService } from "./config/simulation-seed.service";
@@ -27,6 +28,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     SummaryService,
     OracleService,
     BacktestService,
+    BacktestMaterializationService,
     SimulationSeedService,
     SimulationPreparationService,
     ConfigFileService,
@@ -45,6 +47,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     SummaryService,
     OracleService,
     BacktestService,
+    BacktestMaterializationService,
     SimulationSeedService,
     SimulationPreparationService,
     ConfigFileService,
