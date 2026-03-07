@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { RawForecastEntry } from "@chargecaster/domain";
+import { normalizePriceSlots, type RawForecastEntry } from "@chargecaster/domain";
 import { ForecastAssemblyService } from "../src/config/forecast-assembly.service";
-import { normalizePriceSlots } from "../src/simulation/simulation.service";
 
 describe("ForecastAssemblyService price normalization", () => {
   const service = new ForecastAssemblyService();

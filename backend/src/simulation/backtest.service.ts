@@ -72,7 +72,7 @@ export class BacktestService {
     }
 
     const detail = computed.entries[0] ?? null;
-    this.logger.log(`Daily backtest detail: date=${date} -> ${detail ? "hit" : "miss"}`);
+    this.logger.log(`Daily backtest detail: date=${date} -> ${computed.entries.length > 0 ? "hit" : "miss"}`);
     return detail;
   }
 

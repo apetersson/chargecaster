@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 
 import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
-import { EnergyPrice, TimeSlot } from "@chargecaster/domain";
-import { normalizePriceSlots } from "../simulation/simulation.service";
+import { derivePriceSnapshot, EnergyPrice, normalizePriceSlots, TimeSlot } from "@chargecaster/domain";
 import { parseTimestamp } from "../simulation/solar";
 
 const SLOT_DURATION_MS = 3_600_000;
@@ -140,19 +139,10 @@ export class ForecastAssemblyService {
   }
 
   derivePriceSnapshot(forecast: RawForecastEntry[], config: SimulationConfig): number | null {
-    if (!forecast.length) {
-      return null;
-    }
-    const slots = normalizePriceSlots(forecast);
-    if (!slots.length) {
-      return null;
-    }
-    const basePrice = slots[0]?.price;
-    if (typeof basePrice !== "number" || Number.isNaN(basePrice)) {
-      return null;
-    }
-    const gridFee = config.price.grid_fee_eur_per_kwh ?? 0;
-    return basePrice + gridFee;
+    return derivePriceSnapshot(
+      normalizePriceSlots(forecast),
+      EnergyPrice.fromEurPerKwh(config.price.grid_fee_eur_per_kwh ?? 0),
+    )?.eurPerKwh ?? null;
   }
 
   private addSource(entry: EraEntry, source: CostSource | SolarSource): void {

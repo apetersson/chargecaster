@@ -1,8 +1,14 @@
-import { describeError, type RawForecastEntry } from "@chargecaster/domain";
+import {
+  derivePriceSnapshot,
+  describeError,
+  EnergyPrice,
+  normalizePriceSlots,
+  type RawForecastEntry,
+} from "@chargecaster/domain";
 import { Logger } from "@nestjs/common";
 import type { EntsoeNewConfig } from "../schemas";
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
-import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
+import { clampHorizon } from "./provider.utils";
 
 const BASE_URL = "https://newtransparency.entsoe.eu/market/energyPrices/load";
 const REQUEST_TIMEOUT_MS = 15000;
@@ -28,7 +34,10 @@ export class EntsoeNewProvider implements MarketProvider {
         this.logger.verbose("Aggregating ENTSO-E prices to hourly cadence");
         forecast = this.aggregateToHourly(forecast);
       }
-      const priceSnapshot = derivePriceSnapshotFromForecast(forecast, ctx.simulationConfig);
+      const priceSnapshot = derivePriceSnapshot(
+        normalizePriceSlots(forecast),
+        EnergyPrice.fromEurPerKwh(ctx.simulationConfig.price.grid_fee_eur_per_kwh ?? 0),
+      )?.eurPerKwh ?? null;
       this.logger.verbose(`ENTSO-E returned ${forecast.length} slots (snapshot=${priceSnapshot ?? "n/a"})`);
       return {forecast, priceSnapshot};
     } catch (error) {

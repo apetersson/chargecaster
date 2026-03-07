@@ -1,8 +1,14 @@
-import { describeError, type RawForecastEntry } from "@chargecaster/domain";
+import {
+  derivePriceSnapshot,
+  describeError,
+  EnergyPrice,
+  normalizePriceSlots,
+  type RawForecastEntry,
+} from "@chargecaster/domain";
 import { Logger } from "@nestjs/common";
 import { parseMarketForecast, type AwattarConfig } from "../schemas";
 import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
-import { clampHorizon, derivePriceSnapshotFromForecast } from "./provider.utils";
+import { clampHorizon } from "./provider.utils";
 
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
 const REQUEST_TIMEOUT_MS = 15000;
@@ -19,7 +25,10 @@ export class AwattarProvider implements MarketProvider {
       const payload = await this.fetchJson(endpoint);
       const entries = parseMarketForecast(payload);
       const forecast: RawForecastEntry[] = clampHorizon(entries, this.cfg?.max_hours ?? 72);
-      const priceSnapshot = derivePriceSnapshotFromForecast(forecast, ctx.simulationConfig);
+      const priceSnapshot = derivePriceSnapshot(
+        normalizePriceSlots(forecast),
+        EnergyPrice.fromEurPerKwh(ctx.simulationConfig.price.grid_fee_eur_per_kwh ?? 0),
+      )?.eurPerKwh ?? null;
       this.logger.verbose(`Awattar returned ${forecast.length} slots (snapshot=${priceSnapshot ?? "n/a"})`);
       return {forecast, priceSnapshot};
     } catch (error) {

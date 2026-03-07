@@ -6,7 +6,29 @@ export { TimeSlot } from "./time-slot";
 export { TariffSlot } from "./tariff-slot";
 export { Scalar } from "./scalar";
 export { Percentage } from "./percentage";
+export {
+  clampRatio,
+  computeGridEnergyCostEur,
+  energyDeltaFromSocPercent,
+  energyFromPower,
+  energyFromSoc,
+  inferBatteryPowerFromSocDelta,
+  powerFromEnergy,
+  socFromEnergy,
+} from "./battery-math";
 export { describeError } from "./errors";
+export {
+  buildDerivedForecastEras,
+  buildOracleLookup,
+  derivePowerFromEnergy,
+  derivePriceSnapshot,
+  estimateProjectedDemand,
+  extractForecastEraPrice,
+  extractForecastEraSolar,
+  normalizePriceSlots,
+  resolveOracleEntryForEra,
+} from "./forecast-helpers";
+export type { ForecastDerivedEra } from "./forecast-helpers";
 export {
   normaliseSolarTimeseries,
   parseTemporal,

@@ -2,9 +2,9 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import type { SimulationConfig } from "@chargecaster/domain";
+import { normalizePriceSlots, type SimulationConfig } from "@chargecaster/domain";
 import { buildSolarForecastFromTimeseries } from "../src/simulation/solar";
-import { normalizePriceSlots, simulateOptimalSchedule } from "../src/simulation/simulation.service";
+import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
 import { parseEvccState } from "../src/config/schemas";
 
 describe("solar-confusion fixture: project grid power including solar", () => {
