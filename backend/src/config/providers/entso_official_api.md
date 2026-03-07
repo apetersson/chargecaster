@@ -22,7 +22,6 @@ curl -G 'https://web-api.tp.entsoe.eu/api' \
 
 Notes
 
-- Values are reported as price.amount; the document carries currency and price units (EUR/MWh). Convert to EUR/kWh by dividing by 1000, or to ct/kWh by dividing by
-    10. (transparency.entsoe.eu (https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide_prod_backup_06_11_2024.html))
+- Values are reported as price.amount; the document carries currency and price units (EUR/MWh). Convert to EUR/kWh by dividing by 1000, or to ct/kWh by dividing by 10. (transparency.entsoe.eu (https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide_prod_backup_06_11_2024.html))
 - This official A44 API is different from the newtransparency GUI endpoint you explored; the official one requires a token and returns XML. (transparency.entsoe.eu
   (https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide_prod_backup_06_11_2024.html))
