@@ -107,12 +107,20 @@ export class BacktestService {
 
   materializeHistoricalDailyBacktests(
     config: SimulationConfig,
-    options?: { dates?: string[]; today?: string },
+    options?: { dates?: string[]; today?: string; missingOnly?: boolean },
   ): { materialized: number; skipped: number } {
     const index = this.loadDailyHistoryIndex(options?.today);
     const configFingerprint = this.buildCacheFingerprint(config);
     const requestedDates = options?.dates ?? index.availableDays;
-    const targetDates = requestedDates.filter((date) => this.isCacheEligibleDay(date, index));
+    let targetDates = requestedDates.filter((date) => this.isCacheEligibleDay(date, index));
+
+    if (options?.missingOnly && targetDates.length > 0) {
+      const existingDates = new Set(
+        this.storage.listDailyBacktestSummaries(configFingerprint, targetDates).map((entry) => entry.date),
+      );
+      targetDates = targetDates.filter((date) => !existingDates.has(date));
+    }
+
     const summaries: { date: string; configFingerprint: string; payload: BacktestResultSummary }[] = [];
 
     for (const date of targetDates) {
