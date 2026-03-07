@@ -225,8 +225,10 @@ function DailyHistorySection({ entries, hasMore, loading, error, onLoad, onLoadM
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Auto EUR</th>
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Adj. Actual</th>
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Adj. Auto</th>
-              <th style={{ padding: "4px 6px", fontWeight: 500 }}>Final SOC</th>
-              <th style={{ padding: "4px 6px", fontWeight: 500 }}>Next-day ct/kWh</th>
+              <th style={{ padding: "4px 6px", fontWeight: 500 }}>Actual SOC</th>
+              <th style={{ padding: "4px 6px", fontWeight: 500 }}>Auto SOC</th>
+              <th style={{ padding: "4px 6px", fontWeight: 500 }}>SOC Adj EUR</th>
+              <th style={{ padding: "4px 6px", fontWeight: 500 }}>Marginal ct/kWh</th>
               <th style={{ padding: "4px 6px", fontWeight: 500 }}>Savings</th>
             </tr>
           </thead>
@@ -242,6 +244,8 @@ function DailyHistorySection({ entries, hasMore, loading, error, onLoad, onLoadM
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.adjusted_actual_cost_eur, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.adjusted_simulated_cost_eur, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.actual_final_soc_percent, "%")}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.simulated_final_soc_percent, "%")}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.soc_value_adjustment_eur, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{formatNumber(result.avg_price_eur_per_kwh * 100, "")}</td>
                   <td style={{ padding: "4px 6px", textAlign: "right", color: pos ? "var(--positive, #4caf50)" : "var(--negative, #f44336)" }}>
                     {pos ? "-" : "+"}{formatNumber(Math.abs(result.savings_eur), "")}
@@ -252,7 +256,7 @@ function DailyHistorySection({ entries, hasMore, loading, error, onLoad, onLoadM
           </tbody>
           <tfoot>
             <tr style={{ borderTop: "1px solid var(--border, #333)", fontWeight: 600 }}>
-              <td colSpan={8} style={{ padding: "4px 6px", textAlign: "right" }}>Total savings</td>
+              <td colSpan={10} style={{ padding: "4px 6px", textAlign: "right" }}>Total savings</td>
               <td style={{ padding: "4px 6px", textAlign: "right", color: totalSavings > 0 ? "var(--positive, #4caf50)" : "var(--negative, #f44336)" }}>
                 {totalSavings > 0 ? "-" : "+"}{formatNumber(Math.abs(totalSavings), " EUR")}
               </td>
