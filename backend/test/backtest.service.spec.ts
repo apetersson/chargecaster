@@ -315,4 +315,62 @@ describe("StorageService listAllHistoryAsc", () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("only backfills missing daily summaries when requested", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
+    const dbPath = join(tempDir, "backend.sqlite");
+    const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
+    process.env.CHARGECASTER_STORAGE_PATH = dbPath;
+
+    const storage = new StorageService();
+    const service = new BacktestService(storage);
+
+    try {
+      storage.appendHistory([
+        ...createDay("2026-03-05"),
+        ...createDay("2026-03-06"),
+        ...createDay("2026-03-07"),
+      ]);
+
+      const fingerprint = service.buildCacheFingerprint(config);
+      storage.upsertDailyBacktestSummaries([
+        {
+          date: "2026-03-05",
+          configFingerprint: fingerprint,
+          payload: {
+            generated_at: "2026-03-08T00:00:00.000Z",
+            actual_total_cost_eur: 1,
+            simulated_total_cost_eur: 1,
+            actual_final_soc_percent: 1,
+            simulated_final_soc_percent: 1,
+            soc_value_adjustment_eur: 0,
+            adjusted_actual_cost_eur: 1,
+            adjusted_simulated_cost_eur: 1,
+            savings_eur: 0,
+            avg_price_eur_per_kwh: 0.2,
+            history_points_used: 288,
+            span_hours: 24,
+          },
+        },
+      ]);
+
+      const result = service.materializeHistoricalDailyBacktests(config, {
+        today: "2026-03-08",
+        missingOnly: true,
+      });
+      const cached = storage.listDailyBacktestSummaries(fingerprint, ["2026-03-05", "2026-03-06"]);
+
+      expect(result.materialized).toBe(1);
+      expect(cached.map((entry) => entry.date)).toEqual(["2026-03-06", "2026-03-05"]);
+      expect(cached.find((entry) => entry.date === "2026-03-05")?.payload.actual_total_cost_eur).toBe(1);
+    } finally {
+      storage.onModuleDestroy();
+      if (previousStoragePath == null) {
+        delete process.env.CHARGECASTER_STORAGE_PATH;
+      } else {
+        process.env.CHARGECASTER_STORAGE_PATH = previousStoragePath;
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

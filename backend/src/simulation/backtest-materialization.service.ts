@@ -35,15 +35,15 @@ export class BacktestMaterializationService implements OnModuleDestroy {
   }
 
   private runStartupCatchup(): void {
-    this.runMaterialization("startup");
+    this.runMaterialization("startup", undefined, true);
   }
 
   private runScheduledRefresh(): void {
     const targetDate = this.computeDayMinusTwoUtcDate();
-    this.runMaterialization("scheduled", [targetDate]);
+    this.runMaterialization("scheduled", [targetDate], false);
   }
 
-  private runMaterialization(reason: "startup" | "scheduled", dates?: string[]): void {
+  private runMaterialization(reason: "startup" | "scheduled", dates?: string[], missingOnly = false): void {
     if (this.runInProgress) {
       this.logger.warn(`Backtest materialization already running; skipping ${reason} request.`);
       return;
@@ -52,7 +52,7 @@ export class BacktestMaterializationService implements OnModuleDestroy {
     this.runInProgress = true;
     try {
       const config = this.configFactory.create(this.runtimeConfig.getDocumentRef());
-      const result = this.backtestService.materializeHistoricalDailyBacktests(config, {dates});
+      const result = this.backtestService.materializeHistoricalDailyBacktests(config, {dates, missingOnly});
       this.logger.log(
         `Backtest materialization ${reason} complete: materialized=${result.materialized}, skipped=${result.skipped}`,
       );
