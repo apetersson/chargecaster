@@ -131,11 +131,24 @@ const oracleEntrySchema = z.object({
 
 export type OracleEntry = z.infer<typeof oracleEntrySchema>;
 
+export const demandForecastEntrySchema = z.object({
+  start: requiredTimestampSchema,
+  end: optionalTimestampSchema.optional(),
+  house_power_w: z.number().nonnegative(),
+  direct_pv_use_w: z.number().nonnegative(),
+  residual_house_power_w: z.number().nonnegative(),
+  ev_power_w: z.number().nonnegative(),
+  total_power_w: z.number().nonnegative(),
+  baseline_house_power_w: z.number().nonnegative(),
+  confidence: nullableNumberSchema.optional(),
+  source: z.string(),
+});
+
+export type DemandForecastEntry = z.infer<typeof demandForecastEntrySchema>;
+
 export const snapshotPayloadSchema = z.object({
   timestamp: requiredTimestampSchema,
   interval_seconds: nullableNumberSchema,
-  house_load_w: nullableNumberSchema,
-  solar_direct_use_ratio: nullableNumberSchema.optional(),
   current_soc_percent: nullableNumberSchema,
   next_step_soc_percent: nullableNumberSchema,
   recommended_soc_percent: nullableNumberSchema,
@@ -152,6 +165,7 @@ export const snapshotPayloadSchema = z.object({
   forecast_hours: nullableNumberSchema,
   forecast_samples: nullableNumberSchema,
   forecast_eras: z.array(forecastEraSchema),
+  demand_forecast: z.array(demandForecastEntrySchema),
   oracle_entries: z.array(oracleEntrySchema),
   history: z.array(historyPointSchema),
   warnings: z.array(z.string()),
@@ -163,8 +177,6 @@ export type SnapshotPayload = z.infer<typeof snapshotPayloadSchema>;
 export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   timestamp: true,
   interval_seconds: true,
-  house_load_w: true,
-  solar_direct_use_ratio: true,
   current_soc_percent: true,
   next_step_soc_percent: true,
   recommended_soc_percent: true,
@@ -207,6 +219,13 @@ export const oracleResponseSchema = z.object({
 
 export type OracleResponse = z.infer<typeof oracleResponseSchema>;
 
+export const demandForecastResponseSchema = z.object({
+  generated_at: requiredTimestampSchema,
+  entries: z.array(demandForecastEntrySchema),
+});
+
+export type DemandForecastResponse = z.infer<typeof demandForecastResponseSchema>;
+
 export const forecastSlotInputSchema = z.object({
   start: requiredTimestampSchema,
   end: optionalTimestampSchema.optional(),
@@ -242,19 +261,13 @@ export const priceConfigSchema = z.object({
 export const logicConfigSchema = z.object({
   interval_seconds: nullableNumberSchema.optional(),
   min_hold_minutes: nullableNumberSchema.optional(),
-  house_load_w: nullableNumberSchema.optional(),
   allow_battery_export: optionalBooleanSchema.optional(),
-});
-
-export const solarConfigSchema = z.object({
-  direct_use_ratio: nullableNumberSchema.optional(),
 });
 
 export const simulationConfigSchema = z.object({
   battery: batteryConfigSchema,
   price: priceConfigSchema,
   logic: logicConfigSchema,
-  solar: solarConfigSchema.optional(),
 });
 
 export type SimulationConfig = z.infer<typeof simulationConfigSchema>;

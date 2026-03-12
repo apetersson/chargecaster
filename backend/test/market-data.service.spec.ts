@@ -30,7 +30,6 @@ describe("MarketDataService", () => {
     logic: {
       interval_seconds: 300,
       min_hold_minutes: 10,
-      house_load_w: 1200,
       allow_battery_export: true,
     },
   };

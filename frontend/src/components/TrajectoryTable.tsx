@@ -1,11 +1,11 @@
-import { buildDerivedForecastEras } from "@chargecaster/domain";
 import { type JSX, useMemo } from "react";
 
-import type { ForecastEra, OracleEntry, SnapshotSummary } from "../types";
+import type { DemandForecastEntry, ForecastEra, OracleEntry, SnapshotSummary } from "../types";
 import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
+  demandForecast: DemandForecastEntry[];
   oracleEntries: OracleEntry[];
   summary?: SnapshotSummary | null;
 };
@@ -22,38 +22,43 @@ type TrajectoryRow = {
 
 function buildTrajectoryRows(
   forecast: ForecastEra[],
+  demandForecast: DemandForecastEntry[],
   oracleEntries: OracleEntry[],
-  summary: SnapshotSummary | null | undefined,
-  now: number,
+  _summary: SnapshotSummary | null | undefined,
 ): TrajectoryRow[] {
-  return buildDerivedForecastEras(forecast, oracleEntries, summary, now).map((era) => {
-    const solarLabel =
-      era.solarAveragePower !== null
-        ? formatNumber(era.solarAveragePower.watts, " W")
-        : era.solarEnergy !== null
-          ? formatNumber(era.solarEnergy.kilowattHours, " kWh")
-          : "n/a";
-    const endSocValue = formatPercent(era.targetSoc?.percent ?? null);
-    const targetLabel = era.strategy ? `${endSocValue} (${era.strategy.toUpperCase()})` : "n/a";
-    const timeCell =
-      `${dateTimeNoSecondsFormatter.format(era.slot.start)} — ${timeFormatter.format(era.slot.end)}`;
-
-    return {
-      key: era.era.era_id,
-      timeCell,
-      marketPriceLabel: era.price !== null ? formatNumber(era.price.ctPerKwh, " ct/kWh") : "n/a",
-      solarLabel,
-      demandLabel: formatNumber(era.demandPower.watts, " W"),
+  const oracleByEraId = new Map(oracleEntries.map((entry) => [entry.era_id, entry]));
+  const demandByStart = new Map(demandForecast.map((entry) => [entry.start, entry]));
+  return forecast.flatMap((era) => {
+    const demand = era.start ? demandByStart.get(era.start) : undefined;
+    const oracle = oracleByEraId.get(era.era_id);
+    const start = era.start ? new Date(era.start) : null;
+    const end = era.end ? new Date(era.end) : null;
+    const solarSource = era.sources.find((source) => source.type === "solar");
+    const costSource = era.sources.find((source) => source.type === "cost");
+    if (!start || !end) {
+      return [];
+    }
+    const targetPercent = oracle?.target_soc_percent ?? oracle?.end_soc_percent ?? null;
+    const endSocValue = formatPercent(targetPercent);
+    const targetLabel = oracle?.strategy ? `${endSocValue} (${oracle.strategy.toUpperCase()})` : "n/a";
+    return [{
+      key: era.era_id,
+      timeCell: `${dateTimeNoSecondsFormatter.format(start)} — ${timeFormatter.format(end)}`,
+      marketPriceLabel: costSource ? formatNumber(costSource.payload.price_with_fee_ct_per_kwh, " ct/kWh") : "n/a",
+      solarLabel: solarSource ? formatNumber(solarSource.payload.average_power_w ?? solarSource.payload.energy_wh, " W") : "n/a",
+      demandLabel: demand ? formatNumber(demand.house_power_w, " W") : "n/a",
       targetLabel,
-      gridPowerLabel: era.gridPower !== null ? formatNumber(era.gridPower.watts, " W") : "n/a",
-    };
+      gridPowerLabel: oracle?.grid_energy_wh != null && era.duration_hours
+        ? formatNumber(oracle.grid_energy_wh / era.duration_hours, " W")
+        : "n/a",
+    }];
   });
 }
 
-function TrajectoryTable({forecast, oracleEntries, summary}: TrajectoryTableProps): JSX.Element {
+function TrajectoryTable({forecast, demandForecast, oracleEntries, summary}: TrajectoryTableProps): JSX.Element {
   const rows = useMemo(
-    () => buildTrajectoryRows(forecast, oracleEntries, summary, Date.now()),
-    [forecast, oracleEntries, summary],
+    () => buildTrajectoryRows(forecast, demandForecast, oracleEntries, summary),
+    [forecast, demandForecast, oracleEntries, summary],
   );
 
   if (!rows.length) {

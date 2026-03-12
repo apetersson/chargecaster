@@ -72,14 +72,15 @@ const logicConfigSchema = z
   .object({
     interval_seconds: optionalNumberSchema.optional(),
     min_hold_minutes: optionalNumberSchema.optional(),
-    house_load_w: optionalNumberSchema.optional(),
     allow_battery_export: optionalBooleanSchema.optional(),
   })
   .strip();
 
-const solarConfigSchema = z
+const locationConfigSchema = z
   .object({
-    direct_use_ratio: optionalNumberSchema.optional(),
+    latitude: optionalNumberSchema.optional(),
+    longitude: optionalNumberSchema.optional(),
+    timezone: optionalStringSchema.optional(),
   })
   .strip();
 
@@ -110,9 +111,9 @@ export const configDocumentSchema = z
     battery: batteryConfigSchema.optional(),
     price: priceConfigSchema.optional(),
     logic: logicConfigSchema.optional(),
+    location: locationConfigSchema.optional(),
     evcc: evccConfigSchema.optional(),
     market_data: marketConfigSchema.optional(),
-    solar: solarConfigSchema.optional(),
     logging: loggingConfigSchema.optional(),
   })
   .strict();
@@ -129,6 +130,8 @@ export interface ParsedEvccState {
   homePowerW: number | null;
   evChargePowerW: number | null;
   siteDemandPowerW: number | null;
+  evConnected: boolean;
+  evCharging: boolean;
 }
 
 const forecastArraySchema = z.array(rawForecastEntrySchema);
@@ -384,9 +387,17 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
 
   const loadpoints = Array.isArray(stateObj.loadpoints) ? stateObj.loadpoints : [];
   let evChargePowerW: number | null = null;
+  let evConnected = false;
+  let evCharging = false;
   for (const rawLoadpoint of loadpoints) {
     if (!isRecord(rawLoadpoint)) {
       continue;
+    }
+    if (rawLoadpoint.connected === true) {
+      evConnected = true;
+    }
+    if (rawLoadpoint.charging === true) {
+      evCharging = true;
     }
     const chargePowerW = pickFirstNumber(
       rawLoadpoint.chargePower,
@@ -432,5 +443,7 @@ export const parseEvccState = (input: unknown): ParsedEvccState => {
     homePowerW,
     evChargePowerW,
     siteDemandPowerW,
+    evConnected,
+    evCharging,
   };
 };

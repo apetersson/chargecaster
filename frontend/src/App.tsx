@@ -10,7 +10,7 @@ import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChar
 import { useIsMobile } from "./hooks/useIsMobile";
 
 function App(): JSX.Element {
-  const { summary, history, forecast, oracleEntries, loading, error, refresh } = useDashboardData();
+  const { summary, history, forecast, demandForecast, oracleEntries, loading, error, refresh } = useDashboardData();
   const isMobile = useIsMobile();
   const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
   const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
@@ -20,7 +20,7 @@ function App(): JSX.Element {
     setShowPriceAxisLabels(!isMobile);
   }, [isMobile]);
 
-  const projectionChartRef = useProjectionChart(history, forecast, oracleEntries, summary, {
+  const projectionChartRef = useProjectionChart(history, forecast, demandForecast, oracleEntries, summary, {
     isMobile,
     showPowerAxisLabels,
     showPriceAxisLabels,
@@ -67,7 +67,7 @@ function App(): JSX.Element {
 
       <BacktestCard />
 
-      <TrajectoryTable forecast={forecast} oracleEntries={oracleEntries} summary={summary}/>
+      <TrajectoryTable forecast={forecast} demandForecast={demandForecast} oracleEntries={oracleEntries} summary={summary}/>
 
       <HistoryTable history={history}/>
 

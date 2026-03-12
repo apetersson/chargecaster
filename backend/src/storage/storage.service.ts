@@ -39,6 +39,18 @@ export interface HistoryDayStatRecord {
   pointCount: number;
 }
 
+export interface WeatherHourRecord {
+  latitude: number;
+  longitude: number;
+  hourUtc: string;
+  temperature2m: number | null;
+  cloudCover: number | null;
+  windSpeed10m: number | null;
+  precipitationMm: number | null;
+  source: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class StorageService implements OnModuleDestroy {
   private readonly dbPath: string;
@@ -177,6 +189,102 @@ export class StorageService implements OnModuleDestroy {
     }));
   }
 
+  listWeatherHours(
+    latitude: number,
+    longitude: number,
+    startInclusive: string,
+    endInclusive: string,
+  ): WeatherHourRecord[] {
+    this.logger.verbose(
+      `Listing weather hours (${latitude.toFixed(3)},${longitude.toFixed(3)} ${startInclusive}..${endInclusive})`,
+    );
+    const stmt = this.db.prepare(`
+      SELECT
+        latitude,
+        longitude,
+        hour_utc,
+        temperature_2m,
+        cloud_cover,
+        wind_speed_10m,
+        precipitation_mm,
+        source,
+        updated_at
+      FROM weather_hourly_cache
+      WHERE latitude = ?
+        AND longitude = ?
+        AND hour_utc >= ?
+        AND hour_utc <= ?
+      ORDER BY hour_utc ASC
+    `);
+    const rows = stmt.all(latitude, longitude, startInclusive, endInclusive) as {
+      latitude: number;
+      longitude: number;
+      hour_utc: string;
+      temperature_2m: number | null;
+      cloud_cover: number | null;
+      wind_speed_10m: number | null;
+      precipitation_mm: number | null;
+      source: string;
+      updated_at: string;
+    }[];
+    return rows.map((row) => ({
+      latitude: row.latitude,
+      longitude: row.longitude,
+      hourUtc: row.hour_utc,
+      temperature2m: row.temperature_2m,
+      cloudCover: row.cloud_cover,
+      windSpeed10m: row.wind_speed_10m,
+      precipitationMm: row.precipitation_mm,
+      source: row.source,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  upsertWeatherHours(entries: Omit<WeatherHourRecord, "updatedAt">[]): void {
+    if (!entries.length) {
+      return;
+    }
+    this.logger.log(`Upserting ${entries.length} weather hours`);
+    const stmt = this.db.prepare(`
+      INSERT INTO weather_hourly_cache (
+        latitude,
+        longitude,
+        hour_utc,
+        temperature_2m,
+        cloud_cover,
+        wind_speed_10m,
+        precipitation_mm,
+        source,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(latitude, longitude, hour_utc) DO UPDATE SET
+        temperature_2m = excluded.temperature_2m,
+        cloud_cover = excluded.cloud_cover,
+        wind_speed_10m = excluded.wind_speed_10m,
+        precipitation_mm = excluded.precipitation_mm,
+        source = excluded.source,
+        updated_at = excluded.updated_at
+    `);
+    const txn = this.db.transaction((items: Omit<WeatherHourRecord, "updatedAt">[]) => {
+      const updatedAt = new Date().toISOString();
+      for (const entry of items) {
+        stmt.run(
+          entry.latitude,
+          entry.longitude,
+          entry.hourUtc,
+          entry.temperature2m,
+          entry.cloudCover,
+          entry.windSpeed10m,
+          entry.precipitationMm,
+          entry.source,
+          updatedAt,
+        );
+      }
+    });
+    txn(entries);
+  }
+
   upsertDailyBacktestSummaries(entries: {
     date: string;
     configFingerprint: string;
@@ -311,6 +419,23 @@ export class StorageService implements OnModuleDestroy {
             id         TEXT PRIMARY KEY,
             applied_at TEXT NOT NULL
         );
+    `);
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS weather_hourly_cache
+        (
+            latitude         REAL NOT NULL,
+            longitude        REAL NOT NULL,
+            hour_utc         TEXT NOT NULL,
+            temperature_2m   REAL,
+            cloud_cover      REAL,
+            wind_speed_10m   REAL,
+            precipitation_mm REAL,
+            source           TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            PRIMARY KEY (latitude, longitude, hour_utc)
+        );
+        CREATE INDEX IF NOT EXISTS idx_weather_hourly_cache_lookup
+          ON weather_hourly_cache (latitude, longitude, hour_utc);
     `);
 
     const hadStrategyColumn = this.tableHasColumn("daily_backtest_summaries", "strategy");

@@ -54,6 +54,7 @@ export class SimulationSeedService implements OnModuleDestroy {
         forecast: prepared.forecast,
         solarForecast: prepared.solarForecast,
         forecastEras: prepared.forecastEras,
+        demandForecast: prepared.demandForecast,
         warnings: prepared.warnings,
         errors: prepared.errors,
         priceSnapshotEurPerKwh: prepared.priceSnapshot,

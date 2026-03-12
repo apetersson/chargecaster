@@ -1,5 +1,5 @@
 import { buildDerivedForecastEras } from "@chargecaster/domain";
-import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
+import type { DemandForecastEntry, ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
 import type { ChartDataset } from "./chartSetup";
 
 import { GRID_BORDER, GRID_FILL, GRID_MARKERS_LABEL, HISTORY_BORDER, HISTORY_POINT, PRICE_BORDER, PRICE_FILL, SOC_BORDER, SOC_FILL, SOLAR_BORDER, SOLAR_FILL, GAP_THRESHOLD_MS, DEMAND_BORDER, DEMAND_FILL } from "./constants";
@@ -234,17 +234,23 @@ const buildSolarSeries = (
 
 const buildDemandSeries = (
   history: HistoryPoint[],
-  futureEras: DerivedEra[],
+  demandForecast: DemandForecastEntry[],
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, entry.home_power_w ?? null))
     .filter((p): p is ProjectionPoint => p !== null);
 
   const futurePoints: ProjectionPoint[] = [];
-  for (const era of futureEras) {
-    const midpoint = eraMidpointMs(era);
-    const demand = era.demandPower.watts;
-    futurePoints.push({x: midpoint, y: demand, source: "forecast"});
+  for (const entry of demandForecast) {
+    const startMs = parseTimestamp(entry.start);
+    const endMs = parseTimestamp(entry.end ?? null);
+    if (startMs === null) {
+      continue;
+    }
+    const midpoint = endMs !== null && endMs > startMs
+      ? startMs + ((endMs - startMs) / 2)
+      : startMs;
+    futurePoints.push({x: midpoint, y: entry.house_power_w, source: "forecast"});
   }
   return buildCombinedSeries(historyPoints, futurePoints);
 };
@@ -335,6 +341,7 @@ const buildLegendGroups = (
 export const buildDatasets = (
   history: HistoryPoint[],
   forecast: ForecastEra[],
+  demandForecast: DemandForecastEntry[],
   oracleEntries: OracleEntry[],
   summary: SnapshotSummary | null,
 ): {
@@ -350,7 +357,7 @@ export const buildDatasets = (
   const {series: socSeries, currentMarker} = buildSoCSeries(history, futureEras, summary);
   const gridSeries = buildGridSeries(history, futureEras);
   const solarSeries = buildSolarSeries(history, futureEras);
-  const demandSeries = buildDemandSeries(history, futureEras);
+  const demandSeries = buildDemandSeries(history, demandForecast);
   const priceSeries = buildPriceSeries(history, futureEras);
   const powerSeries = [...gridSeries, ...solarSeries, ...demandSeries];
 

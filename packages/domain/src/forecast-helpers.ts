@@ -1,6 +1,6 @@
 import { Duration } from "./duration";
 import { Energy } from "./energy";
-import { clampRatio, powerFromEnergy } from "./battery-math";
+import { powerFromEnergy } from "./battery-math";
 import { Percentage } from "./percentage";
 import { Power } from "./power";
 import { EnergyPrice } from "./price";
@@ -9,7 +9,6 @@ import type {
   OracleEntry,
   PriceSlot,
   RawForecastEntry,
-  SnapshotSummary,
 } from "./simulation";
 import { TariffSlot } from "./tariff-slot";
 import { TimeSlot } from "./time-slot";
@@ -197,18 +196,6 @@ export function extractForecastEraSolar(
   return { energy, averagePower };
 }
 
-export function estimateProjectedDemand(
-  summary: Pick<SnapshotSummary, "house_load_w" | "solar_direct_use_ratio"> | null | undefined,
-  solarAveragePower: Power | null | undefined,
-): Power {
-  const directUseRatio = clampRatio(summary?.solar_direct_use_ratio ?? 0.6);
-  const baseLoad = typeof summary?.house_load_w === "number" && Number.isFinite(summary.house_load_w)
-    ? Power.fromWatts(summary.house_load_w)
-    : Power.zero();
-  const solarPower = solarAveragePower ?? Power.zero();
-  return baseLoad.add(solarPower.multiply(directUseRatio));
-}
-
 function extractTargetSoc(entry: OracleEntry | undefined): Percentage | null {
   const percent = entry?.end_soc_percent ?? entry?.target_soc_percent ?? null;
   if (typeof percent !== "number" || !Number.isFinite(percent)) {
@@ -220,9 +207,10 @@ function extractTargetSoc(entry: OracleEntry | undefined): Percentage | null {
 export function buildDerivedForecastEras(
   forecast: ForecastEra[],
   oracleEntries: OracleEntry[],
-  summary?: SnapshotSummary | null,
+  summary?: unknown,
   now = Date.now(),
 ): ForecastDerivedEra[] {
+  void summary;
   const oracleLookup = buildOracleLookup(oracleEntries);
   const derived: ForecastDerivedEra[] = [];
 
@@ -260,7 +248,7 @@ export function buildDerivedForecastEras(
       price: extractForecastEraPrice(era),
       solarEnergy: solar.energy,
       solarAveragePower: solar.averagePower,
-      demandPower: estimateProjectedDemand(summary, solar.averagePower),
+      demandPower: Power.zero(),
       gridPower: derivePowerFromEnergy(gridEnergy, slot.duration),
       targetSoc: extractTargetSoc(oracle),
       strategy: oracle?.strategy ?? null,

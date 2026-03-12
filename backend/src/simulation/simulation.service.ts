@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type {
+  DemandForecastEntry,
   ForecastEra,
   HistoryPoint,
   PriceSlot,
@@ -15,7 +16,6 @@ import {
   Energy,
   EnergyPrice,
   TimeSlot,
-  clampRatio,
   normalizePriceSlots,
 } from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
@@ -35,6 +35,7 @@ export interface SimulationInput {
   priceSnapshotEurPerKwh?: number | null;
   solarForecast?: RawSolarEntry[];
   forecastEras?: ForecastEra[];
+  demandForecast?: DemandForecastEntry[];
   observations?: {
     gridPowerW?: number | null;
     solarPowerW?: number | null;
@@ -97,11 +98,7 @@ export class SimulationService {
       logic: {
         interval_seconds: 300,
         min_hold_minutes: 20,
-        house_load_w: 1200,
         allow_battery_export: true,
-      },
-      solar: {
-        direct_use_ratio: 0.6,
       },
     };
 
@@ -123,6 +120,7 @@ export class SimulationService {
     const liveState = {battery_soc: resolvedSoCPercent};
     const slots = normalizePriceSlots(input.forecast);
     const solarSlots = normalizeSolarSlots(input.solarForecast ?? []);
+    const demandSlots = normalizeDemandForecastSlots(input.demandForecast ?? []);
     const warnings = [...(input.warnings ?? [])];
     const errors = [...(input.errors ?? [])];
     const forecastErasInput = input.forecastEras ?? [];
@@ -155,14 +153,33 @@ export class SimulationService {
     });
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
-
-    const directUseRatio = clampRatio(input.config.solar?.direct_use_ratio ?? 0);
     const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
+    const demandProfilePerSlot = slots.map((priceSlot) => {
+      const priceSlotWindow = TimeSlot.fromDates(priceSlot.start, priceSlot.end);
+      return demandSlots.reduce((acc, sample) => {
+        const overlap = priceSlotWindow.overlapDuration(sample.slot);
+        if (overlap.milliseconds === 0) {
+          return acc;
+        }
+        const ratio = overlap.ratioOf(priceSlotWindow.duration).value;
+        acc.house += sample.housePowerW * ratio;
+        acc.direct += sample.directPvUseW * ratio;
+        acc.residual += sample.residualHousePowerW * ratio;
+        acc.coverage += ratio;
+        return acc;
+      }, { house: 0, direct: 0, residual: 0, coverage: 0 });
+    }).map((entry) => ({
+      housePowerW: entry.coverage > 0 ? entry.house : null,
+      directPvUseW: entry.coverage > 0 ? entry.direct : null,
+      residualHousePowerW: entry.coverage > 0 ? entry.residual : null,
+    }));
 
     // Run the DP-based optimiser with the caller's grid and export preferences
     const result = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
-      pvDirectUseRatio: directUseRatio.ratio,
+      houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
+      directPvUseWattsPerSlot: demandProfilePerSlot.map((entry) => entry.directPvUseW ?? undefined),
+      residualHouseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.residualHousePowerW ?? undefined),
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
     });
@@ -207,7 +224,9 @@ export class SimulationService {
     // Run a second pass that mimics "auto" mode (no active grid charging) for comparison
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
-      pvDirectUseRatio: directUseRatio.ratio,
+      houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
+      directPvUseWattsPerSlot: demandProfilePerSlot.map((entry) => entry.directPvUseW ?? undefined),
+      residualHouseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.residualHousePowerW ?? undefined),
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: false,
@@ -216,8 +235,6 @@ export class SimulationService {
     const snapshot: SnapshotPayload = {
       timestamp: result.timestamp,
       interval_seconds: input.config.logic.interval_seconds ?? null,
-      house_load_w: input.config.logic.house_load_w ?? null,
-      solar_direct_use_ratio: directUseRatio.ratio,
       current_soc_percent: result.initial_soc_percent,
       next_step_soc_percent: result.next_step_soc_percent,
       recommended_soc_percent: result.recommended_soc_percent,
@@ -236,6 +253,7 @@ export class SimulationService {
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
       forecast_eras: forecastEras,
+      demand_forecast: input.demandForecast ?? [],
       oracle_entries: result.oracle_entries,
       history: [],
       warnings,
@@ -403,6 +421,13 @@ interface SolarSlot {
   energy: Energy;
 }
 
+interface DemandSlot {
+  slot: TimeSlot;
+  housePowerW: number;
+  directPvUseW: number;
+  residualHousePowerW: number;
+}
+
 function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
   const slots: SolarSlot[] = [];
   for (const entry of raw) {
@@ -434,6 +459,27 @@ function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
   }
 
   return slots.sort((a, b) => a.slot.start.getTime() - b.slot.start.getTime());
+}
+
+function normalizeDemandForecastSlots(raw: DemandForecastEntry[]): DemandSlot[] {
+  const slots: DemandSlot[] = [];
+  for (const entry of raw) {
+    const start = parseTimestamp(entry.start);
+    if (!start) {
+      continue;
+    }
+    const end = parseTimestamp(entry.end);
+    const slotTime = end && end.getTime() > start.getTime()
+      ? TimeSlot.fromDates(start, end)
+      : TimeSlot.fromStartAndDuration(start, DEFAULT_SLOT_DURATION);
+    slots.push({
+      slot: slotTime,
+      housePowerW: entry.house_power_w,
+      directPvUseW: entry.direct_pv_use_w,
+      residualHousePowerW: entry.residual_house_power_w,
+    });
+  }
+  return slots.sort((left, right) => left.slot.start.getTime() - right.slot.start.getTime());
 }
 
 function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {

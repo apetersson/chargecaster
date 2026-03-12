@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { parseEvccState, parseMarketForecast } from "../src/config/schemas";
+import { parseConfigDocument, parseEvccState, parseMarketForecast } from "../src/config/schemas";
 
 const fixturePath = (name: string) => join(process.cwd(), "fixtures", name);
 
@@ -44,5 +44,24 @@ describe("configuration schema parsers", () => {
     expect(parsed.homePowerW).toBeCloseTo(1292.276, 3);
     expect(parsed.evChargePowerW).toBeCloseTo(10984.894, 3);
     expect(parsed.siteDemandPowerW).toBeCloseTo(12277.17, 2);
+  });
+
+  it("accepts location config and rejects retired direct-use config", () => {
+    const parsed = parseConfigDocument({
+      location: {
+        latitude: 48.235,
+        longitude: 16.134,
+      },
+      logic: {
+        interval_seconds: 300,
+        house_load_w: 2200,
+      },
+    });
+
+    expect(parsed.location?.latitude).toBe(48.235);
+    expect(parsed.location?.longitude).toBe(16.134);
+    expect(parsed.logic?.interval_seconds).toBe(300);
+    expect("house_load_w" in (parsed.logic ?? {})).toBe(false);
+    expect(() => parseConfigDocument({ solar: { direct_use_ratio: 0.6 } })).toThrow();
   });
 });

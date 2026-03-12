@@ -105,8 +105,8 @@ package should be built first so `dist/` is available (handled by `pnpm build:al
 
 ## Configuration
 
-- `config.local.yaml` is the canonical sample. Copy or symlink it to customise credentials, tariff providers, or solar
-  forecasts.
+- `config.local.yaml` is the canonical sample. Copy or symlink it to customise credentials, tariff providers, and the
+  site location used for weather-backed demand forecasting.
 - The backend reads `CHARGECASTER_CONFIG` if set; otherwise it falls back to `../config.local.yaml` relative to the
   backend working directory.
 - `data/db/backend.sqlite` is created automatically; mount `data/` as a volume to persist history.
@@ -118,8 +118,8 @@ Key environment variables:
 - `NODE_ENV` – set to `production` in the container image.
 
 Strict validation: The configuration parser rejects unknown top‑level keys. Valid sections are `dry_run`, `fronius`,
-`battery`, `price`, `logic`, `evcc`, `market_data`, `solar`, and `logging`. Unknown keys will raise a validation error
-at startup.
+`battery`, `price`, `logic`, `location`, `evcc`, `market_data`, and `logging`. Unknown keys will raise a validation
+error at startup.
 
 ---
 

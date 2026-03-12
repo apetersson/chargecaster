@@ -9,9 +9,9 @@ This document defines how Chargecaster models electrical power flows between the
 - Focuses on single-home, AC-coupled PV + battery with grid connection.
 
 ## Key Terms and Symbols
-- BP: Base house load (W), from `logic.house_load_w`.
+- BP: Predicted house load (W), from the hourly demand forecast.
 - PV: PV power (W) during the slot (we work in energy internally; formulas below use power for clarity).
-- r: Direct-use ratio in [0,1], from `solar.direct_use_ratio`.
+- PVdirect: Predicted direct PV overlap with the house load, constrained per slot to `0 <= PVdirect <= min(BP, PV)`.
 
 [//]: # (todo check PVdirect and EP logic)
 - PVdirect = min(BP, r · PV) — PV consumed instantly by the house. 
@@ -71,8 +71,8 @@ This document defines how Chargecaster models electrical power flows between the
 - When available in the source state, a snapshot price may provide a default grid fee; otherwise, configure it explicitly.
 
 ## Slot Math Recap
-- Given BP, PV, and r:
-  - PVdirect = min(BP, r · PV)
+- Given BP and PV:
+  - PVdirect = min(BP, PV) in the cold-start fallback path, otherwise the demand forecaster provides a slot-level direct-use prediction constrained to the same physical bounds
   - EP = BP − PVdirect
   - PVavail = max(0, PV − PVdirect)
 - Battery charge in a slot:
@@ -115,11 +115,9 @@ This document defines how Chargecaster models electrical power flows between the
   - `grid_fee_eur_per_kwh`
   - `feed_in_tariff_eur_per_kwh`
 - logic
-  - `house_load_w`
   - `interval_seconds`
   - `allow_battery_export` (false forbids battery‑origin export)
 - solar
-  - `direct_use_ratio`
 
 ## Product Notes / Decisions
 - PV-first before feed‑in is a hard rule driven by regulation and homeowner priority on self‑consumption.

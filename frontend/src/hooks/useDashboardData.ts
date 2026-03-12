@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { trpcClient } from "../api/trpc";
 import type {
   DashboardOutputs,
+  DemandForecastEntry,
   ForecastEra,
   HistoryPoint,
   OracleEntry,
@@ -38,6 +39,7 @@ type DashboardDataState = {
   summary: DashboardOutputs["summary"] | null;
   history: HistoryPoint[];
   forecast: ForecastEra[];
+  demandForecast: DemandForecastEntry[];
   oracleEntries: OracleEntry[];
   loading: boolean;
   error: string | null;
@@ -48,6 +50,7 @@ export function useDashboardData(): DashboardDataState {
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastEra[]>([]);
+  const [demandForecast, setDemandForecast] = useState<DemandForecastEntry[]>([]);
   const [oracleEntries, setOracleEntries] = useState<OracleEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,22 +59,24 @@ export function useDashboardData(): DashboardDataState {
     const execute = async () => {
       try {
         setLoading(true);
-        const [summaryData, historyData, forecastData, oracleData] = await Promise.all([
+        const [summaryData, historyData, forecastData, demandForecastData, oracleData] = await Promise.all([
           trpcClient.dashboard.summary.query(),
           trpcClient.dashboard.history.query(),
           trpcClient.dashboard.forecast.query(),
+          trpcClient.dashboard.demandForecast.query(),
           trpcClient.dashboard.oracle.query(),
         ]);
 
         setSummary(summaryData);
         setHistory(
-          historyData.entries.map((entry) => ({
+          historyData.entries.map((entry: HistoryPoint) => ({
             ...entry,
             ev_charge_power_w: readOptionalHistoryNumber(entry, "ev_charge_power_w"),
             site_demand_power_w: readOptionalHistoryNumber(entry, "site_demand_power_w"),
           })),
         );
         setForecast(forecastData.eras);
+        setDemandForecast(demandForecastData.entries);
         setOracleEntries(oracleData.entries);
         setError(null);
       } catch (err) {
@@ -96,6 +101,7 @@ export function useDashboardData(): DashboardDataState {
     summary,
     history,
     forecast,
+    demandForecast,
     oracleEntries,
     loading,
     error,

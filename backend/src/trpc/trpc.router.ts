@@ -35,21 +35,13 @@ const priceSchema = z.object({
 const logicSchema = z.object({
   interval_seconds: z.number().positive().optional(),
   min_hold_minutes: z.number().nonnegative().optional(),
-  house_load_w: z.number().nonnegative().optional(),
   allow_battery_export: z.boolean().optional(),
 });
-
-const solarSchema = z
-  .object({
-    direct_use_ratio: z.number().min(0).max(1).optional(),
-  })
-  .optional();
 
 const configSchema: z.ZodType<SimulationConfig> = z.object({
   battery: batterySchema,
   price: priceSchema,
   logic: logicSchema,
-  solar: solarSchema,
 });
 
 const jsonScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -113,6 +105,14 @@ export class TrpcRouter {
           this.logger.log("tRPC.dashboard.forecast requested");
           const snap = this.simulationService.ensureSeedFromFixture();
           return this.forecastService.buildResponse(snap.timestamp, Array.isArray(snap.forecast_eras) ? snap.forecast_eras : []);
+        }),
+        demandForecast: t.procedure.query(() => {
+          this.logger.log("tRPC.dashboard.demandForecast requested");
+          const snap = this.simulationService.ensureSeedFromFixture();
+          return {
+            generated_at: snap.timestamp,
+            entries: Array.isArray(snap.demand_forecast) ? snap.demand_forecast : [],
+          };
         }),
         oracle: t.procedure.query(() => {
           this.logger.log("tRPC.dashboard.oracle requested");

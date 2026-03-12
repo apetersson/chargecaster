@@ -1,12 +1,13 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
-import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
+import type { DemandForecastEntry, ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
 import { parseTimestamp } from "../simulation/solar";
 import type { ConfigDocument } from "./schemas";
 import { SimulationConfigFactory } from "./simulation-config.factory";
 import { MarketDataService } from "./market-data.service";
 import { EvccDataService } from "./evcc-data.service";
 import { ForecastAssemblyService } from "./forecast-assembly.service";
+import { DemandForecastService } from "./demand-forecast.service";
 
 export interface PreparedSimulation {
   simulationConfig: SimulationConfig;
@@ -17,11 +18,14 @@ export interface PreparedSimulation {
   priceSnapshot: number | null;
   solarForecast: RawSolarEntry[];
   forecastEras: ForecastEra[];
+  demandForecast: DemandForecastEntry[];
   liveGridPowerW: number | null;
   liveSolarPowerW: number | null;
   liveHomePowerW: number | null;
   liveEvChargePowerW: number | null;
   liveSiteDemandPowerW: number | null;
+  evConnected: boolean;
+  evCharging: boolean;
   intervalSeconds: number | null;
 }
 
@@ -170,6 +174,7 @@ export class SimulationPreparationService {
     @Inject(MarketDataService) private readonly marketDataService: MarketDataService,
     @Inject(EvccDataService) private readonly evccDataService: EvccDataService,
     @Inject(ForecastAssemblyService) private readonly forecastAssembly: ForecastAssemblyService,
+    @Inject(DemandForecastService) private readonly demandForecastService: DemandForecastService,
   ) {}
 
   async prepare(configFile: ConfigDocument): Promise<PreparedSimulation> {
@@ -239,6 +244,14 @@ export class SimulationPreparationService {
     );
 
     forecast = forecastErasResult.forecastEntries;
+    const demandForecast = await this.demandForecastService.buildForecast({
+      config: configFile,
+      forecastEras: forecastErasResult.eras,
+      liveHomePowerW: evccResult.homePowerW,
+      liveEvChargePowerW: evccResult.evChargePowerW,
+      evConnected: evccResult.evConnected,
+      evCharging: evccResult.evCharging,
+    });
 
     const priceSnapshotValue = priceSnapshot ?? this.forecastAssembly.derivePriceSnapshot(forecast, simulationConfig);
 
@@ -251,11 +264,14 @@ export class SimulationPreparationService {
       priceSnapshot: priceSnapshotValue,
       solarForecast,
       forecastEras: forecastErasResult.eras,
+      demandForecast,
       liveGridPowerW: evccResult.gridPowerW,
       liveSolarPowerW: evccResult.solarPowerW,
       liveHomePowerW: evccResult.homePowerW,
       liveEvChargePowerW: evccResult.evChargePowerW,
       liveSiteDemandPowerW: evccResult.siteDemandPowerW,
+      evConnected: evccResult.evConnected,
+      evCharging: evccResult.evCharging,
       intervalSeconds: this.configFactory.getIntervalSeconds(simulationConfig),
     };
   }

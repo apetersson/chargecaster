@@ -138,7 +138,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       : null;
     const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
     const feedInTariffEur = Math.max(0, Number(config.price.feed_in_tariff_eur_per_kwh ?? 0));
-    const houseLoadWFallback = Number(config.logic.house_load_w ?? 1200);
+    const houseLoadWFallback = 2200;
     const marginalPrice =
       options?.marginalPrice ?? (options?.snapshot ? this.deriveMarginalDischargePrice(options.snapshot, config) : null);
     if (marginalPrice == null) {

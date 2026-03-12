@@ -25,6 +25,8 @@ export class EvccDataService {
     homePowerW: number | null;
     evChargePowerW: number | null;
     siteDemandPowerW: number | null;
+    evConnected: boolean;
+    evCharging: boolean;
   }> {
     const {
       enabled = true,
@@ -82,6 +84,8 @@ export class EvccDataService {
         homePowerW: parsed.homePowerW,
         evChargePowerW: parsed.evChargePowerW,
         siteDemandPowerW: parsed.siteDemandPowerW,
+        evConnected: parsed.evConnected,
+        evCharging: parsed.evCharging,
       };
     } catch (error) {
       const message = `EVCC data fetch failed: ${describeError(error)}`;
@@ -101,6 +105,8 @@ export class EvccDataService {
     homePowerW: number | null;
     evChargePowerW: number | null;
     siteDemandPowerW: number | null;
+    evConnected: boolean;
+    evCharging: boolean;
   } {
     return {
       forecast: [],
@@ -112,6 +118,8 @@ export class EvccDataService {
       homePowerW: null,
       evChargePowerW: null,
       siteDemandPowerW: null,
+      evConnected: false,
+      evCharging: false,
     };
   }
 

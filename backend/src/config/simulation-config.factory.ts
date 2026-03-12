@@ -26,7 +26,6 @@ export class SimulationConfigFactory {
     const battery = config.battery ?? {};
     const price = config.price ?? {};
     const logic = config.logic ?? {};
-    const solar = config.solar ?? {};
 
     const capacity = coerceNumber(battery.capacity_kwh) ?? 0;
     const maxChargePower = coerceNumber(battery.max_charge_power_w) ?? 0;
@@ -54,18 +53,7 @@ export class SimulationConfigFactory {
       minHoldMinutesRaw != null && minHoldMinutesRaw >= 0
         ? minHoldMinutesRaw
         : undefined;
-    const houseLoadRaw = coerceNumber(logic.house_load_w);
-    const houseLoad =
-      houseLoadRaw != null && houseLoadRaw >= 0
-        ? houseLoadRaw
-        : undefined;
     const allowBatteryExport = logic.allow_battery_export ?? true;
-
-    const directUseRatioRaw = coerceNumber(solar.direct_use_ratio);
-    const directUseRatio =
-      directUseRatioRaw == null
-        ? null
-        : Math.min(Math.max(directUseRatioRaw, 0), 1);
     const maxSolarChargePowerRaw = coerceNumber(battery.max_charge_power_solar_w);
     const maxSolarChargePower =
       maxSolarChargePowerRaw != null && maxSolarChargePowerRaw >= 0
@@ -88,15 +76,8 @@ export class SimulationConfigFactory {
       logic: {
         interval_seconds: intervalSeconds,
         min_hold_minutes: minHoldMinutes ?? null,
-        house_load_w: houseLoad ?? null,
         allow_battery_export: allowBatteryExport,
       },
-      solar:
-        directUseRatio == null
-          ? undefined
-          : {
-            direct_use_ratio: directUseRatio,
-          },
     };
   }
 

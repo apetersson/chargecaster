@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import type { ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
+import type { DemandForecastEntry, ForecastEra, HistoryPoint, OracleEntry, SnapshotSummary } from "../../types";
 import { buildDatasets } from "./buildDatasets";
 import type { AxisBounds, LegendGroup, ProjectionPoint, TimeRangeMs } from "./types";
 import type { ChartDataset } from "./chartSetup";
@@ -18,11 +18,12 @@ interface ProjectionDatasetResult {
 export const useProjectionDatasets = (
   history: HistoryPoint[],
   forecast: ForecastEra[],
+  demandForecast: DemandForecastEntry[],
   oracleEntries: OracleEntry[],
   summary: SnapshotSummary | null,
 ): ProjectionDatasetResult => {
   return useMemo(
-    () => buildDatasets(history, forecast, oracleEntries, summary),
-    [history, forecast, oracleEntries, summary],
+    () => buildDatasets(history, forecast, demandForecast, oracleEntries, summary),
+    [history, forecast, demandForecast, oracleEntries, summary],
   );
 };

@@ -29,7 +29,6 @@ const config = {
   logic: {
     interval_seconds: 300,
     min_hold_minutes: 20,
-    house_load_w: 1200,
   },
 };
 
@@ -48,7 +47,7 @@ describe("dashboard tRPC", () => {
     const testDbPath = join(process.cwd(), "..", "data", "test_db", "backend-e2e.sqlite");
     testDbDir = join(process.cwd(), "..", "data", "test_db");
     if (existsSync(testDbDir)) {
-      throw new Error(`Refusing to run dashboard e2e: test DB folder already exists at ${testDbDir}`);
+      rmSync(testDbDir, { recursive: true, force: true });
     }
     originalStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
     process.env.CHARGECASTER_STORAGE_PATH = testDbPath;
@@ -68,7 +67,6 @@ describe("dashboard tRPC", () => {
       logic: {
         interval_seconds: 300,
         min_hold_minutes: 20,
-        house_load_w: 1200,
         allow_battery_export: true,
       },
       logging: {
@@ -167,7 +165,9 @@ describe("dashboard tRPC", () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
     rmSync(testDbDir, { recursive: true, force: true });
     if (originalStoragePath === undefined) {
       delete process.env.CHARGECASTER_STORAGE_PATH;

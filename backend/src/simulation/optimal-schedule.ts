@@ -1,6 +1,5 @@
 import type { OracleEntry, PriceSlot, SimulationConfig } from "@chargecaster/domain";
 import {
-  clampRatio,
   computeGridEnergyCostEur,
   Duration,
   Energy,
@@ -17,7 +16,9 @@ const HOLD_ENERGY_THRESHOLD_KWH = 0.02;
 
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
-  pvDirectUseRatio?: number;
+  houseLoadWattsPerSlot?: Array<number | undefined>;
+  directPvUseWattsPerSlot?: Array<number | undefined>;
+  residualHouseLoadWattsPerSlot?: Array<number | undefined>;
   feedInTariffEurPerKwh?: number;
   allowBatteryExport?: boolean;
   allowGridChargeFromGrid?: boolean;
@@ -92,12 +93,11 @@ interface SimulationContext {
   minAllowedSocPercent: number;
   maxChargeSoC: number;
   networkTariffEurPerKwh: number;
-  houseLoadW: number;
+  fallbackHouseLoadW: number;
   capacityKwh: number;
   maxChargePowerW: number;
   maxSolarChargePowerW: number | null;
   maxDischargePowerW: number | null;
-  directUseRatio: number;
   feedInTariff: number;
   allowBatteryExport: boolean;
   allowGridChargeFromGrid: boolean;
@@ -138,7 +138,7 @@ function prepareSimulationContext(
     throw new Error("price forecast is empty");
   }
 
-  const {battery, price, logic, solar} = cfg;
+  const {battery, price, logic} = cfg;
 
   const capacityKwh = Number(battery.capacity_kwh ?? 0);
   if (!(capacityKwh > 0)) {
@@ -147,7 +147,9 @@ function prepareSimulationContext(
 
   const normalizedOptions = {
     solarGenerationPerSlotKwh: options.solarGenerationKwhPerSlot ?? [],
-    directUseRatio: clampRatio(options.pvDirectUseRatio ?? solar?.direct_use_ratio ?? 0).ratio,
+    houseLoadWattsPerSlot: options.houseLoadWattsPerSlot ?? [],
+    directPvUseWattsPerSlot: options.directPvUseWattsPerSlot ?? [],
+    residualHouseLoadWattsPerSlot: options.residualHouseLoadWattsPerSlot ?? [],
     feedInTariff: Math.max(
       0,
       Number(options.feedInTariffEurPerKwh ?? price.feed_in_tariff_eur_per_kwh ?? 0),
@@ -168,7 +170,7 @@ function prepareSimulationContext(
     ? Math.max(0, Number(battery.max_discharge_power_w))
     : null;
   const networkTariffEurPerKwh = gridFee(cfg);
-  const houseLoadW = logic.house_load_w ?? 1200;
+  const fallbackHouseLoadW = 2200;
 
   let currentSoCPercent = Number(liveState.battery_soc ?? 50);
   if (Number.isNaN(currentSoCPercent)) {
@@ -221,9 +223,11 @@ function prepareSimulationContext(
 
   const slotProfiles = buildSlotProfiles({
     slots,
-    directUseRatio: normalizedOptions.directUseRatio,
     solarGenerationPerSlotKwh: normalizedOptions.solarGenerationPerSlotKwh,
-    houseLoadW,
+    houseLoadWattsPerSlot: normalizedOptions.houseLoadWattsPerSlot,
+    directPvUseWattsPerSlot: normalizedOptions.directPvUseWattsPerSlot,
+    residualHouseLoadWattsPerSlot: normalizedOptions.residualHouseLoadWattsPerSlot,
+    fallbackHouseLoadW,
     networkTariffEurPerKwh,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
     maxChargePowerW,
@@ -248,12 +252,11 @@ function prepareSimulationContext(
     minAllowedSocPercent,
     maxChargeSoC,
     networkTariffEurPerKwh,
-    houseLoadW,
+    fallbackHouseLoadW,
     capacityKwh,
     maxChargePowerW,
     maxSolarChargePowerW,
     maxDischargePowerW,
-    directUseRatio: normalizedOptions.directUseRatio,
     feedInTariff: normalizedOptions.feedInTariff,
     allowBatteryExport: normalizedOptions.allowBatteryExport,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
@@ -263,9 +266,11 @@ function prepareSimulationContext(
 
 function buildSlotProfiles(params: {
   slots: PriceSlot[];
-  directUseRatio: number;
   solarGenerationPerSlotKwh: number[];
-  houseLoadW: number;
+  houseLoadWattsPerSlot: Array<number | undefined>;
+  directPvUseWattsPerSlot: Array<number | undefined>;
+  residualHouseLoadWattsPerSlot: Array<number | undefined>;
+  fallbackHouseLoadW: number;
   networkTariffEurPerKwh: number;
   allowGridChargeFromGrid: boolean;
   maxChargePowerW: number;
@@ -274,11 +279,24 @@ function buildSlotProfiles(params: {
 }): SlotProfile[] {
   return params.slots.map((slot, index) => {
     const durationHours = slot.durationHours;
-    const loadEnergyKwh = energyKwhFromPowerWatts(params.houseLoadW, durationHours);
     const solarGenerationKwh = params.solarGenerationPerSlotKwh[index] ?? 0;
-    const directTargetKwh = Math.max(0, solarGenerationKwh * params.directUseRatio);
-    const directUseEnergyKwh = Math.min(loadEnergyKwh, directTargetKwh);
-    const loadAfterDirectUseKwh = loadEnergyKwh - directUseEnergyKwh;
+    const explicitLoadEnergyKwh = energyKwhFromOptionalPowerWatts(params.houseLoadWattsPerSlot[index], durationHours);
+    const explicitDirectUseEnergyKwh = energyKwhFromOptionalPowerWatts(params.directPvUseWattsPerSlot[index], durationHours);
+    const explicitResidualEnergyKwh = energyKwhFromOptionalPowerWatts(params.residualHouseLoadWattsPerSlot[index], durationHours);
+    const loadEnergyKwh = explicitLoadEnergyKwh ??
+      (
+        explicitDirectUseEnergyKwh != null || explicitResidualEnergyKwh != null
+          ? (explicitDirectUseEnergyKwh ?? 0) + (explicitResidualEnergyKwh ?? 0)
+          : energyKwhFromPowerWatts(params.fallbackHouseLoadW, durationHours)
+      );
+    const directUseEnergyKwh = clampEnergyKwh(
+      explicitDirectUseEnergyKwh ?? Math.max(0, loadEnergyKwh - (explicitResidualEnergyKwh ?? loadEnergyKwh)),
+      0,
+      Math.min(loadEnergyKwh, solarGenerationKwh),
+    );
+    const loadAfterDirectUseKwh = explicitResidualEnergyKwh != null
+      ? Math.max(0, explicitResidualEnergyKwh)
+      : Math.max(0, loadEnergyKwh - directUseEnergyKwh);
     const availableSolarKwh = Math.max(0, solarGenerationKwh - directUseEnergyKwh);
     const priceTotal = slot.price + params.networkTariffEurPerKwh;
     const baselineGridEnergyKwh = loadAfterDirectUseKwh - availableSolarKwh;
@@ -640,6 +658,13 @@ function energyKwhFromPowerWatts(powerWatts: number, durationHours: number): num
   return energyFromPower(Power.fromWatts(powerWatts), Duration.fromHours(durationHours)).kilowattHours;
 }
 
+function energyKwhFromOptionalPowerWatts(powerWatts: number | undefined, durationHours: number): number | null {
+  if (typeof powerWatts !== "number" || !Number.isFinite(powerWatts)) {
+    return null;
+  }
+  return energyKwhFromPowerWatts(Math.max(0, powerWatts), durationHours);
+}
+
 function powerWattsFromEnergyKwh(energyKwh: number, durationHours: number): number {
   return powerFromEnergy(Energy.fromKilowattHours(energyKwh), Duration.fromHours(durationHours)).watts;
 }
@@ -650,6 +675,10 @@ function computeGridCostEur(gridEnergyKwh: number, importPriceEur: number, feedI
     EnergyPrice.fromEurPerKwh(importPriceEur),
     EnergyPrice.fromEurPerKwh(feedInTariffEur),
   );
+}
+
+function clampEnergyKwh(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function adjustForPvExportDuringRollout(

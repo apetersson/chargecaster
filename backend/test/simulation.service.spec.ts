@@ -27,7 +27,6 @@ const baseConfig: SimulationConfig = {
   logic: {
     interval_seconds: 300,
     min_hold_minutes: 0,
-    house_load_w: 1500,
   },
 };
 
@@ -48,7 +47,9 @@ describe("simulateOptimalSchedule oracle output", () => {
       slots,
       {
         solarGenerationKwhPerSlot: [0, 0],
-        pvDirectUseRatio: 0,
+        houseLoadWattsPerSlot: [1500, 1500],
+        directPvUseWattsPerSlot: [0, 0],
+        residualHouseLoadWattsPerSlot: [1500, 1500],
       },
     );
 
@@ -84,10 +85,6 @@ describe("simulateOptimalSchedule oracle output", () => {
       },
       logic: {
         ...baseConfig.logic,
-        house_load_w: 1000,
-      },
-      solar: {
-        direct_use_ratio: 0.2,
       },
     };
 
@@ -100,7 +97,9 @@ describe("simulateOptimalSchedule oracle output", () => {
       slots,
       {
         solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
-        pvDirectUseRatio: 0.2,
+        houseLoadWattsPerSlot: [1000, 1000],
+        directPvUseWattsPerSlot: [360, 40],
+        residualHouseLoadWattsPerSlot: [640, 960],
       },
     );
 
@@ -172,11 +171,7 @@ describe("simulateOptimalSchedule oracle output", () => {
       logic: {
         interval_seconds: 300,
         min_hold_minutes: 0,
-        house_load_w: 2200,
         allow_battery_export: false,
-      },
-      solar: {
-        direct_use_ratio: 0.6,
       },
     };
 
@@ -186,7 +181,7 @@ describe("simulateOptimalSchedule oracle output", () => {
       slots,
       {
         solarGenerationKwhPerSlot,
-        pvDirectUseRatio: config.solar?.direct_use_ratio ?? 0,
+        houseLoadWattsPerSlot: slots.map(() => 2200),
         feedInTariffEurPerKwh: config.price.feed_in_tariff_eur_per_kwh ?? 0,
         allowBatteryExport: config.logic.allow_battery_export ?? true,
       },

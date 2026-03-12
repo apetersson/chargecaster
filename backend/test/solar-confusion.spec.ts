@@ -52,13 +52,9 @@ describe("solar-confusion fixture: project grid power including solar", () => {
       logic: {
         interval_seconds: 300,
         min_hold_minutes: 0,
-        house_load_w: 2200,
         // Enforce no battery-origin export (regulatory: disabled);
         // export only allowed from PV when battery cannot accept more this slot or is full.
         allow_battery_export: false,
-      },
-      solar: {
-        direct_use_ratio: 0.6,
       },
     };
 
@@ -68,7 +64,7 @@ describe("solar-confusion fixture: project grid power including solar", () => {
       slots,
       {
         solarGenerationKwhPerSlot: solarKwhPerSlot,
-        pvDirectUseRatio: 0.6,
+        houseLoadWattsPerSlot: slots.map(() => 2200),
         feedInTariffEurPerKwh: 0.03,
         allowBatteryExport: false,
       },

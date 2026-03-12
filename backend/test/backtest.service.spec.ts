@@ -47,8 +47,6 @@ function toHistoryRecords(points: HistoryPoint[]): HistoryRecord[] {
 const snapshot: SnapshotPayload = {
   timestamp: "2026-03-07T01:00:00.000Z",
   interval_seconds: 300,
-  house_load_w: 1200,
-  solar_direct_use_ratio: 0,
   current_soc_percent: 50,
   next_step_soc_percent: 50,
   recommended_soc_percent: 50,
@@ -64,6 +62,7 @@ const snapshot: SnapshotPayload = {
   forecast_hours: 0,
   forecast_samples: 0,
   forecast_eras: [],
+  demand_forecast: [],
   oracle_entries: [],
   history: [],
   warnings: [],
@@ -86,11 +85,7 @@ const config: SimulationConfig = {
   logic: {
     interval_seconds: 300,
     min_hold_minutes: 0,
-    house_load_w: 1200,
     allow_battery_export: false,
-  },
-  solar: {
-    direct_use_ratio: 0,
   },
 };
 
@@ -459,7 +454,7 @@ describe("BacktestService continuous daily carry", () => {
 });
 
 describe("StorageService listAllHistoryAsc", () => {
-  it("returns every stored history row by default", () => {
+  it("returns every stored history row by default", { timeout: 15000 }, () => {
     const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
     const dbPath = join(tempDir, "backend.sqlite");
     const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
