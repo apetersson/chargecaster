@@ -24,8 +24,8 @@
   },
   "pnpm": {
     "overrides": {
-      "@nestjs/platform-fastify>fastify": "5.8.2",
-      "vite>esbuild": "0.27.3"
+      "@nestjs/common>file-type": "21.3.1",
+      "@nestjs/platform-fastify>fastify": "5.8.2"
     },
     "onlyBuiltDependencies": [
       "@nestjs/core",

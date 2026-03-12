@@ -233,7 +233,7 @@ Prereqs: logged in to Docker (`docker login`) and Docker Buildx available.
 
 - In dev, run the backend without static files and use Vite for the SPA:
   - Backend: `backend:dev:api` at `http://localhost:4000` (tRPC at `/trpc`).
-  - Frontend: `yarn dev` at `http://localhost:5173` with `VITE_TRPC_URL=http://localhost:4000/trpc`.
+  - Frontend: `VITE_TRPC_URL=http://localhost:4000/trpc pnpm --filter chargecaster-frontend dev` at `http://localhost:5173`.
 - In containers, the backend serves the built SPA from `/public` when `SERVE_STATIC=true` (default in Dockerfiles).
   - Container listens on `8080` and Compose maps it to `6969`.
 
