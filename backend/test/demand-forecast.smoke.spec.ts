@@ -4,7 +4,7 @@ import DatabaseConstructor from "better-sqlite3";
 import YAML from "yaml";
 import { describe, expect, it } from "vitest";
 
-import type { ForecastEra, HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
+import type { HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
 import { DemandForecastService } from "../src/config/demand-forecast.service";
 import { parseConfigDocument } from "../src/config/schemas";
 import { WeatherService } from "../src/config/weather.service";
@@ -77,7 +77,7 @@ describe("Demand forecast smoke", () => {
 
     const forecast = await demandForecastService.buildForecast({
       config,
-      forecastEras: Array.isArray(snapshot.forecast_eras) ? snapshot.forecast_eras as ForecastEra[] : [],
+      forecastEras: Array.isArray(snapshot.forecast_eras) ? snapshot.forecast_eras : [],
       liveHomePowerW: latestHistory?.home_power_w ?? null,
       liveEvChargePowerW: latestHistory?.ev_charge_power_w ?? null,
       evConnected: (latestHistory?.ev_charge_power_w ?? 0) > 0,

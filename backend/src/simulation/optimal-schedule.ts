@@ -16,9 +16,9 @@ const HOLD_ENERGY_THRESHOLD_KWH = 0.02;
 
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
-  houseLoadWattsPerSlot?: Array<number | undefined>;
-  directPvUseWattsPerSlot?: Array<number | undefined>;
-  residualHouseLoadWattsPerSlot?: Array<number | undefined>;
+  houseLoadWattsPerSlot?: (number | undefined)[];
+  directPvUseWattsPerSlot?: (number | undefined)[];
+  residualHouseLoadWattsPerSlot?: (number | undefined)[];
   feedInTariffEurPerKwh?: number;
   allowBatteryExport?: boolean;
   allowGridChargeFromGrid?: boolean;
@@ -267,9 +267,9 @@ function prepareSimulationContext(
 function buildSlotProfiles(params: {
   slots: PriceSlot[];
   solarGenerationPerSlotKwh: number[];
-  houseLoadWattsPerSlot: Array<number | undefined>;
-  directPvUseWattsPerSlot: Array<number | undefined>;
-  residualHouseLoadWattsPerSlot: Array<number | undefined>;
+  houseLoadWattsPerSlot: (number | undefined)[];
+  directPvUseWattsPerSlot: (number | undefined)[];
+  residualHouseLoadWattsPerSlot: (number | undefined)[];
   fallbackHouseLoadW: number;
   networkTariffEurPerKwh: number;
   allowGridChargeFromGrid: boolean;

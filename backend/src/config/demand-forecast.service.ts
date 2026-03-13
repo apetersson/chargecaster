@@ -1,9 +1,9 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { DemandForecastEntry, ForecastEra, HistoryPoint } from "@chargecaster/domain";
 import { extractForecastEraPrice, extractForecastEraSolar, parseTemporal, TimeSlot } from "@chargecaster/domain";
+import { StorageService, type WeatherHourRecord } from "../storage/storage.service";
 import type { ConfigDocument } from "./schemas";
 import { WeatherService, type WeatherLocation } from "./weather.service";
-import { StorageService, type WeatherHourRecord } from "../storage/storage.service";
 
 const DEFAULT_HOUSE_LOAD_W = 2200;
 const MIN_HOUSE_LOAD_W = 150;
@@ -216,13 +216,13 @@ export class DemandForecastService {
   }
 }
 
-function aggregateHistoryByHour(historyPoints: HistoryPoint[]): Array<{
+function aggregateHistoryByHour(historyPoints: HistoryPoint[]): {
   hourUtc: string;
   homePowerW: number;
   evPowerW: number;
   solarPowerW: number;
   priceEurPerKwh: number;
-}> {
+}[] {
   const grouped = new Map<string, {
     homeSum: number;
     homeCount: number;
@@ -422,7 +422,7 @@ function buildEvForecast(input: {
   const medianRecentEv = recentEvValues.length
     ? recentEvValues[Math.floor(recentEvValues.length / 2)]
     : latestHistory?.evPowerW ?? 0;
-  const anchor = Math.max(0, input.liveEvChargePowerW ?? medianRecentEv ?? 0);
+  const anchor = Math.max(0, input.liveEvChargePowerW ?? medianRecentEv);
   if (!(anchor > 0)) {
     return input.contexts.map(() => 0);
   }

@@ -1,13 +1,12 @@
 import { type JSX, useMemo } from "react";
 
-import type { DemandForecastEntry, ForecastEra, OracleEntry, SnapshotSummary } from "../types";
+import type { DemandForecastEntry, ForecastEra, OracleEntry } from "../types";
 import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
 
 type TrajectoryTableProps = {
   forecast: ForecastEra[];
   demandForecast: DemandForecastEntry[];
   oracleEntries: OracleEntry[];
-  summary?: SnapshotSummary | null;
 };
 
 type TrajectoryRow = {
@@ -24,7 +23,6 @@ function buildTrajectoryRows(
   forecast: ForecastEra[],
   demandForecast: DemandForecastEntry[],
   oracleEntries: OracleEntry[],
-  _summary: SnapshotSummary | null | undefined,
 ): TrajectoryRow[] {
   const oracleByEraId = new Map(oracleEntries.map((entry) => [entry.era_id, entry]));
   const demandByStart = new Map(demandForecast.map((entry) => [entry.start, entry]));
@@ -55,10 +53,10 @@ function buildTrajectoryRows(
   });
 }
 
-function TrajectoryTable({forecast, demandForecast, oracleEntries, summary}: TrajectoryTableProps): JSX.Element {
+function TrajectoryTable({forecast, demandForecast, oracleEntries}: TrajectoryTableProps): JSX.Element {
   const rows = useMemo(
-    () => buildTrajectoryRows(forecast, demandForecast, oracleEntries, summary),
-    [forecast, demandForecast, oracleEntries, summary],
+    () => buildTrajectoryRows(forecast, demandForecast, oracleEntries),
+    [forecast, demandForecast, oracleEntries],
   );
 
   if (!rows.length) {

@@ -37,7 +37,7 @@ describe("dashboard tRPC", () => {
   const rawSample: unknown = JSON.parse(readFileSync(sampleDataPath, "utf-8"));
   const forecast = extractForecastFromState(rawSample);
 
-  let app: NestFastifyApplication;
+  let app: NestFastifyApplication | null = null;
   let client: ReturnType<typeof createTRPCProxyClient<AppRouter>>;
   let originalStoragePath: string | undefined;
   let testDbDir: string;
@@ -204,9 +204,6 @@ describe("dashboard tRPC", () => {
     const history = await client.dashboard.history.query({ limit: 24 });
     expect(history.generated_at).toEqual(snapshot.timestamp);
     expect(history.entries.length).toBeGreaterThan(0);
-    if (history.entries.length === 0) {
-      throw new Error("History entries should not be empty");
-    }
     expect(history.entries[0].timestamp).toBeDefined();
 
     const forecastResponse = await client.dashboard.forecast.query();

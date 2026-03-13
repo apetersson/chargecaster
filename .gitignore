@@ -6,10 +6,11 @@ __pycache__/
 node_modules/
 dist/
 backend/dist-bundle/
-/.idea/
+.idea/
 .env
 .env.*
 config.local.yaml
+config.local.*.yaml
 package-lock.json
 .DS_Store
 pnpm-debug.log*

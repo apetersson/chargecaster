@@ -67,7 +67,7 @@ function App(): JSX.Element {
 
       <BacktestCard />
 
-      <TrajectoryTable forecast={forecast} demandForecast={demandForecast} oracleEntries={oracleEntries} summary={summary}/>
+      <TrajectoryTable forecast={forecast} demandForecast={demandForecast} oracleEntries={oracleEntries}/>
 
       <HistoryTable history={history}/>
 

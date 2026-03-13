@@ -127,8 +127,8 @@ describe("DemandForecastService", () => {
       upsertWeatherHours: () => undefined,
     } as unknown as StorageService;
     const weatherService = {
-      getWeatherHours: async () => weatherRows,
-    } as WeatherService;
+      getWeatherHours: () => Promise.resolve(weatherRows),
+    } as unknown as WeatherService;
     const service = new DemandForecastService(storage, weatherService);
 
     const forecast = await service.buildForecast({
@@ -164,8 +164,8 @@ describe("DemandForecastService", () => {
       upsertWeatherHours: () => undefined,
     } as unknown as StorageService;
     const weatherService = {
-      getWeatherHours: async () => weatherRows,
-    } as WeatherService;
+      getWeatherHours: () => Promise.resolve(weatherRows),
+    } as unknown as WeatherService;
     const service = new DemandForecastService(storage, weatherService);
 
     const forecast = await service.buildForecast({
@@ -192,8 +192,8 @@ describe("DemandForecastService", () => {
       upsertWeatherHours: () => undefined,
     } as unknown as StorageService;
     const weatherService = {
-      getWeatherHours: async () => [],
-    } as WeatherService;
+      getWeatherHours: () => Promise.resolve([]),
+    } as unknown as WeatherService;
     const service = new DemandForecastService(storage, weatherService);
 
     const forecast = await service.buildForecast({

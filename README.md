@@ -27,7 +27,8 @@ API while a Vite bundle renders the UI.
 ├── frontend/           # React + Vite dashboard
 │   ├── src/            # Components, hooks, API client
 │   └── package.json
-├── config.local.yaml   # Example runtime configuration
+├── config.yaml.sample  # Sanitized runtime configuration template
+├── config.local.yaml   # Local runtime configuration (gitignored)
 ├── data/               # Created at runtime; contains SQLite database
 ├── Dockerfile  # Distroless runtime image (bundled backend; serves SPA when enabled)
 ├── docker-compose.yml  # Local orchestration helper
@@ -105,8 +106,8 @@ package should be built first so `dist/` is available (handled by `pnpm build:al
 
 ## Configuration
 
-- `config.local.yaml` is the canonical sample. Copy or symlink it to customise credentials, tariff providers, and the
-  site location used for weather-backed demand forecasting.
+- Copy `config.yaml.sample` to `config.local.yaml` and customise credentials, tariff providers, and the site location
+  used for weather-backed demand forecasting.
 - The backend reads `CHARGECASTER_CONFIG` if set; otherwise it falls back to `../config.local.yaml` relative to the
   backend working directory.
 - `data/db/backend.sqlite` is created automatically; mount `data/` as a volume to persist history.
@@ -194,6 +195,7 @@ Update `docker-compose.yml` if your config file lives elsewhere or if you prefer
 Example with an absolute config path:
 
 ```bash
+cp config.yaml.sample config.local.yaml
 CHARGECASTER_CONFIG_FILE=./config.local.yaml \
   docker compose up --build
 ```
