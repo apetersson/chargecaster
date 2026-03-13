@@ -1,0 +1,21 @@
+{
+  "model_type": "catboost",
+  "model_version": "manual-20260313",
+  "feature_schema_version": "v2_house_load_1",
+  "trained_at": "2026-03-13T10:14:45.351345Z",
+  "training_window": {
+    "start": "2025-10-16T17:00:00Z",
+    "end": "2026-03-12T23:00:00Z"
+  },
+  "history_row_count": 3442,
+  "hourly_row_count": 3435,
+  "metrics_summary": {
+    "mae": 630.2567317133638,
+    "rmse": 852.2643471625494,
+    "p50_absolute_error": 482.4839279972348,
+    "p90_absolute_error": 1340.5388874133043,
+    "p90_economic_hours_absolute_error": 1437.0896884451631,
+    "mae_vs_hybrid_improvement_ratio": -0.027474758499865023
+  },
+  "catboost_version": "1.2.10"
+}

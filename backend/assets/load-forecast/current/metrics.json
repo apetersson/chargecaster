@@ -1,0 +1,31 @@
+{
+  "model": {
+    "mae": 630.2567317133638,
+    "rmse": 852.2643471625494,
+    "p50_absolute_error": 482.4839279972348,
+    "p90_absolute_error": 1340.5388874133043,
+    "p90_economic_hours_absolute_error": 1437.0896884451631,
+    "mae_vs_hybrid_improvement_ratio": -0.027474758499865023
+  },
+  "flat_2200": {
+    "mae": 787.9151338355775,
+    "rmse": 983.6074404861362,
+    "p50_absolute_error": 676.1000000000001,
+    "p90_absolute_error": 1485.7916666666665
+  },
+  "hour_of_week": {
+    "mae": 631.0884885883353,
+    "rmse": 868.2473298899606,
+    "p50_absolute_error": 472.63354328603737,
+    "p90_absolute_error": 1335.1469157381662
+  },
+  "hybrid": {
+    "mae": 613.403615514168,
+    "rmse": 845.4347435637001,
+    "p50_absolute_error": 447.48977482258397,
+    "p90_absolute_error": 1352.300638401919,
+    "p90_economic_hours_absolute_error": 1438.3623838772482
+  },
+  "active_model": null,
+  "fold_count": 101
+}
