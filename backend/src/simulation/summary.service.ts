@@ -33,6 +33,8 @@ export class SummaryService {
       projected_savings_eur: snapshot.projected_savings_eur,
       projected_grid_power_w: snapshot.projected_grid_power_w,
       solar_forecast_discrepancy_w: snapshot.solar_forecast_discrepancy_w,
+      solar_forecast_discrepancy_start: snapshot.solar_forecast_discrepancy_start,
+      solar_forecast_discrepancy_end: snapshot.solar_forecast_discrepancy_end,
       forecast_hours: snapshot.forecast_hours,
       forecast_samples: snapshot.forecast_samples,
       warnings: snapshot.warnings,

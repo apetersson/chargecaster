@@ -201,6 +201,10 @@ describe("dashboard tRPC", () => {
     expect(summary.timestamp).toEqual(snapshot.timestamp);
     expect(summary.recommended_final_soc_percent).toEqual(snapshot.recommended_final_soc_percent);
     expect("solar_forecast_discrepancy_w" in summary).toBe(true);
+    if (summary.solar_forecast_discrepancy_w == null) {
+      expect(summary.solar_forecast_discrepancy_start).toBeUndefined();
+      expect(summary.solar_forecast_discrepancy_end).toBeUndefined();
+    }
 
     const history = await client.dashboard.history.query({ limit: 24 });
     expect(history.generated_at).toEqual(snapshot.timestamp);

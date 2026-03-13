@@ -76,6 +76,27 @@ export function formatDate(value: string | null | undefined): string {
   return dateTimeFormatter.format(parsed);
 }
 
+export function formatTimeRange(
+  startValue: string | null | undefined,
+  endValue: string | null | undefined,
+): string {
+  if (!startValue) {
+    return "n/a";
+  }
+  const start = new Date(startValue);
+  if (Number.isNaN(start.getTime())) {
+    return "n/a";
+  }
+  if (!endValue) {
+    return timeFormatter.format(start);
+  }
+  const end = new Date(endValue);
+  if (Number.isNaN(end.getTime())) {
+    return timeFormatter.format(start);
+  }
+  return `${timeFormatter.format(start)}-${timeFormatter.format(end)}`;
+}
+
 export function statusClass(
   errors?: string[],
   warnings?: string[],

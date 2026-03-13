@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 
 import type { SnapshotSummary } from "../types";
-import { formatDate, formatNumber, formatPercent, formatSignedNumber, statusClass } from "../utils/format";
+import { formatDate, formatNumber, formatPercent, formatSignedNumber, formatTimeRange, statusClass } from "../utils/format";
 
 function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | null {
   if (!data) {
@@ -21,6 +21,14 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
       return "Hold";
     }
     return "";
+  })();
+  const peakSolarAdjustmentLabel = (() => {
+    const base = formatSignedNumber(data.solar_forecast_discrepancy_w, " W");
+    const range = formatTimeRange(
+      data.solar_forecast_discrepancy_start,
+      data.solar_forecast_discrepancy_end,
+    );
+    return range === "n/a" ? base : `${base} (${range})`;
   })();
 
   return (
@@ -76,7 +84,7 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
         </div>
         <div className="metric">
           <span className="label">Peak Solar Adj.</span>
-          <span className="value small">{formatSignedNumber(data.solar_forecast_discrepancy_w, " W")}</span>
+          <span className="value small">{peakSolarAdjustmentLabel}</span>
         </div>
         <div className="metric">
           <span className="label">Forecast Horizon</span>

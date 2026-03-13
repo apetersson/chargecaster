@@ -46,8 +46,16 @@ export interface SimulationInput {
 }
 
 interface SolarDiscrepancySample {
+  start: string;
+  end: string | null;
   calibratedPowerW: number;
   proxyPowerW: number;
+}
+
+interface PeakSolarDiscrepancy {
+  watts: number;
+  start: string;
+  end: string | null;
 }
 
 @Injectable()
@@ -159,7 +167,7 @@ export class SimulationService {
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
     const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
-    const solarForecastDiscrepancyW = computePeakSolarForecastDiscrepancyWatts(input.solarForecast ?? []);
+    const peakSolarDiscrepancy = computePeakSolarForecastDiscrepancy(input.solarForecast ?? []);
     const demandProfilePerSlot = slots.map((priceSlot) => {
       const priceSlotWindow = TimeSlot.fromDates(priceSlot.start, priceSlot.end);
       return demandSlots.reduce((acc, sample) => {
@@ -248,7 +256,9 @@ export class SimulationService {
         ? autoResult.projected_cost_eur - result.projected_cost_eur
         : null,
       projected_grid_power_w: result.projected_grid_power_w,
-      solar_forecast_discrepancy_w: solarForecastDiscrepancyW,
+      solar_forecast_discrepancy_w: peakSolarDiscrepancy?.watts ?? null,
+      solar_forecast_discrepancy_start: peakSolarDiscrepancy?.start,
+      solar_forecast_discrepancy_end: peakSolarDiscrepancy?.end ?? undefined,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
       forecast_eras: forecastEras,
@@ -406,18 +416,31 @@ export class SimulationService {
   }
 }
 
-function computePeakSolarForecastDiscrepancyWatts(solarForecast: RawSolarEntry[]): number | null {
+function computePeakSolarForecastDiscrepancy(solarForecast: RawSolarEntry[]): PeakSolarDiscrepancy | null {
   const samples = solarForecast
     .map(toSolarDiscrepancySample)
     .filter((sample): sample is SolarDiscrepancySample => sample !== null);
   if (!samples.length) {
     return null;
   }
-  const strongestDelta = samples.reduce((strongest, sample) => {
+  const strongest = samples.reduce((currentStrongest, sample) => {
     const delta = sample.calibratedPowerW - sample.proxyPowerW;
-    return Math.abs(delta) > Math.abs(strongest) ? delta : strongest;
-  }, 0);
-  return Number(strongestDelta.toFixed(3));
+    if (currentStrongest === null || Math.abs(delta) > Math.abs(currentStrongest.watts)) {
+      return {
+        watts: delta,
+        start: sample.start,
+        end: sample.end,
+      };
+    }
+    return currentStrongest;
+  }, null as PeakSolarDiscrepancy | null);
+  if (!strongest) {
+    return null;
+  }
+  return {
+    ...strongest,
+    watts: Number(strongest.watts.toFixed(3)),
+  };
 }
 
 function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample | null {
@@ -441,6 +464,8 @@ function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample 
   }
 
   return {
+    start: start.toISOString(),
+    end: end?.toISOString() ?? null,
     calibratedPowerW,
     proxyPowerW,
   };
