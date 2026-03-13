@@ -45,6 +45,12 @@ export interface SimulationInput {
   };
 }
 
+interface SolarDiscrepancySample {
+  durationHours: number;
+  calibratedPowerW: number;
+  proxyPowerW: number;
+}
+
 @Injectable()
 export class SimulationService {
   private readonly logger = new Logger(SimulationService.name);
@@ -154,6 +160,7 @@ export class SimulationService {
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
     const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
+    const solarForecastDiscrepancyW = computeSolarForecastDiscrepancyWatts(input.solarForecast ?? []);
     const demandProfilePerSlot = slots.map((priceSlot) => {
       const priceSlotWindow = TimeSlot.fromDates(priceSlot.start, priceSlot.end);
       return demandSlots.reduce((acc, sample) => {
@@ -242,6 +249,7 @@ export class SimulationService {
         ? autoResult.projected_cost_eur - result.projected_cost_eur
         : null,
       projected_grid_power_w: result.projected_grid_power_w,
+      solar_forecast_discrepancy_w: solarForecastDiscrepancyW,
       forecast_hours: result.forecast_hours,
       forecast_samples: result.forecast_samples,
       forecast_eras: forecastEras,
@@ -397,6 +405,66 @@ export class SimulationService {
     }
     return null;
   }
+}
+
+function computeSolarForecastDiscrepancyWatts(solarForecast: RawSolarEntry[]): number | null {
+  const samples = solarForecast
+    .map(toSolarDiscrepancySample)
+    .filter((sample): sample is SolarDiscrepancySample => sample !== null);
+  if (!samples.length) {
+    return null;
+  }
+
+  const totalDurationHours = samples.reduce((sum, sample) => sum + sample.durationHours, 0);
+  if (totalDurationHours <= 0) {
+    return null;
+  }
+
+  const weightedDelta = samples.reduce(
+    (sum, sample) => sum + (sample.calibratedPowerW - sample.proxyPowerW) * sample.durationHours,
+    0,
+  );
+  return Number((weightedDelta / totalDurationHours).toFixed(3));
+}
+
+function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample | null {
+  const start = parseTimestamp(entry.start ?? entry.ts ?? null);
+  if (!start) {
+    return null;
+  }
+  const end = parseTimestamp(entry.end ?? null);
+  const durationHours = end && end.getTime() > start.getTime()
+    ? (end.getTime() - start.getTime()) / 3_600_000
+    : 1;
+  if (!Number.isFinite(durationHours) || durationHours <= 0) {
+    return null;
+  }
+
+  const calibratedPowerW = resolveFiniteNumber(entry.calibrated_power_w)
+    ?? inferSolarAveragePower(entry, durationHours);
+  const proxyPowerW = resolveFiniteNumber(entry.proxy_power_w);
+  if (calibratedPowerW === null || proxyPowerW === null) {
+    return null;
+  }
+
+  return {
+    durationHours,
+    calibratedPowerW,
+    proxyPowerW,
+  };
+}
+
+function inferSolarAveragePower(entry: RawSolarEntry, durationHours: number): number | null {
+  if (durationHours <= 0) {
+    return null;
+  }
+  const energyWh = resolveFiniteNumber(entry.energy_wh)
+    ?? (resolveFiniteNumber(entry.energy_kwh) != null ? (entry.energy_kwh as number) * 1000 : null);
+  return energyWh == null ? null : energyWh / durationHours;
+}
+
+function resolveFiniteNumber(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function normalizeSocLabel(value: number | null | undefined): string | null {

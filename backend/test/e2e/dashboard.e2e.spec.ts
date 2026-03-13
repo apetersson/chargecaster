@@ -200,6 +200,7 @@ describe("dashboard tRPC", () => {
     const summary = await client.dashboard.summary.query();
     expect(summary.timestamp).toEqual(snapshot.timestamp);
     expect(summary.recommended_final_soc_percent).toEqual(snapshot.recommended_final_soc_percent);
+    expect("solar_forecast_discrepancy_w" in summary).toBe(true);
 
     const history = await client.dashboard.history.query({ limit: 24 });
     expect(history.generated_at).toEqual(snapshot.timestamp);

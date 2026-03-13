@@ -128,5 +128,6 @@ describe("SolarForecastCalibrationService", () => {
     expect(Number(calibrated[0]?.calibration_ratio ?? 0)).toBeGreaterThan(0.7);
     expect(Number(calibrated[0]?.calibration_ratio ?? 0)).toBeLessThan(0.9);
     expect(Number(calibrated[0]?.proxy_power_w ?? 0)).toBeCloseTo(4000, 3);
+    expect(Number(calibrated[0]?.calibrated_power_w ?? 0) - Number(calibrated[0]?.proxy_power_w ?? 0)).toBeLessThan(0);
   });
 });

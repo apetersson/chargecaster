@@ -44,6 +44,11 @@ export const rawSolarEntrySchema = z
     value: nullableNumberSchema.optional(),
     val: nullableNumberSchema.optional(),
     ts: optionalTimestampSchema.optional(),
+    calibrated_power_w: nullableNumberSchema.optional(),
+    raw_power_w: nullableNumberSchema.optional(),
+    proxy_power_w: nullableNumberSchema.optional(),
+    calibration_ratio: nullableNumberSchema.optional(),
+    calibration_confidence: nullableNumberSchema.optional(),
   })
   .catchall(z.unknown());
 
@@ -160,6 +165,7 @@ export const snapshotPayloadSchema = z.object({
   active_control_savings_eur: nullableNumberSchema.optional(),
   projected_savings_eur: nullableNumberSchema,
   projected_grid_power_w: nullableNumberSchema,
+  solar_forecast_discrepancy_w: nullableNumberSchema.optional(),
   forecast_hours: nullableNumberSchema,
   forecast_samples: nullableNumberSchema,
   forecast_eras: z.array(forecastEraSchema),
@@ -188,6 +194,7 @@ export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   active_control_savings_eur: true,
   projected_savings_eur: true,
   projected_grid_power_w: true,
+  solar_forecast_discrepancy_w: true,
   forecast_hours: true,
   forecast_samples: true,
   warnings: true,

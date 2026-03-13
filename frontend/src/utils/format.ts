@@ -55,6 +55,16 @@ export function formatNumber(value: number | null | undefined, unit = ""): strin
   return `${numberFormatter.format(value)}${nbspUnit}`;
 }
 
+export function formatSignedNumber(value: number | null | undefined, unit = ""): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "n/a";
+  }
+  const trimmedUnit = unit.trim();
+  const nbspUnit = trimmedUnit ? `\u00A0${trimmedUnit}` : "";
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${numberFormatter.format(value)}${nbspUnit}`;
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "n/a";

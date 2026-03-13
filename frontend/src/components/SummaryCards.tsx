@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 
 import type { SnapshotSummary } from "../types";
-import { formatDate, formatNumber, formatPercent, statusClass } from "../utils/format";
+import { formatDate, formatNumber, formatPercent, formatSignedNumber, statusClass } from "../utils/format";
 
 function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | null {
   if (!data) {
@@ -73,6 +73,10 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
         <div className="metric">
           <span className="label">Projected Grid Power</span>
           <span className="value small">{formatNumber(data.projected_grid_power_w, " W")}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Solar Forecast Adj.</span>
+          <span className="value small">{formatSignedNumber(data.solar_forecast_discrepancy_w, " W")}</span>
         </div>
         <div className="metric">
           <span className="label">Forecast Horizon</span>
