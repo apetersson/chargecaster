@@ -46,7 +46,6 @@ export interface SimulationInput {
 }
 
 interface SolarDiscrepancySample {
-  durationHours: number;
   calibratedPowerW: number;
   proxyPowerW: number;
 }
@@ -160,7 +159,7 @@ export class SimulationService {
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
     const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
-    const solarForecastDiscrepancyW = computeSolarForecastDiscrepancyWatts(input.solarForecast ?? []);
+    const solarForecastDiscrepancyW = computePeakSolarForecastDiscrepancyWatts(input.solarForecast ?? []);
     const demandProfilePerSlot = slots.map((priceSlot) => {
       const priceSlotWindow = TimeSlot.fromDates(priceSlot.start, priceSlot.end);
       return demandSlots.reduce((acc, sample) => {
@@ -407,24 +406,18 @@ export class SimulationService {
   }
 }
 
-function computeSolarForecastDiscrepancyWatts(solarForecast: RawSolarEntry[]): number | null {
+function computePeakSolarForecastDiscrepancyWatts(solarForecast: RawSolarEntry[]): number | null {
   const samples = solarForecast
     .map(toSolarDiscrepancySample)
     .filter((sample): sample is SolarDiscrepancySample => sample !== null);
   if (!samples.length) {
     return null;
   }
-
-  const totalDurationHours = samples.reduce((sum, sample) => sum + sample.durationHours, 0);
-  if (totalDurationHours <= 0) {
-    return null;
-  }
-
-  const weightedDelta = samples.reduce(
-    (sum, sample) => sum + (sample.calibratedPowerW - sample.proxyPowerW) * sample.durationHours,
-    0,
-  );
-  return Number((weightedDelta / totalDurationHours).toFixed(3));
+  const strongestDelta = samples.reduce((strongest, sample) => {
+    const delta = sample.calibratedPowerW - sample.proxyPowerW;
+    return Math.abs(delta) > Math.abs(strongest) ? delta : strongest;
+  }, 0);
+  return Number(strongestDelta.toFixed(3));
 }
 
 function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample | null {
@@ -448,7 +441,6 @@ function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample 
   }
 
   return {
-    durationHours,
     calibratedPowerW,
     proxyPowerW,
   };

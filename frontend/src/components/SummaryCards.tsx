@@ -75,7 +75,7 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
           <span className="value small">{formatNumber(data.projected_grid_power_w, " W")}</span>
         </div>
         <div className="metric">
-          <span className="label">Solar Forecast Adj.</span>
+          <span className="label">Peak Solar Adj.</span>
           <span className="value small">{formatSignedNumber(data.solar_forecast_discrepancy_w, " W")}</span>
         </div>
         <div className="metric">
