@@ -86,8 +86,6 @@ const locationConfigSchema = z
 
 const solarArrayConfigSchema = z
   .object({
-    lat: optionalNumberSchema.optional(),
-    lon: optionalNumberSchema.optional(),
     kwp: optionalNumberSchema.optional(),
     dec: optionalNumberSchema.optional(),
     az: optionalNumberSchema.optional(),

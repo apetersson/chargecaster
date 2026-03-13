@@ -54,8 +54,6 @@ describe("configuration schema parsers", () => {
       },
       solar: [
         {
-          lat: 48.23,
-          lon: 16.14,
           kwp: 5,
           dec: 15,
           az: -90,

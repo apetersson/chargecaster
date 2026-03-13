@@ -16,15 +16,11 @@ function createConfig(): ConfigDocument {
     },
     solar: [
       {
-        lat: 48.23,
-        lon: 16.14,
         kwp: 5,
         dec: 15,
         az: -90,
       },
       {
-        lat: 48.23,
-        lon: 16.14,
         kwp: 5,
         dec: 15,
         az: 90,
@@ -98,9 +94,11 @@ function buildProxyRows(arrays: SolarArrayConfig[]) {
 describe("SolarForecastCalibrationService", () => {
   it("scales future solar slots toward the learned site-specific production ratio", async () => {
     const config = createConfig();
+    const latitude = config.location?.latitude ?? 0;
+    const longitude = config.location?.longitude ?? 0;
     const arrays: SolarArrayConfig[] = (config.solar ?? []).map((entry) => ({
-      latitude: entry.lat ?? 0,
-      longitude: entry.lon ?? 0,
+      latitude,
+      longitude,
       kwp: entry.kwp ?? 0,
       tilt: entry.dec ?? 0,
       azimuth: entry.az ?? 0,

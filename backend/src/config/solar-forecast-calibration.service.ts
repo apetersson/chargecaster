@@ -184,11 +184,13 @@ export class SolarForecastCalibrationService {
 }
 
 function normalizeSolarArrays(config: ConfigDocument): SolarArrayConfig[] {
+  const latitude = config.location?.latitude ?? Number.NaN;
+  const longitude = config.location?.longitude ?? Number.NaN;
   const timeZone = resolveTimeZone(config.location?.timezone);
   return (config.solar ?? [])
     .map((entry) => ({
-      latitude: entry.lat ?? Number.NaN,
-      longitude: entry.lon ?? Number.NaN,
+      latitude,
+      longitude,
       kwp: entry.kwp ?? Number.NaN,
       tilt: entry.dec ?? Number.NaN,
       azimuth: entry.az ?? Number.NaN,
