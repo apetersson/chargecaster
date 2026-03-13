@@ -30,6 +30,7 @@
     "onlyBuiltDependencies": [
       "@nestjs/core",
       "better-sqlite3",
+      "catboost",
       "esbuild"
     ]
   }

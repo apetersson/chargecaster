@@ -8,6 +8,8 @@ import { MarketDataService } from "./market-data.service";
 import { EvccDataService } from "./evcc-data.service";
 import { ForecastAssemblyService } from "./forecast-assembly.service";
 import { DemandForecastService } from "./demand-forecast.service";
+import { SolarForecastCalibrationService } from "./solar-forecast-calibration.service";
+import { OpenMeteoSolarForecastService } from "./open-meteo-solar-forecast.service";
 
 export interface PreparedSimulation {
   simulationConfig: SimulationConfig;
@@ -175,6 +177,8 @@ export class SimulationPreparationService {
     @Inject(EvccDataService) private readonly evccDataService: EvccDataService,
     @Inject(ForecastAssemblyService) private readonly forecastAssembly: ForecastAssemblyService,
     @Inject(DemandForecastService) private readonly demandForecastService: DemandForecastService,
+    @Inject(SolarForecastCalibrationService) private readonly solarForecastCalibrationService: SolarForecastCalibrationService,
+    @Inject(OpenMeteoSolarForecastService) private readonly openMeteoSolarForecastService: OpenMeteoSolarForecastService,
   ) {}
 
   async prepare(configFile: ConfigDocument): Promise<PreparedSimulation> {
@@ -200,7 +204,12 @@ export class SimulationPreparationService {
     );
     const nowIso = new Date(referenceTimeMs).toISOString();
     const futureEvccForecast = trimForecastEntriesToFuture(evccResult.forecast, referenceTimeMs);
-    const futureSolarForecast = trimSolarEntriesToFuture(evccResult.solarForecast, referenceTimeMs);
+    const openMeteoSolarForecast = await this.openMeteoSolarForecastService.collect(
+      configFile,
+      warnings,
+      new Date(referenceTimeMs),
+    );
+    const futureSolarForecast = trimSolarEntriesToFuture(openMeteoSolarForecast, referenceTimeMs);
     this.logger.verbose(
       `Future entry counts (ref=${nowIso}): evcc=${futureEvccForecast.length}, market=${futureMarketForecast.length}, solar=${futureSolarForecast.length}`,
     );
@@ -224,7 +233,7 @@ export class SimulationPreparationService {
     }
 
     if (futureSolarForecast.length) {
-      solarForecast = futureSolarForecast;
+      solarForecast = await this.solarForecastCalibrationService.calibrateForecast(configFile, futureSolarForecast);
     }
 
     if (!forecast.length) {
@@ -239,7 +248,7 @@ export class SimulationPreparationService {
       forecast,
       futureEvccForecast,
       futureMarketForecast,
-      futureSolarForecast,
+      solarForecast,
       simulationConfig.price.grid_fee_eur_per_kwh ?? 0,
     );
 
@@ -248,9 +257,6 @@ export class SimulationPreparationService {
       config: configFile,
       forecastEras: forecastErasResult.eras,
       liveHomePowerW: evccResult.homePowerW,
-      liveEvChargePowerW: evccResult.evChargePowerW,
-      evConnected: evccResult.evConnected,
-      evCharging: evccResult.evCharging,
     });
 
     const priceSnapshotValue = priceSnapshot ?? this.forecastAssembly.derivePriceSnapshot(forecast, simulationConfig);

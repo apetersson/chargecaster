@@ -20,6 +20,18 @@ location:
   longitude: 16.000
   timezone: "Europe/Vienna"
 
+solar:
+  - lat: 48.23
+    lon: 16.14
+    kwp: 5
+    dec: 15
+    az: -90
+  - lat: 48.23
+    lon: 16.14
+    kwp: 5
+    dec: 15
+    az: 90
+
 battery:
   capacity_kwh: 10
   max_charge_power_w: 500
@@ -31,6 +43,11 @@ logic:
 
 logging:
   level: "INFO" # ERROR, WARN, INFO, DEBUG, VERBOSE
+
+load_forecast:
+  model_dir: "../data/models/load-forecast"
+  self_training_enabled: false
+  python_executable: "python3"
 
 market_data:
   awattar:

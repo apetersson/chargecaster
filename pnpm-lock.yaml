@@ -48,6 +48,9 @@ importers:
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0
+      catboost:
+        specifier: ^1.2.8
+        version: 1.27.0
       fastify:
         specifier: ^5.8.2
         version: 5.8.2
@@ -1344,6 +1347,9 @@ packages:
   caniuse-lite@1.0.30001747:
     resolution: {integrity: sha512-mzFa2DGIhuc5490Nd/G31xN1pnBnYMadtkyTjefPI7wzypqgCEpeWu9bJr0OnDsyKrW75zA9ZAt7pbQFmwLsQg==}
 
+  catboost@1.27.0:
+    resolution: {integrity: sha512-K43VzrpBgDYMlaGTPk2z8mmD//KWV2nlunhC23dt6VOFrDa30SMNMWXvavVR5SRBFHNReZxx3cC/LeurwO25gQ==}
+
   chai@6.2.2:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
     engines: {node: '>=18'}
@@ -2251,6 +2257,10 @@ packages:
   node-abi@3.77.0:
     resolution: {integrity: sha512-DSmt0OEcLoK4i3NuscSbGjOf3bqiDEutejqENSplMSFA/gmB8mkED9G4pKWnPl7MDU4rSHebKPHeitpDfyH0cQ==}
     engines: {node: '>=10'}
+
+  node-addon-api@8.6.0:
+    resolution: {integrity: sha512-gBVjCaqDlRUk0EwoPNKzIr9KkS9041G/q31IBShPs1Xz6UTA+EXdZADbzqAJQrpDRq71CIMnOP5VMut3SL0z5Q==}
+    engines: {node: ^18 || ^20 || >= 21}
 
   node-releases@2.0.23:
     resolution: {integrity: sha512-cCmFDMSm26S6tQSDpBCg/NR8NENrVPhAJSf+XbxBG4rPFaaonlEoE9wHQmun+cls499TQGSb7ZyPBRlzgKfpeg==}
@@ -4056,6 +4066,10 @@ snapshots:
 
   caniuse-lite@1.0.30001747: {}
 
+  catboost@1.27.0:
+    dependencies:
+      node-addon-api: 8.6.0
+
   chai@6.2.2: {}
 
   chalk@4.1.2:
@@ -5121,6 +5135,8 @@ snapshots:
   node-abi@3.77.0:
     dependencies:
       semver: 7.7.2
+
+  node-addon-api@8.6.0: {}
 
   node-releases@2.0.23: {}
 

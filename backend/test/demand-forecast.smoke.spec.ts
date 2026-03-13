@@ -8,6 +8,7 @@ import type { HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
 import { DemandForecastService } from "../src/config/demand-forecast.service";
 import { parseConfigDocument } from "../src/config/schemas";
 import { WeatherService } from "../src/config/weather.service";
+import type { LoadForecastInferenceService } from "../src/forecasting/load-forecast-inference.service";
 import type { StorageService, WeatherHourRecord } from "../src/storage/storage.service";
 
 type HistoryRow = {
@@ -73,36 +74,35 @@ describe("Demand forecast smoke", () => {
       },
     } as unknown as StorageService;
     const weatherService = new WeatherService(storage);
-    const demandForecastService = new DemandForecastService(storage, weatherService);
+    const inferenceService = {
+      getActiveArtifact: () => null,
+      predict: () => Promise.resolve(null),
+    } as unknown as LoadForecastInferenceService;
+    const demandForecastService = new DemandForecastService(storage, weatherService, inferenceService);
 
     const forecast = await demandForecastService.buildForecast({
       config,
       forecastEras: Array.isArray(snapshot.forecast_eras) ? snapshot.forecast_eras : [],
       liveHomePowerW: latestHistory?.home_power_w ?? null,
-      liveEvChargePowerW: latestHistory?.ev_charge_power_w ?? null,
-      evConnected: (latestHistory?.ev_charge_power_w ?? 0) > 0,
-      evCharging: (latestHistory?.ev_charge_power_w ?? 0) > 0,
     });
 
     expect(forecast.length).toBeGreaterThan(0);
     const rows = forecast.slice(0, 12).map((entry) => ({
       start: entry.start,
       house_power_w: Math.round(entry.house_power_w),
-      direct_pv_use_w: Math.round(entry.direct_pv_use_w),
-      residual_house_power_w: Math.round(entry.residual_house_power_w),
-      ev_power_w: Math.round(entry.ev_power_w),
-      total_power_w: Math.round(entry.total_power_w),
+      baseline_house_power_w: Math.round(entry.baseline_house_power_w),
+      source: entry.source,
+      model_version: entry.model_version ?? "n/a",
       confidence: entry.confidence != null ? entry.confidence.toFixed(3) : "n/a",
     }));
-    const header = ["start", "house", "direct_pv", "residual", "ev", "total", "confidence"];
+    const header = ["start", "house", "baseline_house", "source", "model_version", "confidence"];
     const lines = rows.map((row) =>
       [
         row.start,
         String(row.house_power_w),
-        String(row.direct_pv_use_w),
-        String(row.residual_house_power_w),
-        String(row.ev_power_w),
-        String(row.total_power_w),
+        String(row.baseline_house_power_w),
+        row.source,
+        row.model_version,
         row.confidence,
       ].join("\t"),
     );

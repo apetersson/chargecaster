@@ -48,8 +48,6 @@ describe("simulateOptimalSchedule oracle output", () => {
       {
         solarGenerationKwhPerSlot: [0, 0],
         houseLoadWattsPerSlot: [1500, 1500],
-        directPvUseWattsPerSlot: [0, 0],
-        residualHouseLoadWattsPerSlot: [1500, 1500],
       },
     );
 
@@ -98,8 +96,6 @@ describe("simulateOptimalSchedule oracle output", () => {
       {
         solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
         houseLoadWattsPerSlot: [1000, 1000],
-        directPvUseWattsPerSlot: [360, 40],
-        residualHouseLoadWattsPerSlot: [640, 960],
       },
     );
 

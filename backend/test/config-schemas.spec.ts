@@ -46,22 +46,36 @@ describe("configuration schema parsers", () => {
     expect(parsed.siteDemandPowerW).toBeCloseTo(12277.17, 2);
   });
 
-  it("accepts location config and rejects retired direct-use config", () => {
+  it("accepts location, solar arrays, and load-forecast config while rejecting retired keys", () => {
     const parsed = parseConfigDocument({
       location: {
         latitude: 48.235,
         longitude: 16.134,
       },
+      solar: [
+        {
+          lat: 48.23,
+          lon: 16.14,
+          kwp: 5,
+          dec: 15,
+          az: -90,
+        },
+      ],
+      load_forecast: {
+        model_dir: "../data/models/load-forecast",
+        self_training_enabled: true,
+      },
       logic: {
         interval_seconds: 300,
-        house_load_w: 2200,
       },
     });
 
     expect(parsed.location?.latitude).toBe(48.235);
     expect(parsed.location?.longitude).toBe(16.134);
+    expect(parsed.solar?.[0]?.kwp).toBe(5);
+    expect(parsed.load_forecast?.self_training_enabled).toBe(true);
     expect(parsed.logic?.interval_seconds).toBe(300);
-    expect("house_load_w" in (parsed.logic ?? {})).toBe(false);
+    expect("house_load_w" in ((parseConfigDocument({ logic: { house_load_w: 2200 } }).logic as Record<string, unknown>) ?? {})).toBe(false);
     expect(() => parseConfigDocument({ solar: { direct_use_ratio: 0.6 } })).toThrow();
   });
 });

@@ -18,7 +18,12 @@ import { MarketDataService } from "./config/market-data.service";
 import { EvccDataService } from "./config/evcc-data.service";
 import { ForecastAssemblyService } from "./config/forecast-assembly.service";
 import { WeatherService } from "./config/weather.service";
+import { OpenMeteoSolarForecastService } from "./config/open-meteo-solar-forecast.service";
+import { SolarForecastCalibrationService } from "./config/solar-forecast-calibration.service";
 import { DemandForecastService } from "./config/demand-forecast.service";
+import { LoadForecastArtifactService } from "./forecasting/load-forecast-artifact.service";
+import { LoadForecastInferenceService } from "./forecasting/load-forecast-inference.service";
+import { ModelTrainingCoordinator } from "./forecasting/model-training-coordinator.service";
 import { FroniusService } from "./fronius/fronius.service";
 import { OptimisationCommandTranslator } from "./hardware/optimisation-command-translator.service";
 import { StorageModule } from "./storage/storage.module";
@@ -48,6 +53,11 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     EvccDataService,
     ForecastAssemblyService,
     WeatherService,
+    OpenMeteoSolarForecastService,
+    SolarForecastCalibrationService,
+    LoadForecastArtifactService,
+    LoadForecastInferenceService,
+    ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,
     OptimisationCommandTranslator,
@@ -69,6 +79,11 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     EvccDataService,
     ForecastAssemblyService,
     WeatherService,
+    OpenMeteoSolarForecastService,
+    SolarForecastCalibrationService,
+    LoadForecastArtifactService,
+    LoadForecastInferenceService,
+    ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,
     OptimisationCommandTranslator,

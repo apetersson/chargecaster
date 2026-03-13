@@ -6,6 +6,8 @@ __pycache__/
 node_modules/
 dist/
 backend/dist-bundle/
+backend/catboost_info/
+backend/ml/__pycache__/
 .idea/
 .env
 .env.*

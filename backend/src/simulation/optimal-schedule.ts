@@ -17,8 +17,6 @@ const HOLD_ENERGY_THRESHOLD_KWH = 0.02;
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
   houseLoadWattsPerSlot?: (number | undefined)[];
-  directPvUseWattsPerSlot?: (number | undefined)[];
-  residualHouseLoadWattsPerSlot?: (number | undefined)[];
   feedInTariffEurPerKwh?: number;
   allowBatteryExport?: boolean;
   allowGridChargeFromGrid?: boolean;
@@ -148,8 +146,6 @@ function prepareSimulationContext(
   const normalizedOptions = {
     solarGenerationPerSlotKwh: options.solarGenerationKwhPerSlot ?? [],
     houseLoadWattsPerSlot: options.houseLoadWattsPerSlot ?? [],
-    directPvUseWattsPerSlot: options.directPvUseWattsPerSlot ?? [],
-    residualHouseLoadWattsPerSlot: options.residualHouseLoadWattsPerSlot ?? [],
     feedInTariff: Math.max(
       0,
       Number(options.feedInTariffEurPerKwh ?? price.feed_in_tariff_eur_per_kwh ?? 0),
@@ -225,8 +221,6 @@ function prepareSimulationContext(
     slots,
     solarGenerationPerSlotKwh: normalizedOptions.solarGenerationPerSlotKwh,
     houseLoadWattsPerSlot: normalizedOptions.houseLoadWattsPerSlot,
-    directPvUseWattsPerSlot: normalizedOptions.directPvUseWattsPerSlot,
-    residualHouseLoadWattsPerSlot: normalizedOptions.residualHouseLoadWattsPerSlot,
     fallbackHouseLoadW,
     networkTariffEurPerKwh,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
@@ -268,8 +262,6 @@ function buildSlotProfiles(params: {
   slots: PriceSlot[];
   solarGenerationPerSlotKwh: number[];
   houseLoadWattsPerSlot: (number | undefined)[];
-  directPvUseWattsPerSlot: (number | undefined)[];
-  residualHouseLoadWattsPerSlot: (number | undefined)[];
   fallbackHouseLoadW: number;
   networkTariffEurPerKwh: number;
   allowGridChargeFromGrid: boolean;
@@ -281,22 +273,13 @@ function buildSlotProfiles(params: {
     const durationHours = slot.durationHours;
     const solarGenerationKwh = params.solarGenerationPerSlotKwh[index] ?? 0;
     const explicitLoadEnergyKwh = energyKwhFromOptionalPowerWatts(params.houseLoadWattsPerSlot[index], durationHours);
-    const explicitDirectUseEnergyKwh = energyKwhFromOptionalPowerWatts(params.directPvUseWattsPerSlot[index], durationHours);
-    const explicitResidualEnergyKwh = energyKwhFromOptionalPowerWatts(params.residualHouseLoadWattsPerSlot[index], durationHours);
-    const loadEnergyKwh = explicitLoadEnergyKwh ??
-      (
-        explicitDirectUseEnergyKwh != null || explicitResidualEnergyKwh != null
-          ? (explicitDirectUseEnergyKwh ?? 0) + (explicitResidualEnergyKwh ?? 0)
-          : energyKwhFromPowerWatts(params.fallbackHouseLoadW, durationHours)
-      );
+    const loadEnergyKwh = explicitLoadEnergyKwh ?? energyKwhFromPowerWatts(params.fallbackHouseLoadW, durationHours);
     const directUseEnergyKwh = clampEnergyKwh(
-      explicitDirectUseEnergyKwh ?? Math.max(0, loadEnergyKwh - (explicitResidualEnergyKwh ?? loadEnergyKwh)),
+      Math.min(loadEnergyKwh, solarGenerationKwh),
       0,
       Math.min(loadEnergyKwh, solarGenerationKwh),
     );
-    const loadAfterDirectUseKwh = explicitResidualEnergyKwh != null
-      ? Math.max(0, explicitResidualEnergyKwh)
-      : Math.max(0, loadEnergyKwh - directUseEnergyKwh);
+    const loadAfterDirectUseKwh = Math.max(0, loadEnergyKwh - directUseEnergyKwh);
     const availableSolarKwh = Math.max(0, solarGenerationKwh - directUseEnergyKwh);
     const priceTotal = slot.price + params.networkTariffEurPerKwh;
     const baselineGridEnergyKwh = loadAfterDirectUseKwh - availableSolarKwh;

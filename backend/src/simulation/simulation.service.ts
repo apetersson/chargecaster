@@ -163,23 +163,17 @@ export class SimulationService {
         }
         const ratio = overlap.ratioOf(priceSlotWindow.duration).value;
         acc.house += sample.housePowerW * ratio;
-        acc.direct += sample.directPvUseW * ratio;
-        acc.residual += sample.residualHousePowerW * ratio;
         acc.coverage += ratio;
         return acc;
-      }, { house: 0, direct: 0, residual: 0, coverage: 0 });
+      }, { house: 0, coverage: 0 });
     }).map((entry) => ({
       housePowerW: entry.coverage > 0 ? entry.house : null,
-      directPvUseW: entry.coverage > 0 ? entry.direct : null,
-      residualHousePowerW: entry.coverage > 0 ? entry.residual : null,
     }));
 
     // Run the DP-based optimiser with the caller's grid and export preferences
     const result = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
-      directPvUseWattsPerSlot: demandProfilePerSlot.map((entry) => entry.directPvUseW ?? undefined),
-      residualHouseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.residualHousePowerW ?? undefined),
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
     });
@@ -225,8 +219,6 @@ export class SimulationService {
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
-      directPvUseWattsPerSlot: demandProfilePerSlot.map((entry) => entry.directPvUseW ?? undefined),
-      residualHouseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.residualHousePowerW ?? undefined),
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: false,
@@ -266,6 +258,7 @@ export class SimulationService {
       price_ct_per_kwh: priceSnapshotCt,
       grid_power_w: null,
       solar_power_w: null,
+      solar_forecast_power_w: null,
       solar_energy_wh: null,
       home_power_w: null,
       ev_charge_power_w: null,
@@ -286,10 +279,12 @@ export class SimulationService {
         historyEntry.solar_energy_wh = firstSolarWh;
         const slotDuration = firstSlot.duration;
         if (slotDuration.hours > 0) {
-          historyEntry.solar_power_w = firstSolarEnergy.per(slotDuration).watts;
+          historyEntry.solar_forecast_power_w = firstSolarEnergy.per(slotDuration).watts;
+          historyEntry.solar_power_w = historyEntry.solar_forecast_power_w;
         }
       } else if (firstSolarWh === 0) {
         historyEntry.solar_energy_wh = historyEntry.solar_energy_wh ?? 0;
+        historyEntry.solar_forecast_power_w = historyEntry.solar_forecast_power_w ?? 0;
         historyEntry.solar_power_w = historyEntry.solar_power_w ?? 0;
       }
     }
@@ -424,8 +419,6 @@ interface SolarSlot {
 interface DemandSlot {
   slot: TimeSlot;
   housePowerW: number;
-  directPvUseW: number;
-  residualHousePowerW: number;
 }
 
 function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
@@ -475,8 +468,6 @@ function normalizeDemandForecastSlots(raw: DemandForecastEntry[]): DemandSlot[] 
     slots.push({
       slot: slotTime,
       housePowerW: entry.house_power_w,
-      directPvUseW: entry.direct_pv_use_w,
-      residualHousePowerW: entry.residual_house_power_w,
     });
   }
   return slots.sort((left, right) => left.slot.start.getTime() - right.slot.start.getTime());

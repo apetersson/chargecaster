@@ -59,6 +59,7 @@ export const historyPointSchema = z
     price_eur_per_kwh: nullableNumberSchema,
     grid_power_w: nullableNumberSchema.optional().default(null),
     solar_power_w: nullableNumberSchema.optional().default(null),
+    solar_forecast_power_w: nullableNumberSchema.optional().default(null),
     solar_energy_wh: nullableNumberSchema.optional().default(null),
     home_power_w: nullableNumberSchema.optional().default(null),
     ev_charge_power_w: nullableNumberSchema.optional().default(null),
@@ -135,13 +136,10 @@ export const demandForecastEntrySchema = z.object({
   start: requiredTimestampSchema,
   end: optionalTimestampSchema.optional(),
   house_power_w: z.number().nonnegative(),
-  direct_pv_use_w: z.number().nonnegative(),
-  residual_house_power_w: z.number().nonnegative(),
-  ev_power_w: z.number().nonnegative(),
-  total_power_w: z.number().nonnegative(),
   baseline_house_power_w: z.number().nonnegative(),
   confidence: nullableNumberSchema.optional(),
   source: z.string(),
+  model_version: optionalStringSchema.optional(),
 });
 
 export type DemandForecastEntry = z.infer<typeof demandForecastEntrySchema>;

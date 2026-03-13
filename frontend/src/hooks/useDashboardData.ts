@@ -29,7 +29,7 @@ function getErrorMessage(error: unknown): string {
 
 function readOptionalHistoryNumber(
   entry: object,
-  key: "ev_charge_power_w" | "site_demand_power_w",
+  key: "ev_charge_power_w" | "site_demand_power_w" | "solar_forecast_power_w",
 ): number | null {
   const value = (entry as Record<string, unknown>)[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -69,8 +69,9 @@ export function useDashboardData(): DashboardDataState {
 
         setSummary(summaryData);
         setHistory(
-          historyData.entries.map((entry: HistoryPoint) => ({
+          historyData.entries.map((entry) => ({
             ...entry,
+            solar_forecast_power_w: readOptionalHistoryNumber(entry, "solar_forecast_power_w"),
             ev_charge_power_w: readOptionalHistoryNumber(entry, "ev_charge_power_w"),
             site_demand_power_w: readOptionalHistoryNumber(entry, "site_demand_power_w"),
           })),

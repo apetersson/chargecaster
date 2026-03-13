@@ -84,6 +84,24 @@ const locationConfigSchema = z
   })
   .strip();
 
+const solarArrayConfigSchema = z
+  .object({
+    lat: optionalNumberSchema.optional(),
+    lon: optionalNumberSchema.optional(),
+    kwp: optionalNumberSchema.optional(),
+    dec: optionalNumberSchema.optional(),
+    az: optionalNumberSchema.optional(),
+  })
+  .strip();
+
+const loadForecastConfigSchema = z
+  .object({
+    model_dir: optionalStringSchema.optional(),
+    self_training_enabled: optionalBooleanSchema.optional(),
+    python_executable: optionalStringSchema.optional(),
+  })
+  .strip();
+
 const evccConfigSchema = configSectionSchema
   .extend({
     base_url: optionalStringSchema.optional(),
@@ -112,6 +130,8 @@ export const configDocumentSchema = z
     price: priceConfigSchema.optional(),
     logic: logicConfigSchema.optional(),
     location: locationConfigSchema.optional(),
+    solar: z.array(solarArrayConfigSchema).optional(),
+    load_forecast: loadForecastConfigSchema.optional(),
     evcc: evccConfigSchema.optional(),
     market_data: marketConfigSchema.optional(),
     logging: loggingConfigSchema.optional(),

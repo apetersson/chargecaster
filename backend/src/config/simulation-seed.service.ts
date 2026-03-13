@@ -6,6 +6,7 @@ import { FroniusService } from "../fronius/fronius.service";
 import { OptimisationCommandTranslator } from "../hardware/optimisation-command-translator.service";
 import { SimulationPreparationService } from "./simulation-preparation.service";
 import { RuntimeConfigService } from "./runtime-config.service";
+import { ModelTrainingCoordinator } from "../forecasting/model-training-coordinator.service";
 
 @Injectable()
 export class SimulationSeedService implements OnModuleDestroy {
@@ -20,6 +21,7 @@ export class SimulationSeedService implements OnModuleDestroy {
     @Inject(SimulationService) private readonly simulationService: SimulationService,
     @Inject(FroniusService) private readonly froniusService: FroniusService,
     @Inject(OptimisationCommandTranslator) private readonly optimisationCommandTranslator: OptimisationCommandTranslator,
+    @Inject(ModelTrainingCoordinator) private readonly modelTrainingCoordinator: ModelTrainingCoordinator,
   ) {
   }
 
@@ -68,6 +70,7 @@ export class SimulationSeedService implements OnModuleDestroy {
       });
       this.logger.log("Seeded snapshot using config data.");
       await this.applyFronius(snapshot);
+      await this.modelTrainingCoordinator.maybeStartTraining(rawConfig);
     } catch (error) {
       this.logger.error(`Simulation seed failed: ${describeError(error)}`);
       throw error;

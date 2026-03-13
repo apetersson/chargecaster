@@ -38,4 +38,36 @@ describe("ForecastAssemblyService price normalization", () => {
     expect(slots).toHaveLength(1);
     expect(slots[0].price).toBeCloseTo(0.18786, 6);
   });
+
+  it("preserves the solar forecast provider on era sources", () => {
+    const start = new Date(Date.UTC(2025, 0, 1, 12, 0, 0)).toISOString();
+    const end = new Date(Date.UTC(2025, 0, 1, 13, 0, 0)).toISOString();
+
+    const canonicalForecast: RawForecastEntry[] = [
+      {
+        start,
+        end,
+        price: 0.18,
+        unit: "EUR/kWh",
+      },
+    ];
+
+    const { eras } = service.buildForecastEras(
+      canonicalForecast,
+      [],
+      [],
+      [
+        {
+          start,
+          end,
+          energy_wh: 1200,
+          provider: "open_meteo",
+        },
+      ],
+      0,
+    );
+
+    expect(eras).toHaveLength(1);
+    expect(eras[0]?.sources.find((source) => source.type === "solar")?.provider).toBe("open_meteo");
+  });
 });

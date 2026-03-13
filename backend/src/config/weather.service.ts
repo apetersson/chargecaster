@@ -1,13 +1,23 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { StorageService, type WeatherHourRecord } from "../storage/storage.service";
+import { StorageService, type SolarProxyHourRecord, type WeatherHourRecord } from "../storage/storage.service";
 
 const FORECAST_API_URL = "https://api.open-meteo.com/v1/forecast";
 const HISTORICAL_FORECAST_API_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast";
 const HOURLY_FIELDS = ["temperature_2m", "cloud_cover", "wind_speed_10m", "precipitation"] as const;
+const SOLAR_HOURLY_FIELDS = ["global_tilted_irradiance"] as const;
 
 export interface WeatherLocation {
   latitude: number;
   longitude: number;
+  timezone: string;
+}
+
+export interface SolarArrayConfig {
+  latitude: number;
+  longitude: number;
+  kwp: number;
+  tilt: number;
+  azimuth: number;
   timezone: string;
 }
 
@@ -18,6 +28,7 @@ interface OpenMeteoPayload {
     cloud_cover?: (number | null)[];
     wind_speed_10m?: (number | null)[];
     precipitation?: (number | null)[];
+    global_tilted_irradiance?: (number | null)[];
   };
 }
 
@@ -61,6 +72,57 @@ export class WeatherService {
     return this.storage.listWeatherHours(location.latitude, location.longitude, startIso, endIso);
   }
 
+  async getSolarProxyHours(
+    arrays: SolarArrayConfig[],
+    startInclusive: Date,
+    endInclusive: Date,
+  ): Promise<SolarProxyHourRecord[]> {
+    const startHour = floorToUtcHour(startInclusive);
+    const endHour = floorToUtcHour(endInclusive);
+    if (endHour.getTime() < startHour.getTime() || arrays.length === 0) {
+      return [];
+    }
+
+    const expectedHours = enumerateHourIsos(startHour, endHour);
+    const nowHour = floorToUtcHour(new Date());
+
+    for (const arrayConfig of arrays) {
+      const cached = this.storage.listSolarProxyHours(
+        arrayConfig.latitude,
+        arrayConfig.longitude,
+        arrayConfig.kwp,
+        arrayConfig.tilt,
+        arrayConfig.azimuth,
+        startHour.toISOString(),
+        endHour.toISOString(),
+      );
+      if (cached.length >= expectedHours.length) {
+        continue;
+      }
+
+      if (startHour.getTime() <= nowHour.getTime()) {
+        const historicalEnd = new Date(Math.min(endHour.getTime(), nowHour.getTime()));
+        await this.fetchAndCacheSolarRange(arrayConfig, startHour, historicalEnd, HISTORICAL_FORECAST_API_URL, "historical");
+      }
+      if (endHour.getTime() > nowHour.getTime()) {
+        const forecastStart = new Date(Math.max(startHour.getTime(), nowHour.getTime()));
+        await this.fetchAndCacheSolarRange(arrayConfig, forecastStart, endHour, FORECAST_API_URL, "forecast");
+      }
+    }
+
+    return arrays.flatMap((arrayConfig) =>
+      this.storage.listSolarProxyHours(
+        arrayConfig.latitude,
+        arrayConfig.longitude,
+        arrayConfig.kwp,
+        arrayConfig.tilt,
+        arrayConfig.azimuth,
+        startHour.toISOString(),
+        endHour.toISOString(),
+      ),
+    );
+  }
+
   private async fetchAndCacheRange(
     location: WeatherLocation,
     startInclusive: Date,
@@ -93,6 +155,42 @@ export class WeatherService {
     const payload = (await response.json()) as OpenMeteoPayload;
     const rows = this.parseHourlyPayload(payload, location, source, startInclusive, endInclusive);
     this.storage.upsertWeatherHours(rows);
+  }
+
+  private async fetchAndCacheSolarRange(
+    arrayConfig: SolarArrayConfig,
+    startInclusive: Date,
+    endInclusive: Date,
+    baseUrl: string,
+    source: string,
+  ): Promise<void> {
+    if (endInclusive.getTime() < startInclusive.getTime()) {
+      return;
+    }
+    const url = new URL(baseUrl);
+    url.searchParams.set("latitude", String(arrayConfig.latitude));
+    url.searchParams.set("longitude", String(arrayConfig.longitude));
+    url.searchParams.set("hourly", SOLAR_HOURLY_FIELDS.join(","));
+    url.searchParams.set("timezone", "GMT");
+    url.searchParams.set("start_date", toDateOnly(startInclusive));
+    url.searchParams.set("end_date", toDateOnly(endInclusive));
+    url.searchParams.set("tilt", String(arrayConfig.tilt));
+    url.searchParams.set("azimuth", String(arrayConfig.azimuth));
+
+    this.logger.log(
+      `Fetching ${source} solar proxy for ${arrayConfig.latitude.toFixed(3)},${arrayConfig.longitude.toFixed(3)} tilt=${arrayConfig.tilt} az=${arrayConfig.azimuth} ${toDateOnly(startInclusive)}..${toDateOnly(endInclusive)}`,
+    );
+
+    const response = await fetch(url, {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`Open-Meteo ${source} solar proxy failed: HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const payload = (await response.json()) as OpenMeteoPayload;
+    const rows = this.parseSolarProxyPayload(payload, arrayConfig, source, startInclusive, endInclusive);
+    this.storage.upsertSolarProxyHours(rows);
   }
 
   private parseHourlyPayload(
@@ -129,6 +227,48 @@ export class WeatherService {
         cloudCover: toNullableNumber(cloudCover[index]),
         windSpeed10m: toNullableNumber(windSpeed[index]),
         precipitationMm: toNullableNumber(precipitation[index]),
+        source,
+      });
+    }
+    return rows;
+  }
+
+  private parseSolarProxyPayload(
+    payload: OpenMeteoPayload,
+    arrayConfig: SolarArrayConfig,
+    source: string,
+    startInclusive: Date,
+    endInclusive: Date,
+  ): Omit<SolarProxyHourRecord, "updatedAt">[] {
+    const hourly = payload.hourly;
+    const times = Array.isArray(hourly?.time) ? hourly.time : [];
+    const irradiance = Array.isArray(hourly?.global_tilted_irradiance) ? hourly.global_tilted_irradiance : [];
+    const startMs = floorToUtcHour(startInclusive).getTime();
+    const endMs = floorToUtcHour(endInclusive).getTime();
+    const rows: Omit<SolarProxyHourRecord, "updatedAt">[] = [];
+
+    for (let index = 0; index < times.length; index += 1) {
+      const hourUtc = normalizeOpenMeteoHour(times[index]);
+      if (!hourUtc) {
+        continue;
+      }
+      const hourMs = new Date(hourUtc).getTime();
+      if (hourMs < startMs || hourMs > endMs) {
+        continue;
+      }
+      const gti = toNullableNumber(irradiance[index]);
+      const expectedPowerW = gti == null
+        ? null
+        : Math.max(0, arrayConfig.kwp * Math.min(gti, 1200));
+      rows.push({
+        latitude: arrayConfig.latitude,
+        longitude: arrayConfig.longitude,
+        kwp: arrayConfig.kwp,
+        tilt: arrayConfig.tilt,
+        azimuth: arrayConfig.azimuth,
+        hourUtc,
+        globalTiltedIrradiance: gti,
+        expectedPowerW,
         source,
       });
     }

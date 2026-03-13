@@ -98,7 +98,10 @@ export class ForecastAssemblyService {
       }
 
       const solarSlot = this.findSolarSlot(slot.startDate, slot.endDate, solarSlots);
-      const solarSource = this.buildSolarSource("evcc", slot, solarSlot);
+      const solarProvider = typeof solarSlot?.payload.provider === "string" && solarSlot.payload.provider.length > 0
+        ? solarSlot.payload.provider
+        : "open_meteo";
+      const solarSource = this.buildSolarSource(solarProvider, slot, solarSlot);
       if (solarSource) {
         this.addSource(entry, solarSource);
       }

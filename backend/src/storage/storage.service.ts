@@ -51,6 +51,19 @@ export interface WeatherHourRecord {
   updatedAt: string;
 }
 
+export interface SolarProxyHourRecord {
+  latitude: number;
+  longitude: number;
+  kwp: number;
+  tilt: number;
+  azimuth: number;
+  hourUtc: string;
+  globalTiltedIrradiance: number | null;
+  expectedPowerW: number | null;
+  source: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class StorageService implements OnModuleDestroy {
   private readonly dbPath: string;
@@ -285,6 +298,111 @@ export class StorageService implements OnModuleDestroy {
     txn(entries);
   }
 
+  listSolarProxyHours(
+    latitude: number,
+    longitude: number,
+    kwp: number,
+    tilt: number,
+    azimuth: number,
+    startInclusive: string,
+    endInclusive: string,
+  ): SolarProxyHourRecord[] {
+    this.logger.verbose(
+      `Listing solar proxy hours (${latitude.toFixed(3)},${longitude.toFixed(3)} tilt=${tilt} az=${azimuth} ${startInclusive}..${endInclusive})`,
+    );
+    const stmt = this.db.prepare(`
+      SELECT
+        latitude,
+        longitude,
+        kwp,
+        tilt,
+        azimuth,
+        hour_utc,
+        global_tilted_irradiance,
+        expected_power_w,
+        source,
+        updated_at
+      FROM solar_proxy_hourly_cache
+      WHERE latitude = ?
+        AND longitude = ?
+        AND kwp = ?
+        AND tilt = ?
+        AND azimuth = ?
+        AND hour_utc >= ?
+        AND hour_utc <= ?
+      ORDER BY hour_utc ASC
+    `);
+    const rows = stmt.all(latitude, longitude, kwp, tilt, azimuth, startInclusive, endInclusive) as {
+      latitude: number;
+      longitude: number;
+      kwp: number;
+      tilt: number;
+      azimuth: number;
+      hour_utc: string;
+      global_tilted_irradiance: number | null;
+      expected_power_w: number | null;
+      source: string;
+      updated_at: string;
+    }[];
+    return rows.map((row) => ({
+      latitude: row.latitude,
+      longitude: row.longitude,
+      kwp: row.kwp,
+      tilt: row.tilt,
+      azimuth: row.azimuth,
+      hourUtc: row.hour_utc,
+      globalTiltedIrradiance: row.global_tilted_irradiance,
+      expectedPowerW: row.expected_power_w,
+      source: row.source,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  upsertSolarProxyHours(entries: Omit<SolarProxyHourRecord, "updatedAt">[]): void {
+    if (!entries.length) {
+      return;
+    }
+    this.logger.log(`Upserting ${entries.length} solar proxy hours`);
+    const stmt = this.db.prepare(`
+      INSERT INTO solar_proxy_hourly_cache (
+        latitude,
+        longitude,
+        kwp,
+        tilt,
+        azimuth,
+        hour_utc,
+        global_tilted_irradiance,
+        expected_power_w,
+        source,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(latitude, longitude, kwp, tilt, azimuth, hour_utc) DO UPDATE SET
+        global_tilted_irradiance = excluded.global_tilted_irradiance,
+        expected_power_w = excluded.expected_power_w,
+        source = excluded.source,
+        updated_at = excluded.updated_at
+    `);
+    const txn = this.db.transaction((items: Omit<SolarProxyHourRecord, "updatedAt">[]) => {
+      const updatedAt = new Date().toISOString();
+      for (const entry of items) {
+        stmt.run(
+          entry.latitude,
+          entry.longitude,
+          entry.kwp,
+          entry.tilt,
+          entry.azimuth,
+          entry.hourUtc,
+          entry.globalTiltedIrradiance,
+          entry.expectedPowerW,
+          entry.source,
+          updatedAt,
+        );
+      }
+    });
+    txn(entries);
+  }
+
   upsertDailyBacktestSummaries(entries: {
     date: string;
     configFingerprint: string;
@@ -436,6 +554,24 @@ export class StorageService implements OnModuleDestroy {
         );
         CREATE INDEX IF NOT EXISTS idx_weather_hourly_cache_lookup
           ON weather_hourly_cache (latitude, longitude, hour_utc);
+    `);
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS solar_proxy_hourly_cache
+        (
+            latitude                 REAL NOT NULL,
+            longitude                REAL NOT NULL,
+            kwp                      REAL NOT NULL,
+            tilt                     REAL NOT NULL,
+            azimuth                  REAL NOT NULL,
+            hour_utc                 TEXT NOT NULL,
+            global_tilted_irradiance REAL,
+            expected_power_w         REAL,
+            source                   TEXT NOT NULL,
+            updated_at               TEXT NOT NULL,
+            PRIMARY KEY (latitude, longitude, kwp, tilt, azimuth, hour_utc)
+        );
+        CREATE INDEX IF NOT EXISTS idx_solar_proxy_hourly_cache_lookup
+          ON solar_proxy_hourly_cache (latitude, longitude, kwp, tilt, azimuth, hour_utc);
     `);
 
     const hadStrategyColumn = this.tableHasColumn("daily_backtest_summaries", "strategy");
