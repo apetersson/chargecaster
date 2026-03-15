@@ -47,7 +47,7 @@ MODEL_PARAMS = {
     "iterations": 600,
     "depth": 6,
     "learning_rate": 0.05,
-    "l2_leaf_reg": 10.0,
+    "l2_leaf_reg": 15.0,
     "random_seed": 42,
     "verbose": False,
 }
