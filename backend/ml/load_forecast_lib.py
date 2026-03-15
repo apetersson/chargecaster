@@ -329,17 +329,28 @@ def build_feature_vector(context: HistoricalHour, evaluation_rows: list[Historic
     ]
 
 
-def build_training_samples(train_rows: list[HistoricalHour]) -> tuple[list[list[float]], list[float]]:
+def build_training_samples(train_rows: list[HistoricalHour]) -> tuple[list[list[float]], list[float], list[float]]:
     rows = [row for row in train_rows if row.valid_target]
     history_by_hour = {row.hour_utc: row.home_power_w for row in train_rows}
     features: list[list[float]] = []
     targets: list[float] = []
+    sample_weights: list[float] = []
     rolling_homes: list[float] = []
+    prices = sorted(row.price_eur_per_kwh for row in rows)
+    price_threshold = percentile(prices, 0.75) if prices else 0.0
     for index, row in enumerate(rows):
         features.append(build_feature_vector(row, rows, index, rolling_homes, history_by_hour))
         targets.append(row.home_power_w)
+        economic_weight = 1.0
+        if row.solar_power_w < 250.0:
+            economic_weight += 0.35
+        if row.price_eur_per_kwh >= price_threshold:
+            economic_weight += 0.35
+        if row.local_hour in (6, 7, 8, 17, 18, 19, 20, 21):
+            economic_weight += 0.15
+        sample_weights.append(economic_weight)
         rolling_homes.append(row.home_power_w)
-    return features, targets
+    return features, targets, sample_weights
 
 
 def sequential_model_predict(model: CatBoostRegressor, history_rows: list[HistoricalHour], eval_rows: list[HistoricalHour]) -> list[float]:
@@ -455,7 +466,7 @@ def train_and_evaluate(db_path: str, config_path: str, output_dir: str, verbose:
     economic_errors_model: list[float] = []
     economic_errors_hybrid: list[float] = []
     for fold_index, (train_rows, eval_rows) in enumerate(folds, start=1):
-        train_x, train_y = build_training_samples(train_rows)
+        train_x, train_y, train_weights = build_training_samples(train_rows)
         if not train_x or not train_y:
             continue
         if verbose and (fold_index == 1 or fold_index == len(folds) or fold_index % 10 == 0):
@@ -465,7 +476,7 @@ def train_and_evaluate(db_path: str, config_path: str, output_dir: str, verbose:
                 f"(train_hours={len(train_rows)}, eval_hours={len(eval_rows)}, samples={len(train_x)})",
             )
         model = CatBoostRegressor(**MODEL_PARAMS)
-        model.fit(train_x, train_y)
+        model.fit(train_x, train_y, sample_weight=train_weights)
         fold_model_predictions = sequential_model_predict(model, train_rows, eval_rows)
         fold_hour_week_predictions = sequential_hour_of_week_predict(train_rows, eval_rows)
         fold_hybrid_predictions = sequential_hybrid_predict(train_rows, eval_rows)
@@ -496,11 +507,11 @@ def train_and_evaluate(db_path: str, config_path: str, output_dir: str, verbose:
         else 0.0
     )
 
-    train_x_all, train_y_all = build_training_samples(valid_rows)
+    train_x_all, train_y_all, train_weights_all = build_training_samples(valid_rows)
     if verbose:
         log_progress(f"Training final model on {len(train_x_all)} samples")
     model = CatBoostRegressor(**MODEL_PARAMS)
-    model.fit(train_x_all, train_y_all)
+    model.fit(train_x_all, train_y_all, sample_weight=train_weights_all)
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
