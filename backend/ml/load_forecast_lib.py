@@ -301,14 +301,6 @@ def build_feature_vector(context: HistoricalHour, evaluation_rows: list[Historic
     same_hour_prev_week = history_by_hour.get(prev_week_key)
     next3 = average([row.solar_power_w for row in evaluation_rows[index:index + 3]]) or context.solar_power_w
     next6 = average([row.solar_power_w for row in evaluation_rows[index:index + 6]]) or context.solar_power_w
-    next6_price = average([row.price_eur_per_kwh for row in evaluation_rows[index:index + 6]]) or context.price_eur_per_kwh
-    next24_prices = [row.price_eur_per_kwh for row in evaluation_rows[index:index + 24]]
-    sorted24 = sorted(next24_prices)
-    if len(sorted24) <= 1:
-        percentile = 0.5
-    else:
-        first_idx = next((i for i, value in enumerate(sorted24) if value >= context.price_eur_per_kwh), len(sorted24) - 1)
-        percentile = first_idx / (len(sorted24) - 1)
     return [
         float(context.local_hour),
         float(context.weekday),
@@ -323,10 +315,10 @@ def build_feature_vector(context: HistoricalHour, evaluation_rows: list[Historic
         context.solar_power_w,
         next3,
         next6,
-        context.price_eur_per_kwh,
-        next6_price,
-        percentile,
-        1.0 if percentile >= 0.75 else 0.0,
+        0.0,
+        0.0,
+        0.5,
+        0.0,
         lag_prev_hour,
         lag_mean_3,
         lag_mean_6,
