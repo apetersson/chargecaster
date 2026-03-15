@@ -42,7 +42,7 @@ class HistoricalHour:
 
 
 MODEL_PARAMS = {
-    "loss_function": "Quantile:alpha=0.3",
+    "loss_function": "Quantile:alpha=0.25",
     "eval_metric": "MAE",
     "iterations": 600,
     "depth": 6,
