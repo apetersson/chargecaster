@@ -14,6 +14,7 @@ import { ConfigFileService } from "./config/config-file.service";
 import { SimulationPreparationService } from "./config/simulation-preparation.service";
 import { SimulationSeedService } from "./config/simulation-seed.service";
 import { SimulationConfigFactory } from "./config/simulation-config.factory";
+import { ConfigHistoryService } from "./config/config-history.service";
 import { MarketDataService } from "./config/market-data.service";
 import { EvccDataService } from "./config/evcc-data.service";
 import { ForecastAssemblyService } from "./config/forecast-assembly.service";
@@ -49,6 +50,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     SimulationPreparationService,
     ConfigFileService,
     SimulationConfigFactory,
+    ConfigHistoryService,
     MarketDataService,
     EvccDataService,
     ForecastAssemblyService,
@@ -75,6 +77,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     SimulationPreparationService,
     ConfigFileService,
     SimulationConfigFactory,
+    ConfigHistoryService,
     MarketDataService,
     EvccDataService,
     ForecastAssemblyService,

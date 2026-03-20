@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
-import { describeError, Percentage } from "@chargecaster/domain";
+import { describeError, Percentage, Power } from "@chargecaster/domain";
 import type { ConfigDocument } from "../config/schemas";
 import { RuntimeConfigService } from "../config/runtime-config.service";
 
@@ -10,6 +10,7 @@ export interface FroniusConnectionConfig {
   user: string;
   password: string;
   batteriesPath: string;
+  timeOfUsePath: string;
   timeoutSeconds: number;
   verifyTls: boolean;
 }
@@ -19,6 +20,8 @@ const DIGEST_PREFIX = "digest";
 const AUTH_ERROR_SUMMARY_MESSAGE = "Unable to control battery because of authentication problem.";
 
 const TARGET_TOLERANCE_PERCENT = 0.5;
+const MIN_TIME_OF_USE_WINDOW_MINUTES = 2;
+const MAX_TIME_OF_USE_WINDOW_MINUTES = 15;
 
 export interface FroniusApplyResult {
   errorMessage: string | null;
@@ -30,6 +33,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 type FroniusMode = "charge" | "auto" | "hold";
 
 export type OptimisationCommand =
+  | {charge: {untilTimestamp?: string | null}}
   | "charge"
   | "auto"
   | {auto: {floorSocPercent?: number | null}}
@@ -40,6 +44,7 @@ interface NormalisedStrategy {
   manualTarget: Percentage | null;
   observedSocPercent: number | null;
   floorTarget: Percentage | null;
+  chargeUntil: Date | null;
 }
 
 interface DigestSession {
@@ -48,6 +53,29 @@ interface DigestSession {
   qop: string;
   ha1: string;
   nc: number;
+}
+
+interface FroniusWeekdays {
+  Mon: boolean;
+  Tue: boolean;
+  Wed: boolean;
+  Thu: boolean;
+  Fri: boolean;
+  Sat: boolean;
+  Sun: boolean;
+}
+
+interface FroniusTimeTable {
+  Start: string;
+  End: string;
+}
+
+interface FroniusTimeOfUseEntry {
+  Active: boolean;
+  Power: Power;
+  ScheduleType: "CHARGE_MIN";
+  TimeTable: FroniusTimeTable;
+  Weekdays: FroniusWeekdays;
 }
 
 @Injectable()
@@ -59,10 +87,14 @@ export class FroniusService {
   private readonly froniusDisabled: boolean;
   private readonly autoModeFloorOverride: Percentage | null;
   private readonly maxChargeLimit: Percentage | null;
+  private readonly chargeFloorPower: Power | null;
+  private readonly chargeFloorWindowMinutes: number;
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
   private workingBatteriesPath: string | null = null;
   private workingCommandsPrefix: string | null = null;
+  private workingTimeOfUsePath: string | null = null;
+  private lastManagedTimeOfUseEntry: FroniusTimeOfUseEntry | null = null;
   private digestSession: DigestSession | null = null;
 
   constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
@@ -71,6 +103,12 @@ export class FroniusService {
     this.froniusDisabled = document.fronius?.enabled === false;
     this.autoModeFloorOverride = this.parsePercentage(document.battery?.auto_mode_floor_soc ?? null);
     this.maxChargeLimit = this.parsePercentage(document.battery?.max_charge_soc_percent ?? null);
+    this.chargeFloorPower = this.parsePositivePower(document.battery?.max_charge_power_w ?? null);
+    const intervalSeconds = this.parsePositiveNumber(document.logic?.interval_seconds ?? null) ?? 300;
+    this.chargeFloorWindowMinutes = Math.min(
+      MAX_TIME_OF_USE_WINDOW_MINUTES,
+      Math.max(MIN_TIME_OF_USE_WINDOW_MINUTES, Math.ceil(intervalSeconds / 60) + 1),
+    );
     let froniusConfig: FroniusConnectionConfig | null = null;
     try {
       froniusConfig = requireFroniusConnectionConfig(document);
@@ -110,11 +148,6 @@ export class FroniusService {
       this.logger.log(
         `Preparing to apply Fronius mode ${desiredMode.toUpperCase()} via ${urlCandidates[0]}`,
       );
-      if (this.shouldSkipUpdate(strategy)) {
-        this.logger.log(`Fronius already aligned with ${desiredMode} strategy; skipping update.`);
-        return {errorMessage: null};
-      }
-
       const payload = this.buildPayload(strategy);
       if (!payload) {
         this.logger.warn("Unable to construct Fronius payload; skipping update.");
@@ -122,37 +155,44 @@ export class FroniusService {
       }
 
       const targetLabel = payload.target ? `${payload.target.percent.toFixed(1)}%` : "n/a";
-      this.logger.verbose(`Fronius payload: ${JSON.stringify(payload.body)}`);
-      let lastError: Error | null = null;
-      for (const [index, url] of urlCandidates.entries()) {
-        const pathHint = new URL(url).pathname;
-        await this.loginFroniusSession(froniusConfig, pathHint);
-        this.logger.log(
-          `Issuing Fronius command (mode=${desiredMode}, target=${targetLabel}) to ${url}`,
-        );
-        try {
-          await this.requestJson("POST", url, froniusConfig, payload.body);
-          this.workingBatteriesPath = new URL(url).pathname;
-          this.workingCommandsPrefix = this.extractApiPrefix(this.workingBatteriesPath);
-          if (index > 0) {
-            this.logger.warn(
-              `Fronius accepted fallback endpoint ${this.workingBatteriesPath}; persist this path via fronius.batteries_path.`,
-            );
+      const shouldApplyBatteryUpdate = !this.shouldSkipBatteryUpdate(strategy);
+      if (shouldApplyBatteryUpdate) {
+        this.logger.verbose(`Fronius payload: ${JSON.stringify(payload.body)}`);
+        let lastError: Error | null = null;
+        for (const [index, url] of urlCandidates.entries()) {
+          const pathHint = new URL(url).pathname;
+          await this.loginFroniusSession(froniusConfig, pathHint);
+          this.logger.log(
+            `Issuing Fronius command (mode=${desiredMode}, target=${targetLabel}) to ${url}`,
+          );
+          try {
+            await this.requestJson("POST", url, froniusConfig, payload.body);
+            this.workingBatteriesPath = new URL(url).pathname;
+            this.workingCommandsPrefix = this.extractApiPrefix(this.workingBatteriesPath);
+            if (index > 0) {
+              this.logger.warn(
+                `Fronius accepted fallback endpoint ${this.workingBatteriesPath}; persist this path via fronius.batteries_path.`,
+              );
+            }
+            lastError = null;
+            break;
+          } catch (error: unknown) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            const canTryFallback = index < urlCandidates.length - 1;
+            if (!canTryFallback || !this.isHttp404(error)) {
+              throw error;
+            }
+            this.logger.warn(`Fronius endpoint ${url} returned 404; trying fallback path.`);
           }
-          lastError = null;
-          break;
-        } catch (error: unknown) {
-          lastError = error instanceof Error ? error : new Error(String(error));
-          const canTryFallback = index < urlCandidates.length - 1;
-          if (!canTryFallback || !this.isHttp404(error)) {
-            throw error;
-          }
-          this.logger.warn(`Fronius endpoint ${url} returned 404; trying fallback path.`);
+        }
+        if (lastError) {
+          throw lastError;
         }
       }
-      if (lastError) {
-        throw lastError;
+      else {
+        this.logger.log(`Fronius already aligned with ${desiredMode} strategy; skipping battery update.`);
       }
+      await this.syncChargeFloorTimeOfUse(strategy, froniusConfig);
       this.lastAppliedMode = desiredMode;
       this.lastAppliedTarget = payload.target;
       if (desiredMode === "hold" && payload.target && strategy.observedSocPercent != null) {
@@ -168,22 +208,32 @@ export class FroniusService {
         }
       }
       this.logger.log("Fronius command applied successfully.");
-      await this.logoutFroniusSession(froniusConfig);
       return {errorMessage: null};
     } catch (error: unknown) {
       this.logger.warn(`Fronius update failed: ${describeError(error)}`);
       return {errorMessage: this.normaliseSummaryError(error)};
+    } finally {
+      await this.logoutFroniusSession(froniusConfig);
     }
   }
 
   private normaliseStrategy(input: OptimisationCommand): NormalisedStrategy {
+    if (typeof input === "object" && input !== null && "charge" in input) {
+      return {
+        mode: "charge",
+        manualTarget: null,
+        observedSocPercent: null,
+        floorTarget: null,
+        chargeUntil: this.parseTimestamp(input.charge.untilTimestamp),
+      };
+    }
     if (input === "charge") {
-      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null};
+      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
     }
     if (input === "auto") {
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null};
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
     }
-    if ("hold" in input) {
+    if (typeof input === "object" && input !== null && "hold" in input) {
       const holdConfig = input.hold;
       const manualTarget = this.parsePercentage(holdConfig.minSocPercent);
       if (!manualTarget) {
@@ -196,12 +246,13 @@ export class FroniusService {
         manualTarget,
         observedSocPercent,
         floorTarget,
+        chargeUntil: null,
       };
     }
-    if ("auto" in input) {
+    if (typeof input === "object" && input !== null && "auto" in input) {
       const autoConfig = input.auto;
       const floorTarget = this.parsePercentage(autoConfig.floorSocPercent ?? null);
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget};
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget, chargeUntil: null};
     }
     throw new Error("Unsupported Fronius optimisation command.");
   }
@@ -213,7 +264,18 @@ export class FroniusService {
     return Math.min(Math.max(value, 0), 100);
   }
 
-  private shouldSkipUpdate(strategy: NormalisedStrategy): boolean {
+  private parseTimestamp(value: string | null | undefined): Date | null {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return null;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed;
+  }
+
+  private shouldSkipBatteryUpdate(strategy: NormalisedStrategy): boolean {
     if (this.lastAppliedMode !== strategy.mode) {
       return false;
     }
@@ -230,6 +292,37 @@ export class FroniusService {
       return Math.abs(this.lastAppliedTarget.percent - strategy.floorTarget.percent) <= TARGET_TOLERANCE_PERCENT;
     }
     return true;
+  }
+
+  private async syncChargeFloorTimeOfUse(
+    strategy: NormalisedStrategy,
+    config: FroniusConnectionConfig,
+  ): Promise<void> {
+    const managedPower = this.resolveChargeFloorPower();
+    if (managedPower == null) {
+      return;
+    }
+
+    const {entries: existingEntries, path: activePath} = await this.readTimeOfUseEntries(config);
+    const existingManagedEntry = this.findExistingManagedTimeOfUseEntry(existingEntries, managedPower);
+    const preservedEntries = existingManagedEntry
+      ? existingEntries.filter((entry) => entry !== existingManagedEntry)
+      : existingEntries;
+    const desiredManagedEntry = this.buildManagedChargeFloorEntry(
+      managedPower,
+      strategy.mode === "charge",
+      strategy.chargeUntil,
+    );
+    const desiredEntries = [...preservedEntries, desiredManagedEntry];
+
+    if (this.timeOfUseEntriesEqual(existingEntries, desiredEntries)) {
+      this.lastManagedTimeOfUseEntry = desiredManagedEntry;
+      this.logger.verbose("Fronius time-of-use schedule already aligned; skipping update.");
+      return;
+    }
+
+    await this.writeTimeOfUseEntries(config, activePath, desiredEntries);
+    this.lastManagedTimeOfUseEntry = desiredManagedEntry;
   }
 
   private normaliseSummaryError(error: unknown): string | null {
@@ -355,6 +448,10 @@ export class FroniusService {
     return this.maxChargeLimit;
   }
 
+  private resolveChargeFloorPower(): Power | null {
+    return this.chargeFloorPower;
+  }
+
   private serializeManualTarget(target: Percentage): Record<string, unknown> {
     return {
       BAT_M0_SOC_MIN: this.toPercentInteger(target),
@@ -376,6 +473,18 @@ export class FroniusService {
     return Math.round(value.percent);
   }
 
+  private parsePositiveNumber(value: unknown): number | null {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      return null;
+    }
+    return value;
+  }
+
+  private parsePositivePower(value: unknown): Power | null {
+    const watts = this.parsePositiveNumber(value);
+    return watts == null ? null : Power.fromWatts(watts);
+  }
+
   private buildUrl(host: string, path: string): string {
     const trimmedHost = host.endsWith("/") ? host.slice(0, -1) : host;
     const normalizedHost = trimmedHost.startsWith("http://") || trimmedHost.startsWith("https://")
@@ -386,6 +495,14 @@ export class FroniusService {
   }
 
   private buildBatteriesUrlCandidates(host: string, configuredPath: string): string[] {
+    return this.buildConfigUrlCandidates(host, configuredPath);
+  }
+
+  private buildTimeOfUseUrlCandidates(host: string, configuredPath: string): string[] {
+    return this.buildConfigUrlCandidates(host, configuredPath);
+  }
+
+  private buildConfigUrlCandidates(host: string, configuredPath: string): string[] {
     const normalizedPath = configuredPath.startsWith("/") ? configuredPath : `/${configuredPath}`;
     const candidates = [normalizedPath];
     if (normalizedPath.startsWith("/api/")) {
@@ -447,6 +564,217 @@ export class FroniusService {
 
   private isHttp404(error: unknown): boolean {
     return describeError(error).toLowerCase().includes("http 404");
+  }
+
+  private async readTimeOfUseEntries(
+    config: FroniusConnectionConfig,
+  ): Promise<{entries: FroniusTimeOfUseEntry[]; path: string}> {
+    const configuredPath = this.workingTimeOfUsePath ?? config.timeOfUsePath;
+    const urlCandidates = this.buildTimeOfUseUrlCandidates(config.host, configuredPath);
+    let lastError: Error | null = null;
+    for (const [index, url] of urlCandidates.entries()) {
+      try {
+        const payload = await this.requestJson("GET", url, config);
+        this.workingTimeOfUsePath = new URL(url).pathname;
+        return {
+          entries: this.extractTimeOfUseEntries(payload),
+          path: this.workingTimeOfUsePath,
+        };
+      } catch (error: unknown) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const canTryFallback = index < urlCandidates.length - 1;
+        if (!canTryFallback || !this.isHttp404(error)) {
+          throw error;
+        }
+        this.logger.warn(`Fronius time-of-use endpoint ${url} returned 404; trying fallback path.`);
+      }
+    }
+    if (lastError) {
+      throw lastError;
+    }
+    throw new Error("Unable to read Fronius time-of-use configuration.");
+  }
+
+  private async writeTimeOfUseEntries(
+    config: FroniusConnectionConfig,
+    pathHint: string,
+    entries: FroniusTimeOfUseEntry[],
+  ): Promise<void> {
+    const urlCandidates = this.buildTimeOfUseUrlCandidates(config.host, pathHint);
+    let lastError: Error | null = null;
+    for (const [index, url] of urlCandidates.entries()) {
+      try {
+        this.logger.log(`Updating Fronius time-of-use schedule via ${url}`);
+        await this.requestJson("POST", url, config, {timeofuse: entries.map((entry) => this.serializeTimeOfUseEntry(entry))});
+        this.workingTimeOfUsePath = new URL(url).pathname;
+        return;
+      } catch (error: unknown) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const canTryFallback = index < urlCandidates.length - 1;
+        if (!canTryFallback || !this.isHttp404(error)) {
+          throw error;
+        }
+        this.logger.warn(`Fronius time-of-use endpoint ${url} returned 404; trying fallback path.`);
+      }
+    }
+    if (lastError) {
+      throw lastError;
+    }
+  }
+
+  private extractTimeOfUseEntries(payload: unknown): FroniusTimeOfUseEntry[] {
+    if (!isRecord(payload) || !Array.isArray(payload.timeofuse)) {
+      return [];
+    }
+    return payload.timeofuse
+      .map((entry) => this.parseTimeOfUseEntry(entry))
+      .filter((entry): entry is FroniusTimeOfUseEntry => entry !== null);
+  }
+
+  private parseTimeOfUseEntry(value: unknown): FroniusTimeOfUseEntry | null {
+    if (!isRecord(value)) {
+      return null;
+    }
+    const power = value.Power;
+    const scheduleType = value.ScheduleType;
+    const active = value.Active;
+    const timeTable = this.parseTimeTable(value.TimeTable);
+    const weekdays = this.parseWeekdays(value.Weekdays);
+    if (
+      typeof active !== "boolean" ||
+      typeof power !== "number" ||
+      !Number.isFinite(power) ||
+      scheduleType !== "CHARGE_MIN" ||
+      !timeTable ||
+      !weekdays
+    ) {
+      return null;
+    }
+    return {
+      Active: active,
+      Power: Power.fromWatts(Math.round(power)),
+      ScheduleType: "CHARGE_MIN",
+      TimeTable: timeTable,
+      Weekdays: weekdays,
+    };
+  }
+
+  private parseTimeTable(value: unknown): FroniusTimeTable | null {
+    if (!isRecord(value) || typeof value.Start !== "string" || typeof value.End !== "string") {
+      return null;
+    }
+    return {
+      Start: value.Start,
+      End: value.End,
+    };
+  }
+
+  private parseWeekdays(value: unknown): FroniusWeekdays | null {
+    if (!isRecord(value)) {
+      return null;
+    }
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+    const weekdays = {} as FroniusWeekdays;
+    for (const dayName of dayNames) {
+      if (typeof value[dayName] !== "boolean") {
+        return null;
+      }
+      weekdays[dayName] = value[dayName];
+    }
+    return weekdays;
+  }
+
+  private findExistingManagedTimeOfUseEntry(
+    entries: FroniusTimeOfUseEntry[],
+    managedPower: Power,
+  ): FroniusTimeOfUseEntry | null {
+    if (!this.lastManagedTimeOfUseEntry) {
+      const tailEntry = entries.at(-1) ?? null;
+      if (!tailEntry) {
+        return null;
+      }
+      const activeDays = Object.values(tailEntry.Weekdays).filter(Boolean).length;
+      if (tailEntry.ScheduleType === "CHARGE_MIN" && tailEntry.Power.equals(managedPower) && activeDays === 1) {
+        return tailEntry;
+      }
+      return null;
+    }
+    return entries.find((entry) => this.timeOfUseEntriesEqual([entry], [this.lastManagedTimeOfUseEntry as FroniusTimeOfUseEntry])) ?? null;
+  }
+
+  private buildManagedChargeFloorEntry(
+    power: Power,
+    active: boolean,
+    chargeUntil: Date | null,
+  ): FroniusTimeOfUseEntry {
+    const now = new Date();
+    const start = new Date(now);
+    start.setSeconds(0, 0);
+    const fallbackEnd = new Date(start.getTime() + this.chargeFloorWindowMinutes * 60_000);
+    const end = chargeUntil && chargeUntil.getTime() > start.getTime()
+      ? new Date(chargeUntil)
+      : fallbackEnd;
+    if (
+      end.getFullYear() !== start.getFullYear() ||
+      end.getMonth() !== start.getMonth() ||
+      end.getDate() !== start.getDate()
+    ) {
+      end.setFullYear(start.getFullYear(), start.getMonth(), start.getDate());
+      end.setHours(23, 59, 0, 0);
+    }
+    if (end.getTime() <= start.getTime()) {
+      end.setTime(start.getTime() + 60_000);
+    }
+    return {
+      Active: active,
+      Power: power,
+      ScheduleType: "CHARGE_MIN",
+      TimeTable: {
+        Start: this.formatClockTime(start),
+        End: this.formatClockTime(end),
+      },
+      Weekdays: this.buildWeekdaysForDate(start),
+    };
+  }
+
+  private buildWeekdaysForDate(date: Date): FroniusWeekdays {
+    const weekdays: FroniusWeekdays = {
+      Mon: false,
+      Tue: false,
+      Wed: false,
+      Thu: false,
+      Fri: false,
+      Sat: false,
+      Sun: false,
+    };
+    const dayIndex = date.getDay();
+    const dayNames: (keyof FroniusWeekdays)[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    weekdays[dayNames[dayIndex]] = true;
+    return weekdays;
+  }
+
+  private formatClockTime(value: Date): string {
+    const hours = value.getHours().toString().padStart(2, "0");
+    const minutes = value.getMinutes().toString().padStart(2, "0");
+    return `${hours}:${minutes}`;
+  }
+
+  private serializeTimeOfUseEntry(entry: FroniusTimeOfUseEntry): Record<string, unknown> {
+    return {
+      Active: entry.Active,
+      Power: Math.round(entry.Power.watts),
+      ScheduleType: entry.ScheduleType,
+      TimeTable: entry.TimeTable,
+      Weekdays: entry.Weekdays,
+    };
+  }
+
+  private timeOfUseEntriesEqual(
+    left: FroniusTimeOfUseEntry[],
+    right: FroniusTimeOfUseEntry[],
+  ): boolean {
+    return JSON.stringify(left.map((entry) => this.serializeTimeOfUseEntry(entry)))
+      === JSON.stringify(right.map((entry) => this.serializeTimeOfUseEntry(entry)));
   }
 
   private async requestJson(
@@ -703,6 +1031,7 @@ export function requireFroniusConnectionConfig(config: ConfigDocument): FroniusC
     user: userRaw,
     password: passwordRaw,
     batteriesPath: record.batteries_path?.length ? record.batteries_path : "/config/batteries",
+    timeOfUsePath: record.timeofuse_path?.length ? record.timeofuse_path : "/config/timeofuse",
     timeoutSeconds:
       typeof record.timeout_s === "number" && Number.isFinite(record.timeout_s) ? record.timeout_s : 6,
     verifyTls: record.verify_tls ?? false,

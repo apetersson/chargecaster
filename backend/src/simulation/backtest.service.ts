@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { BacktestResultSummary, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
-import { StorageService, type DailyBacktestSummaryRecord, type HistoryDayStatRecord } from "../storage/storage.service";
+import {
+  StorageService,
+  type DailyBacktestSummaryRecord,
+  type HistoryDayStatRecord,
+} from "../storage/storage.service";
 import {
   DAILY_BACKTEST_STRATEGY,
   type BacktestResult,
@@ -13,6 +17,12 @@ import {
 const BACKTEST_CACHE_VERSION = 2;
 const MS_PER_HOUR = 3600_000;
 const HOURS_24 = 24;
+
+interface EffectiveConfigRecord {
+  config: SimulationConfig;
+  sourceFingerprint: string | null;
+  cacheFingerprint: string;
+}
 
 @Injectable()
 export class BacktestService {
@@ -29,19 +39,15 @@ export class BacktestService {
 
   runDailyHistory(
     snapshot: SnapshotPayload,
-    config: SimulationConfig,
+    currentConfig: SimulationConfig,
     limit: number,
     skip: number,
   ): { entries: DailyBacktestEntry[]; hasMore: boolean } {
     const index = this.loadDailyHistoryIndex();
     const hasMore = skip + limit < index.availableDays.length;
     const pageDays = index.availableDays.slice(skip, skip + limit);
-    const configFingerprint = this.buildCacheFingerprint(config);
-    const cachedDates = pageDays.filter((date) => this.isCacheEligibleDay(date, index));
-    const cachedSummaries = this.storage.listDailyBacktestSummaries(configFingerprint, cachedDates);
-    const computed = this.buildEntriesForDates(pageDays, config, index, configFingerprint, {
+    const computed = this.buildEntriesForDates(pageDays, currentConfig, index, {
       snapshot,
-      cachedSummaries,
     });
     if (computed.summariesToCache.length > 0) {
       this.storage.upsertDailyBacktestSummaries(computed.summariesToCache);
@@ -53,7 +59,7 @@ export class BacktestService {
 
   getDailyHistoryDetail(
     snapshot: SnapshotPayload,
-    config: SimulationConfig,
+    currentConfig: SimulationConfig,
     date: string,
   ): DailyBacktestEntry | null {
     const index = this.loadDailyHistoryIndex();
@@ -62,10 +68,9 @@ export class BacktestService {
       return null;
     }
 
-    const configFingerprint = this.buildCacheFingerprint(config);
-    const computed = this.buildEntriesForDates([date], config, index, configFingerprint, {
+    const computed = this.buildEntriesForDates([date], currentConfig, index, {
       snapshot,
-      cachedSummaries: [],
+      forceLiveDates: new Set([date]),
     });
     if (computed.summariesToCache.length > 0) {
       this.storage.upsertDailyBacktestSummaries(computed.summariesToCache);
@@ -77,22 +82,18 @@ export class BacktestService {
   }
 
   materializeHistoricalDailyBacktests(
-    config: SimulationConfig,
+    currentConfig: SimulationConfig,
     options?: { dates?: string[]; today?: string; missingOnly?: boolean },
   ): { materialized: number; skipped: number } {
     const index = this.loadDailyHistoryIndex(options?.today);
-    const configFingerprint = this.buildCacheFingerprint(config);
     const requestedDates = options?.dates ?? index.availableDays;
     let targetDates = requestedDates.filter((date) => this.isCacheEligibleDay(date, index));
 
     if (options?.missingOnly && targetDates.length > 0) {
-      const existingDates = new Set(
-        this.storage.listDailyBacktestSummaries(configFingerprint, targetDates).map((entry) => entry.date),
-      );
-      targetDates = targetDates.filter((date) => !existingDates.has(date));
+      targetDates = targetDates.filter((date) => this.loadCachedSummary(date, currentConfig, index) === null);
     }
 
-    const computed = this.buildEntriesForDates(targetDates, config, index, configFingerprint);
+    const computed = this.buildEntriesForDates(targetDates, currentConfig, index);
     if (computed.summariesToCache.length > 0) {
       this.storage.upsertDailyBacktestSummaries(computed.summariesToCache);
     }
@@ -105,23 +106,23 @@ export class BacktestService {
     return {materialized, skipped};
   }
 
-  buildCacheFingerprint(config: SimulationConfig): string {
+  buildCacheFingerprint(config: SimulationConfig, sourceFingerprint?: string | null): string {
     const serialized = JSON.stringify({
       version: BACKTEST_CACHE_VERSION,
       strategy: this.strategy.name,
-      config,
+      sourceFingerprint: sourceFingerprint ?? null,
+      config: sourceFingerprint ? undefined : config,
     });
     return createHash("sha256").update(serialized).digest("hex");
   }
 
   private buildEntriesForDates(
     requestedDates: string[],
-    config: SimulationConfig,
+    currentConfig: SimulationConfig,
     index: DailyHistoryIndex,
-    configFingerprint: string,
     options?: {
       snapshot?: SnapshotPayload;
-      cachedSummaries?: DailyBacktestSummaryRecord[];
+      forceLiveDates?: Set<string>;
     },
   ): {
     entries: DailyBacktestEntry[];
@@ -134,7 +135,8 @@ export class BacktestService {
       payload: BacktestResultSummary;
     }[];
   } {
-    const cachedByDate = new Map((options?.cachedSummaries ?? []).map((entry) => [entry.date, entry]));
+    const effectiveConfigByDate = new Map<string, EffectiveConfigRecord>();
+    const cachedByDate = new Map<string, DailyBacktestSummaryRecord | null>();
     const liveByDate = new Map<string, DailyBacktestEntry>();
     const summariesByDate = new Map<string, {
       date: string;
@@ -145,25 +147,64 @@ export class BacktestService {
       payload: BacktestResultSummary;
     }>();
 
+    const resolveEffectiveConfig = (date: string): EffectiveConfigRecord => {
+      const existing = effectiveConfigByDate.get(date);
+      if (existing) {
+        return existing;
+      }
+      const record = this.storage.findConfigSnapshotForTimestamp(`${date}T00:00:00.000Z`);
+      const resolved = record
+        ? {
+          config: record.simulationConfig,
+          sourceFingerprint: record.fingerprint,
+          cacheFingerprint: this.buildCacheFingerprint(record.simulationConfig, record.fingerprint),
+        }
+        : {
+          config: currentConfig,
+          sourceFingerprint: null,
+          cacheFingerprint: this.buildCacheFingerprint(currentConfig),
+        };
+      effectiveConfigByDate.set(date, resolved);
+      return resolved;
+    };
+
+    const getCachedEntryForDate = (date: string): DailyBacktestSummaryRecord | null => {
+      if (cachedByDate.has(date)) {
+        return cachedByDate.get(date) ?? null;
+      }
+      if (options?.forceLiveDates?.has(date)) {
+        cachedByDate.set(date, null);
+        return null;
+      }
+      if (date === index.yesterday || !this.isCacheEligibleDay(date, index)) {
+        cachedByDate.set(date, null);
+        return null;
+      }
+      const effectiveConfig = resolveEffectiveConfig(date);
+      const loaded = this.storage.listDailyBacktestSummaries(effectiveConfig.cacheFingerprint, [date])[0] ?? null;
+      cachedByDate.set(date, loaded);
+      return loaded;
+    };
+
     const ensureLiveEntry = (date: string): DailyBacktestEntry | null => {
       const existing = liveByDate.get(date);
       if (existing) {
         return existing;
       }
+      const effectiveConfig = resolveEffectiveConfig(date);
 
       let initialSimSocPercent: number | null | undefined;
       if (this.strategy.requiresSequentialState) {
         initialSimSocPercent = this.resolveInitialSimSocPercent(
           date,
           index,
-          configFingerprint,
-          cachedByDate,
           liveByDate,
           ensureLiveEntry,
+          getCachedEntryForDate,
         );
       }
 
-      const entry = this.strategy.buildDailyEntry(date, config, {
+      const entry = this.strategy.buildDailyEntry(date, effectiveConfig.config, {
         snapshot: options?.snapshot,
         initialSimSocPercent,
       });
@@ -175,7 +216,7 @@ export class BacktestService {
       if (date !== index.yesterday && this.isCacheEligibleDay(date, index)) {
         summariesByDate.set(date, {
           date,
-          configFingerprint,
+          configFingerprint: effectiveConfig.cacheFingerprint,
           strategy: this.strategy.name,
           simulatedStartSocPercent: entry.result.simulated_start_soc_percent,
           simulatedFinalSocPercent: entry.result.simulated_final_soc_percent,
@@ -188,14 +229,14 @@ export class BacktestService {
 
     const sortedDates = [...requestedDates].sort();
     for (const date of sortedDates) {
-      const cached = date !== index.yesterday ? cachedByDate.get(date) : undefined;
+      const cached = getCachedEntryForDate(date);
       if (!cached) {
         ensureLiveEntry(date);
       }
     }
 
     const entries = requestedDates.flatMap((date) => {
-      const cached = date !== index.yesterday ? cachedByDate.get(date) : undefined;
+      const cached = getCachedEntryForDate(date);
       if (cached) {
         return [{date, result: this.inflateSummary(cached.payload)}];
       }
@@ -209,10 +250,9 @@ export class BacktestService {
   private resolveInitialSimSocPercent(
     date: string,
     index: DailyHistoryIndex,
-    configFingerprint: string,
-    cachedByDate: Map<string, DailyBacktestSummaryRecord>,
     liveByDate: Map<string, DailyBacktestEntry>,
     ensureLiveEntry: (date: string) => DailyBacktestEntry | null,
+    getCachedEntryForDate: (date: string) => DailyBacktestSummaryRecord | null,
   ): number | null | undefined {
     const previousDate = this.previousUtcDate(date);
     if (!index.completeDays.has(previousDate)) {
@@ -224,18 +264,9 @@ export class BacktestService {
       return livePrevious.result.simulated_final_soc_percent;
     }
 
-    const cachedPrevious = cachedByDate.get(previousDate);
+    const cachedPrevious = getCachedEntryForDate(previousDate);
     if (cachedPrevious) {
       return cachedPrevious.simulatedFinalSocPercent;
-    }
-
-    if (this.isCacheEligibleDay(previousDate, index)) {
-      const loadedEntries = this.storage.listDailyBacktestSummaries(configFingerprint, [previousDate]);
-      if (loadedEntries.length > 0) {
-        const loaded = loadedEntries[0];
-        cachedByDate.set(previousDate, loaded);
-        return loaded.simulatedFinalSocPercent;
-      }
     }
 
     if (previousDate === index.today) {
@@ -250,6 +281,33 @@ export class BacktestService {
     }
 
     return undefined;
+  }
+
+  private loadCachedSummary(
+    date: string,
+    currentConfig: SimulationConfig,
+    index: DailyHistoryIndex,
+  ): DailyBacktestSummaryRecord | null {
+    if (date === index.yesterday || !this.isCacheEligibleDay(date, index)) {
+      return null;
+    }
+    const effectiveConfig = this.resolveEffectiveConfigForDate(date, currentConfig);
+    return this.storage.listDailyBacktestSummaries(effectiveConfig.cacheFingerprint, [date])[0] ?? null;
+  }
+
+  private resolveEffectiveConfigForDate(date: string, currentConfig: SimulationConfig): EffectiveConfigRecord {
+    const record = this.storage.findConfigSnapshotForTimestamp(`${date}T00:00:00.000Z`);
+    return record
+      ? {
+        config: record.simulationConfig,
+        sourceFingerprint: record.fingerprint,
+        cacheFingerprint: this.buildCacheFingerprint(record.simulationConfig, record.fingerprint),
+      }
+      : {
+        config: currentConfig,
+        sourceFingerprint: null,
+        cacheFingerprint: this.buildCacheFingerprint(currentConfig),
+      };
   }
 
   private loadDailyHistoryIndex(today = new Date().toISOString().slice(0, 10)): DailyHistoryIndex {

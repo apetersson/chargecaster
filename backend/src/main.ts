@@ -15,6 +15,7 @@ import fastifyStatic from "@fastify/static";
 import { describeError } from "@chargecaster/domain";
 import { AppModule } from "./app.module";
 import { ConfigFileService } from "./config/config-file.service";
+import { ConfigHistoryService } from "./config/config-history.service";
 import { setRuntimeConfig } from "./config/runtime-config";
 import type { ConfigDocument } from "./config/schemas";
 import { SimulationService } from "./simulation/simulation.service";
@@ -30,7 +31,12 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   const initialConfig = await configureGlobalLogging();
   validateConfigDocument(initialConfig);
   setRuntimeConfig(initialConfig);
-  const adapter = new FastifyAdapter({logger: false, maxParamLength: 4096});
+  const adapter = new FastifyAdapter({
+    logger: false,
+    routerOptions: {
+      maxParamLength: 4096,
+    },
+  });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     bufferLogs: true,
   });
@@ -47,6 +53,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   const trpcRouter = app.get(TrpcRouter);
   const simulationService = app.get(SimulationService);
   const configSeedService = app.get(SimulationSeedService);
+  const configHistoryService = app.get(ConfigHistoryService);
   const backtestMaterializationService = app.get(BacktestMaterializationService);
   await fastify.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
@@ -90,6 +97,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
   }
 
   if (process.env.NODE_ENV !== "test") {
+    configHistoryService.recordStartupConfig(initialConfig);
     await configSeedService.seedFromConfig();
   }
 

@@ -12,6 +12,10 @@ export class OptimisationCommandTranslator {
   fromSimulationSnapshot(snapshot: SimulationSnapshot): OptimisationCommand {
     const mode = snapshot.current_mode;
     if (mode === "charge") {
+      const untilTimestamp = this.extractChargeUntil(snapshot);
+      if (untilTimestamp) {
+        return {charge: {untilTimestamp}};
+      }
       return "charge";
     }
     if (mode === "auto") {
@@ -39,6 +43,30 @@ export class OptimisationCommandTranslator {
       };
     }
     return "auto";
+  }
+
+  private extractChargeUntil(snapshot: SimulationSnapshot): string | null {
+    const entries = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries : [];
+    const eras = Array.isArray(snapshot.forecast_eras) ? snapshot.forecast_eras : [];
+    if (!entries.length || !eras.length) {
+      return null;
+    }
+    const eraEndById = new Map(
+      eras
+        .filter((era) => typeof era.era_id === "string" && era.era_id.length > 0 && typeof era.end === "string" && era.end.length > 0)
+        .map((era) => [era.era_id, era.end as string]),
+    );
+    let untilTimestamp: string | null = null;
+    for (const entry of entries) {
+      if (entry.strategy !== "charge") {
+        break;
+      }
+      const eraEnd = eraEndById.get(entry.era_id);
+      if (eraEnd) {
+        untilTimestamp = eraEnd;
+      }
+    }
+    return untilTimestamp;
   }
 
   private extractHoldTarget(snapshot: SimulationSnapshot): number | null {

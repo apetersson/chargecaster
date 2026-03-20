@@ -80,7 +80,12 @@ describe("dashboard tRPC", () => {
     })
       .compile();
 
-    const adapter = new FastifyAdapter({ logger: false, maxParamLength: 4096 });
+    const adapter = new FastifyAdapter({
+      logger: false,
+      routerOptions: {
+        maxParamLength: 4096,
+      },
+    });
     app = moduleRef.createNestApplication<NestFastifyApplication>(adapter);
     const fastify = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
     await fastify.register(cors, { origin: true } satisfies FastifyCorsOptions);

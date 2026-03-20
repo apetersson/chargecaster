@@ -48,6 +48,9 @@ describe("configuration schema parsers", () => {
 
   it("accepts location, solar arrays, and load-forecast config while rejecting retired keys", () => {
     const parsed = parseConfigDocument({
+      fronius: {
+        timeofuse_path: "/api/config/timeofuse",
+      },
       location: {
         latitude: 48.235,
         longitude: 16.134,
@@ -68,6 +71,7 @@ describe("configuration schema parsers", () => {
       },
     });
 
+    expect(parsed.fronius?.timeofuse_path).toBe("/api/config/timeofuse");
     expect(parsed.location?.latitude).toBe(48.235);
     expect(parsed.location?.longitude).toBe(16.134);
     expect(parsed.solar?.[0]?.kwp).toBe(5);

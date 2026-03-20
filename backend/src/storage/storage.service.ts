@@ -1,11 +1,19 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import type { Database } from "better-sqlite3";
 import DatabaseConstructor from "better-sqlite3";
 
-import type { BacktestResultSummary, HistoryPoint, SnapshotPayload } from "@chargecaster/domain";
-import { backtestResultSummarySchema, historyPointSchema, snapshotPayloadSchema } from "@chargecaster/domain";
+import type { BacktestResultSummary, HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
+import {
+  backtestResultSummarySchema,
+  historyPointSchema,
+  simulationConfigSchema,
+  snapshotPayloadSchema,
+} from "@chargecaster/domain";
+import type { ConfigDocument } from "../config/schemas";
+import { parseConfigDocument } from "../config/schemas";
 
 const RESET_DAILY_BACKTEST_SUMMARIES_FOR_RELATIVE_SOC_MIGRATION =
   "2026-03-07-reset-daily-backtest-summaries-for-relative-soc";
@@ -64,6 +72,14 @@ export interface SolarProxyHourRecord {
   updatedAt: string;
 }
 
+export interface ConfigSnapshotRecord {
+  id: number;
+  fingerprint: string;
+  observedAt: string;
+  payload: ConfigDocument;
+  simulationConfig: SimulationConfig;
+}
+
 @Injectable()
 export class StorageService implements OnModuleDestroy {
   private readonly dbPath: string;
@@ -113,6 +129,91 @@ export class StorageService implements OnModuleDestroy {
       }
     });
     txn(entries);
+  }
+
+  buildConfigFingerprint(payload: ConfigDocument): string {
+    return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  }
+
+  appendConfigSnapshot(entry: {
+    fingerprint: string;
+    observedAt: string;
+    payload: ConfigDocument;
+    simulationConfig: SimulationConfig;
+  }): void {
+    this.logger.log(`Recording config snapshot ${entry.fingerprint.slice(0, 8)} at ${entry.observedAt}`);
+    this.db.prepare(`
+      INSERT INTO config_history (fingerprint, observed_at, payload, simulation_payload)
+      VALUES (?, ?, ?, ?)
+    `).run(
+      entry.fingerprint,
+      entry.observedAt,
+      JSON.stringify(entry.payload),
+      JSON.stringify(entry.simulationConfig),
+    );
+  }
+
+  getLatestConfigSnapshot(): ConfigSnapshotRecord | null {
+    const row = this.db.prepare(`
+      SELECT id, fingerprint, observed_at, payload, simulation_payload
+      FROM config_history
+      ORDER BY observed_at DESC, id DESC
+      LIMIT 1
+    `).get() as {
+      id: number;
+      fingerprint: string;
+      observed_at: string;
+      payload: string;
+      simulation_payload: string;
+    } | undefined;
+    return row ? this.parseConfigSnapshotRow(row) : null;
+  }
+
+  findConfigSnapshotForTimestamp(timestamp: string): ConfigSnapshotRecord | null {
+    const row = this.db.prepare(`
+      SELECT id, fingerprint, observed_at, payload, simulation_payload
+      FROM config_history
+      WHERE observed_at <= ?
+      ORDER BY observed_at DESC, id DESC
+      LIMIT 1
+    `).get(timestamp) as {
+      id: number;
+      fingerprint: string;
+      observed_at: string;
+      payload: string;
+      simulation_payload: string;
+    } | undefined;
+    if (row) {
+      return this.parseConfigSnapshotRow(row);
+    }
+    const earliest = this.db.prepare(`
+      SELECT id, fingerprint, observed_at, payload, simulation_payload
+      FROM config_history
+      ORDER BY observed_at ASC, id ASC
+      LIMIT 1
+    `).get() as {
+      id: number;
+      fingerprint: string;
+      observed_at: string;
+      payload: string;
+      simulation_payload: string;
+    } | undefined;
+    return earliest ? this.parseConfigSnapshotRow(earliest) : null;
+  }
+
+  listConfigSnapshotsAsc(): ConfigSnapshotRecord[] {
+    const rows = this.db.prepare(`
+      SELECT id, fingerprint, observed_at, payload, simulation_payload
+      FROM config_history
+      ORDER BY observed_at ASC, id ASC
+    `).all() as Array<{
+      id: number;
+      fingerprint: string;
+      observed_at: string;
+      payload: string;
+      simulation_payload: string;
+    }>;
+    return rows.map((row) => this.parseConfigSnapshotRow(row));
   }
 
   getLatestSnapshot(): SnapshotRecord | null {
@@ -515,6 +616,21 @@ export class StorageService implements OnModuleDestroy {
     `);
 
     this.db.exec(`
+        CREATE TABLE IF NOT EXISTS config_history
+        (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            fingerprint       TEXT NOT NULL,
+            observed_at       TEXT NOT NULL,
+            payload           TEXT NOT NULL,
+            simulation_payload TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_config_history_observed_at
+          ON config_history (observed_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_config_history_fingerprint
+          ON config_history (fingerprint, observed_at DESC);
+    `);
+
+    this.db.exec(`
         CREATE TABLE IF NOT EXISTS daily_backtest_summaries
         (
             date               TEXT NOT NULL,
@@ -639,5 +755,21 @@ export class StorageService implements OnModuleDestroy {
       this.db.prepare("INSERT INTO app_migrations (id, applied_at) VALUES (?, ?)").run(id, new Date().toISOString());
     });
     txn();
+  }
+
+  private parseConfigSnapshotRow(row: {
+    id: number;
+    fingerprint: string;
+    observed_at: string;
+    payload: string;
+    simulation_payload: string;
+  }): ConfigSnapshotRecord {
+    return {
+      id: row.id,
+      fingerprint: row.fingerprint,
+      observedAt: row.observed_at,
+      payload: parseConfigDocument(JSON.parse(row.payload)),
+      simulationConfig: simulationConfigSchema.parse(JSON.parse(row.simulation_payload)),
+    };
   }
 }

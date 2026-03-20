@@ -95,6 +95,11 @@ afterEach(() => {
 });
 
 function createService(storage: StorageService): BacktestService {
+  if (!("findConfigSnapshotForTimestamp" in storage)) {
+    Object.assign(storage as object, {
+      findConfigSnapshotForTimestamp: () => null,
+    });
+  }
   return new BacktestService(storage, new ContinuousBacktestStrategy(storage));
 }
 
@@ -282,6 +287,103 @@ describe("BacktestService daily history", () => {
     expect(detail?.result.intervals[0]?.cumulative_savings_eur).toBeTypeOf("number");
     expect(listHistoryRangeAsc).toHaveBeenCalled();
     expect(upsertDailyBacktestSummaries).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the config snapshot effective for each historical day", () => {
+    const oldConfig: SimulationConfig = {
+      ...config,
+      battery: {
+        ...config.battery,
+        max_charge_power_w: 1200,
+      },
+    };
+    const newConfig: SimulationConfig = {
+      ...config,
+      battery: {
+        ...config.battery,
+        max_charge_power_w: 4200,
+      },
+    };
+    const fakeStrategy = {
+      name: "continuous",
+      requiresSequentialState: false,
+      run: () => ({
+        generated_at: "2026-03-08T00:00:00.000Z",
+        actual_total_cost_eur: 0,
+        simulated_total_cost_eur: 0,
+        simulated_start_soc_percent: 0,
+        actual_final_soc_percent: 0,
+        simulated_final_soc_percent: 0,
+        soc_value_adjustment_eur: 0,
+        adjusted_actual_cost_eur: 0,
+        adjusted_simulated_cost_eur: 0,
+        savings_eur: 0,
+        avg_price_eur_per_kwh: 0,
+        history_points_used: 0,
+        span_hours: 0,
+        intervals: [],
+      }),
+      buildDailyEntry: vi.fn((date: string, dayConfig: SimulationConfig) => ({
+        date,
+        result: {
+          generated_at: `${date}T23:55:00.000Z`,
+          actual_total_cost_eur: dayConfig.battery.max_charge_power_w ?? 0,
+          simulated_total_cost_eur: 0,
+          simulated_start_soc_percent: 0,
+          actual_final_soc_percent: 0,
+          simulated_final_soc_percent: 0,
+          soc_value_adjustment_eur: 0,
+          adjusted_actual_cost_eur: 0,
+          adjusted_simulated_cost_eur: 0,
+          savings_eur: 0,
+          avg_price_eur_per_kwh: 0,
+          history_points_used: 2,
+          span_hours: 24,
+          intervals: [],
+        },
+      })),
+    };
+    const storage = {
+      listHistoryDayStatsBefore: () => [
+        {
+          date: "2026-03-07",
+          firstTimestamp: "2026-03-07T00:00:00.000Z",
+          lastTimestamp: "2026-03-07T23:55:00.000Z",
+          pointCount: 288,
+        },
+        {
+          date: "2026-03-06",
+          firstTimestamp: "2026-03-06T00:00:00.000Z",
+          lastTimestamp: "2026-03-06T23:55:00.000Z",
+          pointCount: 288,
+        },
+      ],
+      listDailyBacktestSummaries: () => [],
+      upsertDailyBacktestSummaries: () => undefined,
+      findConfigSnapshotForTimestamp: (timestamp: string) => timestamp < "2026-03-07T00:00:00.000Z"
+        ? {
+          id: 1,
+          fingerprint: "old-config",
+          observedAt: "2026-03-01T00:00:00.000Z",
+          payload: {} as never,
+          simulationConfig: oldConfig,
+        }
+        : {
+          id: 2,
+          fingerprint: "new-config",
+          observedAt: "2026-03-07T00:00:00.000Z",
+          payload: {} as never,
+          simulationConfig: newConfig,
+        },
+    } as unknown as StorageService;
+
+    const service = new BacktestService(storage, fakeStrategy);
+    const page = service.runDailyHistory(snapshot, config, 2, 0);
+
+    expect(page.entries.map((entry) => [entry.date, entry.result.actual_total_cost_eur])).toEqual([
+      ["2026-03-07", 4200],
+      ["2026-03-06", 1200],
+    ]);
   });
 });
 
