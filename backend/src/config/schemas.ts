@@ -44,8 +44,6 @@ const froniusConfigSchema = configSectionSchema
     host: optionalStringSchema.optional(),
     user: optionalStringSchema.optional(),
     password: optionalStringSchema.optional(),
-    batteries_path: optionalStringSchema.optional(),
-    timeofuse_path: optionalStringSchema.optional(),
     verify_tls: optionalBooleanSchema.optional(),
     timeout_s: optionalNumberSchema.optional(),
   })

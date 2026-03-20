@@ -27,8 +27,6 @@ const createService = () =>
         host: "http://inverter.local",
         user: "technician",
         password: "secret",
-        batteries_path: "/api/config/batteries",
-        timeofuse_path: "/api/config/timeofuse",
       },
       battery: {
         capacity_kwh: 10,

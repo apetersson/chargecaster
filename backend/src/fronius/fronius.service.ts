@@ -9,8 +9,6 @@ export interface FroniusConnectionConfig {
   host: string;
   user: string;
   password: string;
-  batteriesPath: string;
-  timeOfUsePath: string;
   timeoutSeconds: number;
   verifyTls: boolean;
 }
@@ -22,6 +20,8 @@ const AUTH_ERROR_SUMMARY_MESSAGE = "Unable to control battery because of authent
 const TARGET_TOLERANCE_PERCENT = 0.5;
 const MIN_TIME_OF_USE_WINDOW_MINUTES = 2;
 const MAX_TIME_OF_USE_WINDOW_MINUTES = 15;
+const BATTERIES_PATH = "/api/config/batteries";
+const TIME_OF_USE_PATH = "/api/config/timeofuse";
 
 export interface FroniusApplyResult {
   errorMessage: string | null;
@@ -143,7 +143,7 @@ export class FroniusService {
     const desiredMode = strategy.mode;
 
     try {
-      const configuredPath = this.workingBatteriesPath ?? froniusConfig.batteriesPath;
+      const configuredPath = this.workingBatteriesPath ?? BATTERIES_PATH;
       const urlCandidates = this.buildBatteriesUrlCandidates(froniusConfig.host, configuredPath);
       this.logger.log(
         `Preparing to apply Fronius mode ${desiredMode.toUpperCase()} via ${urlCandidates[0]}`,
@@ -171,7 +171,7 @@ export class FroniusService {
             this.workingCommandsPrefix = this.extractApiPrefix(this.workingBatteriesPath);
             if (index > 0) {
               this.logger.warn(
-                `Fronius accepted fallback endpoint ${this.workingBatteriesPath}; persist this path via fronius.batteries_path.`,
+                `Fronius accepted fallback batteries endpoint ${this.workingBatteriesPath}; reusing it for this process.`,
               );
             }
             lastError = null;
@@ -569,7 +569,7 @@ export class FroniusService {
   private async readTimeOfUseEntries(
     config: FroniusConnectionConfig,
   ): Promise<{entries: FroniusTimeOfUseEntry[]; path: string}> {
-    const configuredPath = this.workingTimeOfUsePath ?? config.timeOfUsePath;
+    const configuredPath = this.workingTimeOfUsePath ?? TIME_OF_USE_PATH;
     const urlCandidates = this.buildTimeOfUseUrlCandidates(config.host, configuredPath);
     let lastError: Error | null = null;
     for (const [index, url] of urlCandidates.entries()) {
@@ -986,7 +986,7 @@ export class FroniusService {
 
   private async logoutFroniusSession(config: FroniusConnectionConfig): Promise<void> {
     try {
-      const pathHint = this.workingBatteriesPath ?? config.batteriesPath;
+      const pathHint = this.workingBatteriesPath ?? BATTERIES_PATH;
       const logoutCandidates = this.buildCommandUrlCandidates(config.host, pathHint, "Logout");
       for (const [index, logoutUrl] of logoutCandidates.entries()) {
         try {
@@ -1030,8 +1030,6 @@ export function requireFroniusConnectionConfig(config: ConfigDocument): FroniusC
     host: hostRaw,
     user: userRaw,
     password: passwordRaw,
-    batteriesPath: record.batteries_path?.length ? record.batteries_path : "/config/batteries",
-    timeOfUsePath: record.timeofuse_path?.length ? record.timeofuse_path : "/config/timeofuse",
     timeoutSeconds:
       typeof record.timeout_s === "number" && Number.isFinite(record.timeout_s) ? record.timeout_s : 6,
     verifyTls: record.verify_tls ?? false,
