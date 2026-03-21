@@ -5,6 +5,7 @@ import { ForecastService } from "./simulation/forecast.service";
 import { HistoryService } from "./simulation/history.service";
 import { SummaryService } from "./simulation/summary.service";
 import { OracleService } from "./simulation/oracle.service";
+import { BatteryEfficiencyService } from "./simulation/battery-efficiency.service";
 import { BacktestService } from "./simulation/backtest.service";
 import { BacktestMaterializationService } from "./simulation/backtest-materialization.service";
 import { DAILY_BACKTEST_STRATEGY } from "./simulation/daily-backtest.strategy";
@@ -38,6 +39,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     HistoryService,
     SummaryService,
     OracleService,
+    BatteryEfficiencyService,
     DailyIsolatedBacktestStrategy,
     ContinuousBacktestStrategy,
     {
@@ -71,6 +73,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     HistoryService,
     SummaryService,
     OracleService,
+    BatteryEfficiencyService,
     BacktestService,
     BacktestMaterializationService,
     SimulationSeedService,

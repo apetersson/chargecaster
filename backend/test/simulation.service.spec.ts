@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { EnergyPrice, normalizePriceSlots, TariffSlot } from "@chargecaster/domain";
+import { EnergyPrice, Percentage, normalizePriceSlots, TariffSlot } from "@chargecaster/domain";
 
 import type { PriceSlot, SimulationConfig } from "@chargecaster/domain";
 import { parseEvccState } from "../src/config/schemas";
@@ -111,6 +111,58 @@ describe("simulateOptimalSchedule oracle output", () => {
 
     if (result.next_step_soc_percent !== null && first.end_soc_percent !== null) {
       expect(first.end_soc_percent).toBeCloseTo(result.next_step_soc_percent, 6);
+    }
+  });
+
+  it("reduces stored SoC gain when charge efficiency is below 100%", () => {
+    const capacityKwh = 10;
+    const config: SimulationConfig = {
+      ...baseConfig,
+      battery: {
+        capacity_kwh: capacityKwh,
+        max_charge_power_w: 1000,
+        auto_mode_floor_soc: 10,
+      },
+      logic: {
+        ...baseConfig.logic,
+      },
+    };
+    const slots: PriceSlot[] = [createSlot(0, 0.08), createSlot(1, 0.38)];
+
+    const efficientResult = simulateOptimalSchedule(
+      config,
+      { battery_soc: 50 },
+      slots,
+      {
+        solarGenerationKwhPerSlot: [0, 0],
+        houseLoadWattsPerSlot: [0, 0],
+        chargeEfficiency: Percentage.full(),
+        dischargeEfficiency: Percentage.full(),
+      },
+    );
+    const lossyResult = simulateOptimalSchedule(
+      config,
+      { battery_soc: 50 },
+      slots,
+      {
+        solarGenerationKwhPerSlot: [0, 0],
+        houseLoadWattsPerSlot: [0, 0],
+        chargeEfficiency: Percentage.fromRatio(0.8),
+        dischargeEfficiency: Percentage.full(),
+      },
+    );
+
+    expect(efficientResult.oracle_entries[0]?.strategy).toBe("charge");
+    expect(lossyResult.oracle_entries[0]?.strategy).toBe("charge");
+    const efficientGridEnergyKwh = (efficientResult.oracle_entries[0]?.grid_energy_wh ?? 0) / 1000;
+    const lossyGridEnergyKwh = (lossyResult.oracle_entries[0]?.grid_energy_wh ?? 0) / 1000;
+    const efficientExpectedSoc = Math.round(50 + (efficientGridEnergyKwh / capacityKwh) * 100);
+    const lossyExpectedSoc = Math.round(50 + (lossyGridEnergyKwh * 0.8 / capacityKwh) * 100);
+
+    expect(efficientResult.next_step_soc_percent).toBe(efficientExpectedSoc);
+    expect(lossyResult.next_step_soc_percent).toBe(lossyExpectedSoc);
+    if (lossyResult.next_step_soc_percent != null && efficientResult.next_step_soc_percent != null) {
+      expect(lossyResult.next_step_soc_percent).toBeLessThan(efficientResult.next_step_soc_percent);
     }
   });
 

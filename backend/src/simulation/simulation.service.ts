@@ -21,6 +21,7 @@ import {
 import { StorageService } from "../storage/storage.service";
 import { parseEvccState } from "../config/schemas";
 import { normalizeHistoryList } from "./history.serializer";
+import { BatteryEfficiencyService } from "./battery-efficiency.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
 import { gridFee, simulateOptimalSchedule } from "./optimal-schedule";
 
@@ -64,6 +65,7 @@ export class SimulationService {
 
   constructor(
     @Inject(StorageService) private readonly storageRef: StorageService,
+    @Inject(BatteryEfficiencyService) private readonly batteryEfficiencyRef: BatteryEfficiencyService,
   ) {
   }
 
@@ -167,6 +169,9 @@ export class SimulationService {
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
     const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
+    const batteryEfficiency = this.batteryEfficiencyRef.estimateRecentEfficiencies(
+      Energy.fromKilowattHours(Number(input.config.battery.capacity_kwh ?? 0)),
+    );
     const peakSolarDiscrepancy = computePeakSolarForecastDiscrepancy(input.solarForecast ?? []);
     const demandProfilePerSlot = slots.map((priceSlot) => {
       const priceSlotWindow = TimeSlot.fromDates(priceSlot.start, priceSlot.end);
@@ -190,6 +195,8 @@ export class SimulationService {
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
+      chargeEfficiency: batteryEfficiency.chargeEfficiency,
+      dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
     });
     const initialSoCPercent = result.initial_soc_percent;
     const nextSoCPercent = result.next_step_soc_percent ?? initialSoCPercent;
@@ -236,6 +243,8 @@ export class SimulationService {
       feedInTariffEurPerKwh: feedInTariff,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: false,
+      chargeEfficiency: batteryEfficiency.chargeEfficiency,
+      dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
     });
     // Assemble the API snapshot expected by the frontend and storage layers
     const snapshot: SnapshotPayload = {
