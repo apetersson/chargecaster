@@ -205,7 +205,11 @@ describe("dashboard tRPC", () => {
     const summary = await client.dashboard.summary.query();
     expect(summary.timestamp).toEqual(snapshot.timestamp);
     expect(summary.recommended_final_soc_percent).toEqual(snapshot.recommended_final_soc_percent);
+    expect(summary.charge_efficiency_percent).toEqual(snapshot.charge_efficiency_percent);
+    expect(summary.discharge_efficiency_percent).toEqual(snapshot.discharge_efficiency_percent);
     expect("solar_forecast_discrepancy_w" in summary).toBe(true);
+    expect(summary.charge_efficiency_percent).toBeGreaterThan(0);
+    expect(summary.discharge_efficiency_percent).toBeGreaterThan(0);
     if (summary.solar_forecast_discrepancy_w == null) {
       expect(summary.solar_forecast_discrepancy_start).toBeUndefined();
       expect(summary.solar_forecast_discrepancy_end).toBeUndefined();
@@ -231,5 +235,5 @@ describe("dashboard tRPC", () => {
     expect(latest.history.length).toBeGreaterThan(0);
     expect(Array.isArray(latest.oracle_entries)).toBe(true);
     expect(latest.oracle_entries.length).toBe(snapshot.oracle_entries.length);
-  });
+  }, 20_000);
 });

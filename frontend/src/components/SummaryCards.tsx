@@ -30,6 +30,14 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
     );
     return range === "n/a" ? base : `${base} (${range})`;
   })();
+  const batteryEfficiencyLabel = (() => {
+    const charge = formatPercent(data.charge_efficiency_percent);
+    const discharge = formatPercent(data.discharge_efficiency_percent);
+    if (charge === "n/a" && discharge === "n/a") {
+      return "n/a";
+    }
+    return `${charge}/${discharge}`;
+  })();
 
   return (
     <section className="card">
@@ -45,6 +53,10 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
         <div className="metric">
           <span className="label">Current SOC</span>
           <span className="value">{formatPercent(data.current_soc_percent)}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Charge/Discharge Eff.</span>
+          <span className="value">{batteryEfficiencyLabel}</span>
         </div>
         <div className="metric">
           <span className="label">Baseline Cost</span>

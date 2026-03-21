@@ -15,8 +15,8 @@
     "baseUrl": ".",
     "resolveJsonModule": true,
     "paths": {
-      "@backend/trpc": ["../backend/dist/backend/src/trpc/trpc.router.d.ts"],
-      "@backend/trpc-types": ["../backend/dist/backend/src/trpc/trpc.router.d.ts"],
+      "@backend/trpc": ["../backend/src/trpc/trpc.router.ts"],
+      "@backend/trpc-types": ["../backend/src/trpc/trpc.router.ts"],
       "@chargecaster/domain": ["../packages/domain/src/index.ts"]
     },
     "isolatedModules": true,

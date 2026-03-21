@@ -22,6 +22,8 @@ export class SummaryService {
       next_step_soc_percent: snapshot.next_step_soc_percent,
       recommended_soc_percent: snapshot.recommended_soc_percent,
       recommended_final_soc_percent: snapshot.recommended_final_soc_percent,
+      charge_efficiency_percent: snapshot.charge_efficiency_percent,
+      discharge_efficiency_percent: snapshot.discharge_efficiency_percent,
       current_mode: snapshot.current_mode ?? undefined,
       price_snapshot_ct_per_kwh: snapshot.price_snapshot_ct_per_kwh ??
         (snapshotPrice ? snapshotPrice.ctPerKwh : null),

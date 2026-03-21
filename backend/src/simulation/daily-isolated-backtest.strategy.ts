@@ -128,17 +128,17 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       return this.emptyResult("Battery capacity not configured");
     }
 
-    const floorSocPercent = Math.max(0, Number(config.battery.auto_mode_floor_soc ?? 0));
     const capacity = Energy.fromKilowattHours(capacityKwh);
-    const maxDischargePowerW = config.battery.max_discharge_power_w != null
-      ? Math.max(0, Number(config.battery.max_discharge_power_w))
+    const floorSoc = Percentage.fromPercent(Math.max(0, Number(config.battery.auto_mode_floor_soc ?? 0)));
+    const maxDischargePower = config.battery.max_discharge_power_w != null
+      ? Power.fromWatts(Math.max(0, Number(config.battery.max_discharge_power_w)))
       : null;
-    const maxChargePowerSolarW = config.battery.max_charge_power_solar_w != null
-      ? Math.max(0, Number(config.battery.max_charge_power_solar_w))
+    const maxChargePowerSolar = config.battery.max_charge_power_solar_w != null
+      ? Power.fromWatts(Math.max(0, Number(config.battery.max_charge_power_solar_w)))
       : null;
     const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
     const feedInTariffEur = Math.max(0, Number(config.price.feed_in_tariff_eur_per_kwh ?? 0));
-    const houseLoadWFallback = 2200;
+    const houseLoadFallback = Power.fromWatts(2200);
     const marginalPrice =
       options?.marginalPrice ?? (options?.snapshot ? this.deriveMarginalDischargePrice(options.snapshot, config) : null);
     if (marginalPrice == null) {
@@ -176,89 +176,91 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       const importPrice = EnergyPrice.fromEurPerKwh(priceEur + gridFeeEur);
       const feedInTariff = EnergyPrice.fromEurPerKwh(feedInTariffEur);
 
-      const homePowerW = current.home_power_w != null && Number.isFinite(current.home_power_w)
-        ? current.home_power_w
-        : houseLoadWFallback;
-      const evChargePowerW = current.ev_charge_power_w != null && Number.isFinite(current.ev_charge_power_w)
-        ? Math.max(0, current.ev_charge_power_w)
+      const homePower = current.home_power_w != null && Number.isFinite(current.home_power_w)
+        ? Power.fromWatts(current.home_power_w)
+        : houseLoadFallback;
+      const evChargePower = current.ev_charge_power_w != null && Number.isFinite(current.ev_charge_power_w)
+        ? Power.fromWatts(Math.max(0, current.ev_charge_power_w))
         : null;
-      const solarPowerW = current.solar_power_w != null && Number.isFinite(current.solar_power_w)
-        ? Math.max(0, current.solar_power_w)
-        : 0;
+      const solarPower = current.solar_power_w != null && Number.isFinite(current.solar_power_w)
+        ? Power.fromWatts(Math.max(0, current.solar_power_w))
+        : Power.zero();
       const actualSocPercent = current.battery_soc_percent ?? 50;
       const nextSocPercent = next.battery_soc_percent ?? actualSocPercent;
       const actualSoc = Percentage.fromPercent(actualSocPercent);
       const nextSoc = Percentage.fromPercent(nextSocPercent);
-      const inferredBatteryPowerW = inferBatteryPowerFromSocDelta(
+      const inferredBatteryPower = inferBatteryPowerFromSocDelta(
         actualSoc,
         nextSoc,
         capacity,
         duration,
-      ).watts;
-      const measuredSiteDemandW = current.site_demand_power_w != null && Number.isFinite(current.site_demand_power_w)
-        ? Math.max(0, current.site_demand_power_w)
-        : evChargePowerW != null
-          ? homePowerW + evChargePowerW
-          : null;
-      const syntheticSiteDemandW = Math.max(
-        homePowerW,
-        actualGridPowerWOrFallback(current.grid_power_w, homePowerW, solarPowerW) + solarPowerW + inferredBatteryPowerW,
       );
-      const siteDemandW = measuredSiteDemandW ?? syntheticSiteDemandW;
-      const hiddenLoadW = Math.max(0, siteDemandW - homePowerW);
-      const actualGridPowerW = current.grid_power_w != null && Number.isFinite(current.grid_power_w)
-        ? current.grid_power_w
-        : siteDemandW - solarPowerW - inferredBatteryPowerW;
+      const measuredSiteDemand = current.site_demand_power_w != null && Number.isFinite(current.site_demand_power_w)
+        ? Power.fromWatts(Math.max(0, current.site_demand_power_w))
+        : evChargePower != null
+          ? homePower.add(evChargePower)
+          : null;
+      const syntheticSiteDemand = Power.fromWatts(Math.max(
+        homePower.watts,
+        actualGridPowerOrFallback(current.grid_power_w, homePower, solarPower).watts +
+          solarPower.watts +
+          inferredBatteryPower.watts,
+      ));
+      const siteDemand = measuredSiteDemand ?? syntheticSiteDemand;
+      const hiddenLoad = Power.fromWatts(Math.max(0, siteDemand.watts - homePower.watts));
+      const actualGridPower = current.grid_power_w != null && Number.isFinite(current.grid_power_w)
+        ? Power.fromWatts(current.grid_power_w)
+        : Power.fromWatts(siteDemand.watts - solarPower.watts - inferredBatteryPower.watts);
 
-      const actualGridEnergy = energyFromPower(Power.fromWatts(actualGridPowerW), duration);
+      const actualGridEnergy = energyFromPower(actualGridPower, duration);
       const actualCost = computeGridEnergyCostEur(actualGridEnergy, importPrice, feedInTariff);
 
-      const netLoadW = siteDemandW - solarPowerW;
+      const netLoad = Power.fromWatts(siteDemand.watts - solarPower.watts);
       const simulatedSocStartPercent = simSocPercent;
-      const actualChargePowerW = Math.max(0, -inferredBatteryPowerW);
-      const actualSolarSurplusW = Math.max(0, solarPowerW - siteDemandW);
-      const actualChargeFromSolarW = Math.min(actualChargePowerW, actualSolarSurplusW);
-      const actualChargeFromGridW = Math.max(0, actualChargePowerW - actualChargeFromSolarW);
-      let simulatedChargeFromSolarW = 0;
+      const actualChargePower = Power.fromWatts(Math.max(0, -inferredBatteryPower.watts));
+      const actualSolarSurplus = Power.fromWatts(Math.max(0, solarPower.watts - siteDemand.watts));
+      const actualChargeFromSolar = Power.fromWatts(Math.min(actualChargePower.watts, actualSolarSurplus.watts));
+      const actualChargeFromGrid = Power.fromWatts(Math.max(0, actualChargePower.watts - actualChargeFromSolar.watts));
+      let simulatedChargeFromSolar = Power.zero();
 
-      let simGridPowerW: number;
-      if (netLoadW > 0) {
+      let simGridPower: Power;
+      if (netLoad.watts > 0) {
         const availableEnergy = energyFromSoc(
-          Percentage.fromPercent(Math.max(0, simSocPercent - floorSocPercent)),
+          Percentage.fromPercent(Math.max(0, simSocPercent - floorSoc.percent)),
           capacity,
         );
-        const maxDischargeEnergy = maxDischargePowerW != null
-          ? energyFromPower(Power.fromWatts(maxDischargePowerW), duration)
+        const maxDischargeEnergy = maxDischargePower != null
+          ? energyFromPower(maxDischargePower, duration)
           : availableEnergy;
-        const desiredDischargeEnergy = energyFromPower(Power.fromWatts(netLoadW), duration);
+        const desiredDischargeEnergy = energyFromPower(netLoad, duration);
         const actualDischargeEnergy = minEnergy(desiredDischargeEnergy, availableEnergy, maxDischargeEnergy);
 
         const socDrop = socFromEnergy(actualDischargeEnergy, capacity).percent;
-        simSocPercent = Math.max(floorSocPercent, simSocPercent - socDrop);
+        simSocPercent = Math.max(floorSoc.percent, simSocPercent - socDrop);
 
         const remainingLoadEnergy = desiredDischargeEnergy.subtract(actualDischargeEnergy);
-        simGridPowerW = powerFromEnergy(remainingLoadEnergy, duration).watts;
+        simGridPower = powerFromEnergy(remainingLoadEnergy, duration);
       } else {
-        const surplusW = -netLoadW;
+        const surplusPower = Power.fromWatts(-netLoad.watts);
         const headroomEnergy = energyFromSoc(
           Percentage.fromPercent(Math.max(0, 100 - simSocPercent)),
           capacity,
         );
-        const maxChargeEnergy = maxChargePowerSolarW != null
-          ? energyFromPower(Power.fromWatts(maxChargePowerSolarW), duration)
+        const maxChargeEnergy = maxChargePowerSolar != null
+          ? energyFromPower(maxChargePowerSolar, duration)
           : headroomEnergy;
-        const surplusEnergy = energyFromPower(Power.fromWatts(surplusW), duration);
+        const surplusEnergy = energyFromPower(surplusPower, duration);
         const chargeEnergy = minEnergy(surplusEnergy, headroomEnergy, maxChargeEnergy);
-        simulatedChargeFromSolarW = powerFromEnergy(chargeEnergy, duration).watts;
+        simulatedChargeFromSolar = powerFromEnergy(chargeEnergy, duration);
 
         const socGain = socFromEnergy(chargeEnergy, capacity).percent;
         simSocPercent = Math.min(100, simSocPercent + socGain);
 
         const exportEnergy = surplusEnergy.subtract(chargeEnergy);
-        simGridPowerW = -powerFromEnergy(exportEnergy, duration).watts;
+        simGridPower = Power.fromWatts(-powerFromEnergy(exportEnergy, duration).watts);
       }
 
-      const simGridEnergy = energyFromPower(Power.fromWatts(simGridPowerW), duration);
+      const simGridEnergy = energyFromPower(simGridPower, duration);
       const simCost = computeGridEnergyCostEur(simGridEnergy, importPrice, feedInTariff);
 
       actualTotalCost += actualCost;
@@ -273,24 +275,24 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
         end_timestamp: next.timestamp,
         duration_hours: durationHours,
         price_eur_per_kwh: priceEur,
-        home_power_w: homePowerW,
-        site_demand_power_w: siteDemandW,
-        synthetic_hidden_load_w: measuredSiteDemandW == null ? hiddenLoadW : 0,
-        solar_power_w: solarPowerW,
-        actual_grid_power_w: actualGridPowerW,
+        home_power_w: homePower.watts,
+        site_demand_power_w: siteDemand.watts,
+        synthetic_hidden_load_w: measuredSiteDemand == null ? hiddenLoad.watts : 0,
+        solar_power_w: solarPower.watts,
+        actual_grid_power_w: actualGridPower.watts,
         actual_soc_percent: actualSocPercent,
         simulated_soc_start_percent: simulatedSocStartPercent,
         simulated_soc_percent: simSocPercent,
-        simulated_grid_power_w: simGridPowerW,
+        simulated_grid_power_w: simGridPower.watts,
         actual_cost_eur: actualCost,
         simulated_cost_eur: simCost,
         cash_savings_eur: cashSavings,
         cumulative_cash_savings_eur: cumulativeCashSavings,
         inventory_value_eur: inventoryValue,
         cumulative_savings_eur: cumulativeCashSavings + inventoryValue,
-        actual_charge_from_solar_w: actualChargeFromSolarW,
-        actual_charge_from_grid_w: actualChargeFromGridW,
-        simulated_charge_from_solar_w: simulatedChargeFromSolarW,
+        actual_charge_from_solar_w: actualChargeFromSolar.watts,
+        actual_charge_from_grid_w: actualChargeFromGrid.watts,
+        simulated_charge_from_solar_w: simulatedChargeFromSolar.watts,
       });
     }
 
@@ -427,14 +429,14 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
 
 }
 
-function actualGridPowerWOrFallback(
+function actualGridPowerOrFallback(
   rawGridPowerW: number | null | undefined,
-  homePowerW: number,
-  solarPowerW: number,
-): number {
+  homePower: Power,
+  solarPower: Power,
+): Power {
   return rawGridPowerW != null && Number.isFinite(rawGridPowerW)
-    ? rawGridPowerW
-    : homePowerW - solarPowerW;
+    ? Power.fromWatts(rawGridPowerW)
+    : homePower.subtract(solarPower);
 }
 
 function minEnergy(first: Energy, ...rest: Energy[]): Energy {

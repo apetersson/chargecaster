@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Energy, Power } from "@chargecaster/domain";
 import type { RawSolarEntry } from "@chargecaster/domain";
 
 import type { ConfigDocument } from "./schemas";
@@ -31,23 +32,26 @@ export class OpenMeteoSolarForecastService {
       const start = floorToUtcHour(now);
       const end = new Date(start.getTime() + (resolveSolarForecastHours(config) - 1) * 3_600_000);
       const rows = await this.weatherService.getSolarProxyHours(arrays, start, end);
-      const powerByHour = new Map<string, number>();
+      const powerByHour = new Map<string, Power>();
       for (const row of rows) {
-        const expectedPowerW = row.expectedPowerW ?? 0;
-        powerByHour.set(row.hourUtc, (powerByHour.get(row.hourUtc) ?? 0) + Math.max(0, expectedPowerW));
+        const expectedPower = Power.fromWatts(Math.max(0, row.expectedPowerW ?? 0));
+        powerByHour.set(row.hourUtc, (powerByHour.get(row.hourUtc) ?? Power.zero()).add(expectedPower));
       }
 
       const result = [...powerByHour.entries()]
         .sort((left, right) => left[0].localeCompare(right[0]))
-        .map(([hourUtc, expectedPowerW]) => ({
+        .map(([hourUtc, expectedPower]) => {
+          const expectedEnergy = Energy.fromWattHours(expectedPower.watts);
+          return ({
           start: hourUtc,
           end: new Date(new Date(hourUtc).getTime() + 3_600_000).toISOString(),
           ts: hourUtc,
-          energy_wh: roundNumber(expectedPowerW, 3),
-          energy_kwh: roundNumber(expectedPowerW / 1000, 6),
-          average_power_w: roundNumber(expectedPowerW, 3),
+          energy_wh: roundNumber(expectedEnergy.wattHours, 3),
+          energy_kwh: roundNumber(expectedEnergy.kilowattHours, 6),
+          average_power_w: roundNumber(expectedPower.watts, 3),
           provider: "open_meteo",
-        }) satisfies RawSolarEntry)
+        }) satisfies RawSolarEntry;
+        })
         .filter((entry) => (entry.energy_wh ?? 0) > 0);
 
       this.logger.log(`Collected ${result.length} Open-Meteo solar forecast slots`);

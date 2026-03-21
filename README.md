@@ -78,8 +78,7 @@ Notes:
 
 - Backend binds to `http://localhost:4000`.
 - Reads `config.local.yaml` by default, or `CHARGECASTER_CONFIG` if set.
-- The backend uses TS path aliases to import the domain package from source (`../packages/domain/src`), so no pre‑build
-  is required in dev.
+- The backend and frontend import the shared domain package from source, so no pre-build is required in dev.
 
 The dashboard batches tRPC calls such as `dashboard.summary`, `dashboard.history`, and `dashboard.oracle`. Snapshot data
 is persisted to `data/db/backend.sqlite` so subsequent loads reuse the latest optimiser output.
@@ -99,8 +98,8 @@ pnpm build:all
 > already includes `pnpm.onlyBuiltDependencies` for `better-sqlite3`. If the native addon is missing
 > after a fresh install, run `pnpm rebuild better-sqlite3`.
 
-In dev mode the backend and frontend import the domain package via TS path aliases; for production builds, the domain
-package should be built first so `dist/` is available (handled by `pnpm build:all`).
+In both dev and production builds, the backend and frontend resolve the shared domain package from source instead of
+depending on a prebuilt workspace output.
 
 ---
 

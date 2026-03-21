@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Duration, Energy, Power } from "@chargecaster/domain";
 import type { HistoryPoint, RawSolarEntry } from "@chargecaster/domain";
 
 import type { ConfigDocument } from "./schemas";
@@ -14,14 +15,14 @@ interface AggregatedSolarHour {
   hourUtc: string;
   localHour: number;
   season: number;
-  measuredSolarW: number;
+  measuredSolar: Power;
 }
 
 interface SolarCalibrationProfile {
   globalRatio: number;
   hourRatio: Map<number, number>;
   seasonHourRatio: Map<string, number>;
-  recentBiasW: number;
+  recentBias: Power;
   sampleCount: number;
 }
 
@@ -42,7 +43,7 @@ export class SolarForecastCalibrationService {
 
     const windows = solarForecast
       .map((entry) => toSolarWindow(entry))
-      .filter((entry): entry is { start: Date; end: Date; durationHours: number } => entry !== null)
+      .filter((entry): entry is { start: Date; end: Date; duration: Duration } => entry !== null)
       .sort((left, right) => left.start.getTime() - right.start.getTime());
     if (!windows.length) {
       return solarForecast;
@@ -65,34 +66,39 @@ export class SolarForecastCalibrationService {
           return entry;
         }
         const startHourIso = floorToUtcHour(window.start).toISOString();
-        const rawPowerW = solarEntryAveragePower(entry, window.durationHours);
-        const proxyPowerW = proxyPowerByHour.get(startHourIso) ?? rawPowerW ?? 0;
+        const rawPower = solarEntryAveragePower(entry, window.duration);
+        const proxyPower = proxyPowerByHour.get(startHourIso) ?? rawPower ?? Power.zero();
         const localParts = toTemporalParts(window.start, timeZone);
         const ratio = profile
           ? deriveCalibrationRatio(profile, localParts.localHour, localParts.season)
           : DEFAULT_RATIO;
         const calibratedProxyW = clamp(
-          proxyPowerW * ratio + (profile?.recentBiasW ?? 0) * 0.25,
+          proxyPower.watts * ratio + (profile?.recentBias.watts ?? 0) * 0.25,
           0,
-          Math.max(rawPowerW ?? 0, proxyPowerW * 1.25, 50),
+          Math.max(rawPower?.watts ?? 0, proxyPower.watts * 1.25, 50),
         );
 
-        const rawWeight = rawPowerW == null ? 0 : clamp(0.35 - confidence * 0.15, 0.15, 0.35);
-        const finalPowerW = rawPowerW == null
+        const rawWeight = rawPower == null ? 0 : clamp(0.35 - confidence * 0.15, 0.15, 0.35);
+        const finalPowerW = rawPower == null
           ? calibratedProxyW
-          : clamp(calibratedProxyW * (1 - rawWeight) + rawPowerW * rawWeight, 0, Math.max(calibratedProxyW, rawPowerW, 50));
+          : clamp(
+            calibratedProxyW * (1 - rawWeight) + rawPower.watts * rawWeight,
+            0,
+            Math.max(calibratedProxyW, rawPower.watts, 50),
+          );
 
-        const energyWh = finalPowerW * window.durationHours;
+        const finalPower = Power.fromWatts(finalPowerW);
+        const energy = finalPower.forDuration(window.duration);
         return {
           ...entry,
           start: window.start.toISOString(),
           end: window.end.toISOString(),
           ts: window.start.toISOString(),
-          energy_wh: roundNumber(energyWh, 3),
-          energy_kwh: roundNumber(energyWh / 1000, 6),
-          calibrated_power_w: roundNumber(finalPowerW, 3),
-          raw_power_w: rawPowerW != null ? roundNumber(rawPowerW, 3) : undefined,
-          proxy_power_w: roundNumber(proxyPowerW, 3),
+          energy_wh: roundNumber(energy.wattHours, 3),
+          energy_kwh: roundNumber(energy.kilowattHours, 6),
+          calibrated_power_w: roundNumber(finalPower.watts, 3),
+          raw_power_w: rawPower != null ? roundNumber(rawPower.watts, 3) : undefined,
+          proxy_power_w: roundNumber(proxyPower.watts, 3),
           calibration_ratio: roundNumber(ratio, 6),
           calibration_confidence: roundNumber(confidence, 6),
         } satisfies RawSolarEntry;
@@ -123,15 +129,15 @@ export class SolarForecastCalibrationService {
     const nowMs = Date.now();
     const samples = aggregatedHistory
       .map((hour) => {
-        const proxyPowerW = proxyPowerByHour.get(hour.hourUtc) ?? 0;
-        if (proxyPowerW < MIN_PROXY_SOLAR_W) {
+        const proxyPower = proxyPowerByHour.get(hour.hourUtc) ?? Power.zero();
+        if (proxyPower.watts < MIN_PROXY_SOLAR_W) {
           return null;
         }
         const ageDays = Math.max(0, (nowMs - new Date(hour.hourUtc).getTime()) / 86_400_000);
         return {
           ...hour,
-          proxyPowerW,
-          ratio: clamp(hour.measuredSolarW / proxyPowerW, 0.05, 1.25),
+          proxyPower,
+          ratio: clamp(hour.measuredSolar.watts / proxyPower.watts, 0.05, 1.25),
           weight: Math.exp(-ageDays / 45),
         };
       })
@@ -169,7 +175,7 @@ export class SolarForecastCalibrationService {
         const baselineRatio = seasonHourRatio.get(`${sample.season}:${sample.localHour}`)
           ?? hourRatio.get(sample.localHour)
           ?? globalRatio;
-        return sum + (sample.measuredSolarW - sample.proxyPowerW * baselineRatio);
+        return sum + (sample.measuredSolar.watts - sample.proxyPower.watts * baselineRatio);
       }, 0) / recentSunny.length
       : 0;
 
@@ -177,7 +183,7 @@ export class SolarForecastCalibrationService {
       globalRatio,
       hourRatio,
       seasonHourRatio,
-      recentBiasW,
+      recentBias: Power.fromWatts(recentBiasW),
       sampleCount: samples.length,
     };
   }
@@ -207,7 +213,7 @@ function normalizeSolarArrays(config: ConfigDocument): SolarArrayConfig[] {
 }
 
 function aggregateMeasuredSolarByHour(history: HistoryPoint[], timeZone: string): AggregatedSolarHour[] {
-  const grouped = new Map<string, { solarSum: number; solarCount: number }>();
+  const grouped = new Map<string, { solarSum: Power; solarCount: number }>();
   for (const point of history) {
     const timestamp = parseTimestamp(point.timestamp);
     const solarPowerW = point.solar_power_w;
@@ -215,8 +221,8 @@ function aggregateMeasuredSolarByHour(history: HistoryPoint[], timeZone: string)
       continue;
     }
     const hourUtc = floorToUtcHour(timestamp).toISOString();
-    const bucket = grouped.get(hourUtc) ?? { solarSum: 0, solarCount: 0 };
-    bucket.solarSum += Math.max(0, solarPowerW);
+    const bucket = grouped.get(hourUtc) ?? { solarSum: Power.zero(), solarCount: 0 };
+    bucket.solarSum = bucket.solarSum.add(Power.fromWatts(Math.max(0, solarPowerW)));
     bucket.solarCount += 1;
     grouped.set(hourUtc, bucket);
   }
@@ -229,17 +235,17 @@ function aggregateMeasuredSolarByHour(history: HistoryPoint[], timeZone: string)
         hourUtc,
         localHour: localParts.localHour,
         season: localParts.season,
-        measuredSolarW: bucket.solarSum / bucket.solarCount,
+        measuredSolar: Power.fromWatts(bucket.solarSum.watts / bucket.solarCount),
       };
     })
     .sort((left, right) => left.hourUtc.localeCompare(right.hourUtc));
 }
 
-function aggregateProxyPowerByHour(rows: Array<{ hourUtc: string; expectedPowerW: number | null }>): Map<string, number> {
-  const result = new Map<string, number>();
+function aggregateProxyPowerByHour(rows: Array<{ hourUtc: string; expectedPowerW: number | null }>): Map<string, Power> {
+  const result = new Map<string, Power>();
   for (const row of rows) {
-    const expectedPowerW = row.expectedPowerW ?? 0;
-    result.set(row.hourUtc, (result.get(row.hourUtc) ?? 0) + expectedPowerW);
+    const expectedPower = Power.fromWatts(row.expectedPowerW ?? 0);
+    result.set(row.hourUtc, (result.get(row.hourUtc) ?? Power.zero()).add(expectedPower));
   }
   return result;
 }
@@ -270,7 +276,7 @@ function weightedAverageRatio(samples: Array<{ ratio: number; weight: number }>)
   return totalWeight > 0 ? weighted / totalWeight : DEFAULT_RATIO;
 }
 
-function toSolarWindow(entry: RawSolarEntry): { start: Date; end: Date; durationHours: number } | null {
+function toSolarWindow(entry: RawSolarEntry): { start: Date; end: Date; duration: Duration } | null {
   const start = parseTimestamp(entry.start ?? entry.ts ?? null);
   if (!start) {
     return null;
@@ -282,19 +288,19 @@ function toSolarWindow(entry: RawSolarEntry): { start: Date; end: Date; duration
   return {
     start,
     end,
-    durationHours: (end.getTime() - start.getTime()) / 3_600_000,
+    duration: Duration.between(start, end),
   };
 }
 
-function solarEntryAveragePower(entry: RawSolarEntry, durationHours: number): number | null {
-  if (durationHours <= 0) {
+function solarEntryAveragePower(entry: RawSolarEntry, duration: Duration): Power | null {
+  if (duration.hours <= 0) {
     return null;
   }
   if (typeof entry.energy_wh === "number" && Number.isFinite(entry.energy_wh)) {
-    return entry.energy_wh / durationHours;
+    return Energy.fromWattHours(entry.energy_wh).per(duration);
   }
   if (typeof entry.energy_kwh === "number" && Number.isFinite(entry.energy_kwh)) {
-    return entry.energy_kwh * 1000 / durationHours;
+    return Energy.fromKilowattHours(entry.energy_kwh).per(duration);
   }
   const hintedPower = typeof entry.calibrated_power_w === "number" && Number.isFinite(entry.calibrated_power_w)
     ? entry.calibrated_power_w
@@ -303,7 +309,7 @@ function solarEntryAveragePower(entry: RawSolarEntry, durationHours: number): nu
       : typeof entry.val === "number" && Number.isFinite(entry.val)
         ? entry.val
         : null;
-  return hintedPower != null ? Math.max(0, hintedPower) : null;
+  return hintedPower != null ? Power.fromWatts(Math.max(0, hintedPower)) : null;
 }
 
 function floorToUtcHour(date: Date): Date {

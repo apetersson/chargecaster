@@ -16,9 +16,8 @@ COPY packages/domain/package.json packages/domain/package.json
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
-# Build domain first so dependents can rely on dist outputs
+# Copy shared domain sources before building dependents
 COPY packages/domain/ packages/domain/
-RUN pnpm --filter @chargecaster/domain build
 
 # Build frontend
 COPY frontend/ frontend/
@@ -26,7 +25,7 @@ ARG VITE_TRPC_URL=/trpc
 ENV VITE_TRPC_URL=${VITE_TRPC_URL}
 RUN pnpm --filter chargecaster-frontend build
 
-# Bundle backend with esbuild (externalize native better-sqlite3)
+# Bundle backend with esbuild against workspace sources (externalize native better-sqlite3)
 COPY backend/ backend/
 RUN pnpm --filter chargecaster-backend bundle \
   && pnpm store prune || true

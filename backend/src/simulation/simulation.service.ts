@@ -15,6 +15,8 @@ import {
   Duration,
   Energy,
   EnergyPrice,
+  Percentage,
+  Power,
   TimeSlot,
   normalizePriceSlots,
 } from "@chargecaster/domain";
@@ -49,12 +51,12 @@ export interface SimulationInput {
 interface SolarDiscrepancySample {
   start: string;
   end: string | null;
-  calibratedPowerW: number;
-  proxyPowerW: number;
+  calibratedPower: Power;
+  proxyPower: Power;
 }
 
 interface PeakSolarDiscrepancy {
-  watts: number;
+  power: Power;
   start: string;
   end: string | null;
 }
@@ -168,7 +170,7 @@ export class SimulationService {
     });
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
-    const feedInTariff = Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0));
+    const feedInTariff = EnergyPrice.fromEurPerKwh(Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0)));
     const batteryEfficiency = this.batteryEfficiencyRef.estimateRecentEfficiencies(
       Energy.fromKilowattHours(Number(input.config.battery.capacity_kwh ?? 0)),
     );
@@ -181,7 +183,7 @@ export class SimulationService {
           return acc;
         }
         const ratio = overlap.ratioOf(priceSlotWindow.duration).value;
-        acc.house += sample.housePowerW * ratio;
+        acc.house += sample.housePower.watts * ratio;
         acc.coverage += ratio;
         return acc;
       }, { house: 0, coverage: 0 });
@@ -193,21 +195,21 @@ export class SimulationService {
     const result = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
-      feedInTariffEurPerKwh: feedInTariff,
+      feedInTariffEurPerKwh: feedInTariff.eurPerKwh,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
       dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
     });
-    const initialSoCPercent = result.initial_soc_percent;
-    const nextSoCPercent = result.next_step_soc_percent ?? initialSoCPercent;
+    const initialSoC = Percentage.fromPercent(result.initial_soc_percent);
+    const nextSoC = Percentage.fromPercent(result.next_step_soc_percent ?? result.initial_soc_percent);
     const firstEntry = result.oracle_entries.length > 0 ? result.oracle_entries[0] : null;
     const firstStrategy = firstEntry?.strategy ?? null;
     let currentMode: "charge" | "auto" | "hold";
     if (firstStrategy) {
       currentMode = firstStrategy;
-    } else if (nextSoCPercent > initialSoCPercent + 0.5) {
+    } else if (nextSoC.percent > initialSoC.percent + 0.5) {
       currentMode = "charge";
-    } else if (Math.abs(nextSoCPercent - initialSoCPercent) <= 0.5) {
+    } else if (Math.abs(nextSoC.percent - initialSoC.percent) <= 0.5) {
       currentMode = "hold";
     } else {
       currentMode = "auto";
@@ -240,7 +242,7 @@ export class SimulationService {
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
-      feedInTariffEurPerKwh: feedInTariff,
+      feedInTariffEurPerKwh: feedInTariff.eurPerKwh,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: false,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
@@ -254,6 +256,8 @@ export class SimulationService {
       next_step_soc_percent: result.next_step_soc_percent,
       recommended_soc_percent: result.recommended_soc_percent,
       recommended_final_soc_percent: result.recommended_final_soc_percent,
+      charge_efficiency_percent: batteryEfficiency.chargeEfficiency.percent,
+      discharge_efficiency_percent: batteryEfficiency.dischargeEfficiency.percent,
       current_mode: currentMode,
       price_snapshot_ct_per_kwh: priceSnapshotCt,
       price_snapshot_eur_per_kwh: priceSnapshotEur,
@@ -265,7 +269,7 @@ export class SimulationService {
         ? autoResult.projected_cost_eur - result.projected_cost_eur
         : null,
       projected_grid_power_w: result.projected_grid_power_w,
-      solar_forecast_discrepancy_w: peakSolarDiscrepancy?.watts ?? null,
+      solar_forecast_discrepancy_w: peakSolarDiscrepancy?.power.watts ?? null,
       solar_forecast_discrepancy_start: peakSolarDiscrepancy?.start,
       solar_forecast_discrepancy_end: peakSolarDiscrepancy?.end ?? undefined,
       forecast_hours: result.forecast_hours,
@@ -291,15 +295,15 @@ export class SimulationService {
       site_demand_power_w: null,
     };
 
-    const observedGridPower = input.observations?.gridPowerW;
-    if (observedGridPower != null) {
-      historyEntry.grid_power_w = observedGridPower;
+    const observedGridPower = toObservedPower(input.observations?.gridPowerW);
+    if (observedGridPower) {
+      historyEntry.grid_power_w = observedGridPower.watts;
     }
 
     const firstSolarEnergy = solarEnergyPerSlot[0] ?? Energy.zero();
     const firstSolarWh = firstSolarEnergy.wattHours;
     const firstSlot = slots.length > 0 ? slots[0] : null;
-    const observedSolarPower = input.observations?.solarPowerW;
+    const observedSolarPower = toObservedPower(input.observations?.solarPowerW);
     if (firstSlot) {
       if (firstSolarWh > 0) {
         historyEntry.solar_energy_wh = firstSolarWh;
@@ -314,8 +318,8 @@ export class SimulationService {
         historyEntry.solar_power_w = historyEntry.solar_power_w ?? 0;
       }
     }
-    if (observedSolarPower != null) {
-      historyEntry.solar_power_w = observedSolarPower;
+    if (observedSolarPower) {
+      historyEntry.solar_power_w = observedSolarPower.watts;
       if (
         historyEntry.solar_energy_wh === null &&
         firstSolarWh === 0
@@ -324,19 +328,19 @@ export class SimulationService {
       }
     }
 
-    const observedHomePower = input.observations?.homePowerW;
-    if (observedHomePower != null) {
-      historyEntry.home_power_w = observedHomePower;
+    const observedHomePower = toObservedPower(input.observations?.homePowerW);
+    if (observedHomePower) {
+      historyEntry.home_power_w = observedHomePower.watts;
     }
 
-    const observedEvChargePower = input.observations?.evChargePowerW;
-    if (observedEvChargePower != null) {
-      historyEntry.ev_charge_power_w = observedEvChargePower;
+    const observedEvChargePower = toObservedPower(input.observations?.evChargePowerW);
+    if (observedEvChargePower) {
+      historyEntry.ev_charge_power_w = observedEvChargePower.watts;
     }
 
-    const observedSiteDemandPower = input.observations?.siteDemandPowerW;
-    if (observedSiteDemandPower != null) {
-      historyEntry.site_demand_power_w = observedSiteDemandPower;
+    const observedSiteDemandPower = toObservedPower(input.observations?.siteDemandPowerW);
+    if (observedSiteDemandPower) {
+      historyEntry.site_demand_power_w = observedSiteDemandPower.watts;
     } else if (historyEntry.home_power_w != null) {
       historyEntry.site_demand_power_w = historyEntry.home_power_w + Math.max(0, historyEntry.ev_charge_power_w ?? 0);
     }
@@ -410,15 +414,12 @@ export class SimulationService {
 
   private normalizeSoCPercent(value: unknown): number | null {
     if (typeof value === "number" && Number.isFinite(value)) {
-      if (value >= 0 && value <= 100) {
-        return value;
-      }
-      return Math.min(100, Math.max(0, value));
+      return Percentage.fromPercent(value).percent;
     }
     if (typeof value === "string" && value.trim().length > 0) {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
-        return Math.min(100, Math.max(0, numeric));
+        return Percentage.fromPercent(numeric).percent;
       }
     }
     return null;
@@ -433,10 +434,10 @@ function computePeakSolarForecastDiscrepancy(solarForecast: RawSolarEntry[]): Pe
     return null;
   }
   const strongest = samples.reduce((currentStrongest, sample) => {
-    const delta = sample.calibratedPowerW - sample.proxyPowerW;
-    if (currentStrongest === null || Math.abs(delta) > Math.abs(currentStrongest.watts)) {
+    const delta = sample.calibratedPower.subtract(sample.proxyPower);
+    if (currentStrongest === null || Math.abs(delta.watts) > Math.abs(currentStrongest.power.watts)) {
       return {
-        watts: delta,
+        power: delta,
         start: sample.start,
         end: sample.end,
       };
@@ -448,7 +449,7 @@ function computePeakSolarForecastDiscrepancy(solarForecast: RawSolarEntry[]): Pe
   }
   return {
     ...strongest,
-    watts: Number(strongest.watts.toFixed(3)),
+    power: Power.fromWatts(Number(strongest.power.watts.toFixed(3))),
   };
 }
 
@@ -465,39 +466,45 @@ function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample 
     return null;
   }
 
-  const calibratedPowerW = resolveFiniteNumber(entry.calibrated_power_w)
+  const calibratedPower = resolveFinitePower(entry.calibrated_power_w)
     ?? inferSolarAveragePower(entry, durationHours);
-  const proxyPowerW = resolveFiniteNumber(entry.proxy_power_w);
-  if (calibratedPowerW === null || proxyPowerW === null) {
+  const proxyPower = resolveFinitePower(entry.proxy_power_w);
+  if (calibratedPower === null || proxyPower === null) {
     return null;
   }
 
   return {
     start: start.toISOString(),
     end: end?.toISOString() ?? null,
-    calibratedPowerW,
-    proxyPowerW,
+    calibratedPower,
+    proxyPower,
   };
 }
 
-function inferSolarAveragePower(entry: RawSolarEntry, durationHours: number): number | null {
+function inferSolarAveragePower(entry: RawSolarEntry, durationHours: number): Power | null {
   if (durationHours <= 0) {
     return null;
   }
-  const energyWh = resolveFiniteNumber(entry.energy_wh)
-    ?? (resolveFiniteNumber(entry.energy_kwh) != null ? (entry.energy_kwh as number) * 1000 : null);
-  return energyWh == null ? null : energyWh / durationHours;
+  const energyWh = resolveFiniteEnergy(entry.energy_wh)?.wattHours
+    ?? (typeof entry.energy_kwh === "number" && Number.isFinite(entry.energy_kwh)
+      ? Energy.fromKilowattHours(entry.energy_kwh).wattHours
+      : null);
+  return energyWh == null ? null : Power.fromWatts(energyWh / durationHours);
 }
 
-function resolveFiniteNumber(value: number | null | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function resolveFinitePower(value: number | null | undefined): Power | null {
+  return typeof value === "number" && Number.isFinite(value) ? Power.fromWatts(value) : null;
+}
+
+function resolveFiniteEnergy(value: number | null | undefined): Energy | null {
+  return typeof value === "number" && Number.isFinite(value) ? Energy.fromWattHours(value) : null;
 }
 
 function normalizeSocLabel(value: number | null | undefined): string | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return null;
   }
-  const bounded = Math.min(100, Math.max(0, value));
+  const bounded = Percentage.fromPercent(value).percent;
   const rounded = Math.round(bounded * 10) / 10;
   if (Number.isInteger(rounded)) {
     return `${Math.trunc(rounded)}%`;
@@ -512,7 +519,7 @@ interface SolarSlot {
 
 interface DemandSlot {
   slot: TimeSlot;
-  housePowerW: number;
+  housePower: Power;
 }
 
 function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
@@ -561,10 +568,14 @@ function normalizeDemandForecastSlots(raw: DemandForecastEntry[]): DemandSlot[] 
       : TimeSlot.fromStartAndDuration(start, DEFAULT_SLOT_DURATION);
     slots.push({
       slot: slotTime,
-      housePowerW: entry.house_power_w,
+      housePower: Power.fromWatts(entry.house_power_w),
     });
   }
   return slots.sort((left, right) => left.slot.start.getTime() - right.slot.start.getTime());
+}
+
+function toObservedPower(value: number | null | undefined): Power | null {
+  return typeof value === "number" && Number.isFinite(value) ? Power.fromWatts(value) : null;
 }
 
 function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
