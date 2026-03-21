@@ -56,7 +56,7 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
         </div>
         <div className="metric">
           <span className="label">Charge/Discharge Eff.</span>
-          <span className="value">{batteryEfficiencyLabel}</span>
+          <span className="value small">{batteryEfficiencyLabel}</span>
         </div>
         <div className="metric">
           <span className="label">Baseline Cost</span>
