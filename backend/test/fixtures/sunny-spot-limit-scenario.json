@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-03-23T16:25:00+01:00",
+  "description": "Deterministic SUNNY Spot scenario based on the real aWATTar market curve for 2026-03-24, where morning feed-in value fades to near zero from 11:00 onward.",
+  "source": {
+    "market_url": "https://api.awattar.at/v1/marketdata",
+    "reference_date": "2026-03-24",
+    "feed_in_formula": "market - |market| * 0.19",
+    "notes": [
+      "All import and SUNNY Spot feed-in values come from the real aWATTar AT market data for 2026-03-24.",
+      "The solar and house-load series are synthetic so the optimiser deterministically prefers LIMIT before the weak feed-in window."
+    ]
+  },
+  "live_state": {
+    "battery_soc": 60
+  },
+  "slots": [
+    {
+      "start": "2026-03-24T06:00:00.000Z",
+      "end": "2026-03-24T07:00:00.000Z",
+      "era_id": "morning-value-1",
+      "price_eur_per_kwh": 0.12237
+    },
+    {
+      "start": "2026-03-24T07:00:00.000Z",
+      "end": "2026-03-24T08:00:00.000Z",
+      "era_id": "morning-value-2",
+      "price_eur_per_kwh": 0.10095
+    },
+    {
+      "start": "2026-03-24T08:00:00.000Z",
+      "end": "2026-03-24T09:00:00.000Z",
+      "era_id": "morning-value-3",
+      "price_eur_per_kwh": 0.07267
+    },
+    {
+      "start": "2026-03-24T09:00:00.000Z",
+      "end": "2026-03-24T10:00:00.000Z",
+      "era_id": "late-morning-low-1",
+      "price_eur_per_kwh": 0.02942
+    },
+    {
+      "start": "2026-03-24T10:00:00.000Z",
+      "end": "2026-03-24T11:00:00.000Z",
+      "era_id": "late-morning-low-2",
+      "price_eur_per_kwh": 0.02003
+    },
+    {
+      "start": "2026-03-24T11:00:00.000Z",
+      "end": "2026-03-24T12:00:00.000Z",
+      "era_id": "noon-recovery",
+      "price_eur_per_kwh": 0.03241
+    }
+  ],
+  "feed_in_tariff_eur_per_kwh_by_slot": [
+    0.0991197,
+    0.0817695,
+    0.0588627,
+    0.0238302,
+    0.0162243,
+    0.0262521
+  ],
+  "solar_generation_kwh_per_slot": [
+    1.4,
+    2.3,
+    3.7,
+    4.9,
+    5.2,
+    4.5
+  ],
+  "house_load_watts_per_slot": [
+    300,
+    300,
+    300,
+    300,
+    300,
+    300
+  ]
+}

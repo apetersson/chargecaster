@@ -207,7 +207,7 @@ export class SimulationService {
     const nextSoC = Percentage.fromPercent(result.next_step_soc_percent ?? result.initial_soc_percent);
     const firstEntry = result.oracle_entries.length > 0 ? result.oracle_entries[0] : null;
     const firstStrategy = firstEntry?.strategy ?? null;
-    let currentMode: "charge" | "auto" | "hold";
+    let currentMode: "charge" | "auto" | "hold" | "limit";
     if (firstStrategy) {
       currentMode = firstStrategy;
     } else if (nextSoC.percent > initialSoC.percent + 0.5) {
@@ -222,7 +222,7 @@ export class SimulationService {
       const strategyLog = result.oracle_entries
         .map((entry) => {
           const strategyLabel = entry.strategy.toUpperCase();
-          if (entry.strategy !== "hold") {
+          if (entry.strategy !== "hold" && entry.strategy !== "limit") {
             return `${strategyLabel}@${entry.era_id}`;
           }
           const holdLevel = normalizeSocLabel(entry.target_soc_percent ?? entry.start_soc_percent ?? entry.end_soc_percent);
@@ -240,7 +240,11 @@ export class SimulationService {
     const priceSnapshotEur = priceSnapshot?.eurPerKwh ?? null;
     const priceSnapshotCt = priceSnapshot?.ctPerKwh ?? null;
     const fallbackEras = buildErasFromSlots(slots);
-    const forecastEras = forecastErasInput.length ? forecastErasInput : fallbackEras;
+    const forecastEras = attachFeedInTariffsToForecastEras(
+      forecastErasInput.length ? forecastErasInput : fallbackEras,
+      input.feedInTariffEurPerKwhBySlot,
+      feedInTariff.eurPerKwh,
+    );
     // Run a second pass that mimics "auto" mode (no active grid charging) for comparison
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
@@ -265,6 +269,7 @@ export class SimulationService {
       current_mode: currentMode,
       price_snapshot_ct_per_kwh: priceSnapshotCt,
       price_snapshot_eur_per_kwh: priceSnapshotEur,
+      grid_fee_eur_per_kwh: input.config.price.grid_fee_eur_per_kwh ?? null,
       projected_cost_eur: result.projected_cost_eur,
       baseline_cost_eur: result.baseline_cost_eur,
       basic_battery_cost_eur: autoResult.projected_cost_eur,
@@ -590,6 +595,8 @@ function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
       price_eur_per_kwh: energyPrice.eurPerKwh,
       price_with_fee_ct_per_kwh: energyPrice.ctPerKwh,
       price_with_fee_eur_per_kwh: energyPrice.eurPerKwh,
+      feed_in_tariff_ct_per_kwh: null,
+      feed_in_tariff_eur_per_kwh: null,
       unit: "ct/kWh",
     };
     const updatedSlot = slot.withEraId(eraId);
@@ -607,6 +614,38 @@ function buildErasFromSlots(slots: PriceSlot[]): ForecastEra[] {
         },
       ],
     } satisfies ForecastEra;
+  });
+}
+
+function attachFeedInTariffsToForecastEras(
+  forecastEras: ForecastEra[],
+  feedInTariffEurPerKwhBySlot: (number | undefined)[] | undefined,
+  fallbackFeedInTariffEurPerKwh: number,
+): ForecastEra[] {
+  return forecastEras.map((era, index) => {
+    const candidateFeedInTariff = feedInTariffEurPerKwhBySlot?.[index] ?? fallbackFeedInTariffEurPerKwh;
+    const feedInTariffEurPerKwh = Number.isFinite(candidateFeedInTariff)
+      ? candidateFeedInTariff
+      : fallbackFeedInTariffEurPerKwh;
+    const feedInTariff = EnergyPrice.fromEurPerKwh(feedInTariffEurPerKwh);
+
+    return {
+      ...era,
+      sources: era.sources.map((source) => {
+        if (source.type !== "cost") {
+          return source;
+        }
+
+        return {
+          ...source,
+          payload: {
+            ...source.payload,
+            feed_in_tariff_ct_per_kwh: feedInTariff.ctPerKwh,
+            feed_in_tariff_eur_per_kwh: feedInTariff.eurPerKwh,
+          },
+        };
+      }),
+    };
   });
 }
 

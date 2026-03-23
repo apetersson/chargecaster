@@ -10,11 +10,13 @@ import {
   energyFromPower,
   powerFromEnergy,
 } from "@chargecaster/domain";
-
 const SOC_STEPS = 100;
 const EPSILON = 1e-9;
 const GRID_CHARGE_STRATEGY_THRESHOLD_KWH = 0.05;
 const HOLD_ENERGY_THRESHOLD_KWH = 0.02;
+const SELECTIVE_FEED_IN_THRESHOLD_EUR_PER_KWH = 0;
+const LOW_FEED_IN_THRESHOLD_EUR_PER_KWH = 0.03;
+const FEED_IN_DELTA_THRESHOLD_EUR_PER_KWH = 0.02;
 
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
@@ -54,6 +56,7 @@ export enum TransitionKind {
   Hold = "hold",
   Charge = "charge",
   Discharge = "discharge",
+  Limit = "limit",
 }
 
 export interface PolicyTransition {
@@ -107,6 +110,7 @@ interface SimulationContext {
   allowGridChargeFromGrid: boolean;
   chargeEfficiency: Percentage;
   dischargeEfficiency: Percentage;
+  limitPreferredSlots: boolean[];
 }
 
 interface DynamicProgrammingResult {
@@ -251,6 +255,7 @@ function prepareSimulationContext(
     maxSolarChargePower,
     maxDischargePower,
   });
+  const limitPreferredSlots = buildLimitPreferredSlots(slotProfiles);
 
   return {
     cfg,
@@ -278,6 +283,7 @@ function prepareSimulationContext(
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
     chargeEfficiency: normalizedOptions.chargeEfficiency,
     dischargeEfficiency: normalizedOptions.dischargeEfficiency,
+    limitPreferredSlots,
   };
 }
 
@@ -380,15 +386,15 @@ function evaluateStateTransitions(
     maxAllowedSoCStep,
     minAllowedSoCStep,
     allowBatteryExport,
-    chargeEfficiency,
-    dischargeEfficiency,
+    limitPreferredSlots,
   } = context;
+  const limitPreferred = limitPreferredSlots[profile.index] ?? false;
 
   let maxChargeSteps = numSoCStates - 1 - currentSoCStep;
   if (profile.totalChargeLimit.wattHours > 0) {
     maxChargeSteps = Math.min(
       maxChargeSteps,
-      Math.floor(profile.totalChargeLimit.kilowattHours * chargeEfficiency.ratio / energyPerStep.kilowattHours + EPSILON),
+      Math.floor(profile.totalChargeLimit.kilowattHours * context.chargeEfficiency.ratio / energyPerStep.kilowattHours + EPSILON),
     );
   } else {
     maxChargeSteps = Math.min(maxChargeSteps, 0);
@@ -399,7 +405,7 @@ function evaluateStateTransitions(
   if (profile.dischargeLimit) {
     maxDischargeStepsByPower = Math.min(
       maxDischargeStepsByPower,
-      Math.floor(profile.dischargeLimit.kilowattHours / (dischargeEfficiency.ratio * energyPerStep.kilowattHours) + EPSILON),
+      Math.floor(profile.dischargeLimit.kilowattHours / (context.dischargeEfficiency.ratio * energyPerStep.kilowattHours) + EPSILON),
     );
   }
   const allowedDischargeSteps = Math.max(0, currentSoCStep - minAllowedSoCStep);
@@ -409,12 +415,16 @@ function evaluateStateTransitions(
   let bestTransition: PolicyTransition | null = null;
 
   for (let deltaSoCSteps = -downLimit; deltaSoCSteps <= upLimit; deltaSoCSteps += 1) {
+    if (limitPreferred && deltaSoCSteps > 0) {
+      continue;
+    }
+
     const nextSoCStep = currentSoCStep + deltaSoCSteps;
     const storedEnergyChange = energyPerStep.multiply(deltaSoCSteps);
     const batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
       storedEnergyChange,
-      chargeEfficiency,
-      dischargeEfficiency,
+      context.chargeEfficiency,
+      context.dischargeEfficiency,
     );
     const gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
 
@@ -462,6 +472,8 @@ function evaluateStateTransitions(
         kind:
           deltaSoCSteps > 0
             ? TransitionKind.Charge
+            : limitPreferred
+              ? TransitionKind.Limit
             : deltaSoCSteps < 0
               ? TransitionKind.Discharge
               : TransitionKind.Hold,
@@ -475,7 +487,7 @@ function evaluateStateTransitions(
     return {
       cost: costToGoNextRow[currentSoCStep] ?? Money.zero(),
       transition: {
-        kind: TransitionKind.Hold,
+        kind: limitPreferred ? TransitionKind.Limit : TransitionKind.Hold,
         nextSoCStep: currentSoCStep,
         deltaSoCSteps: 0,
       },
@@ -584,6 +596,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
 
     ({nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy} = adjustForPvExportDuringRollout(
       context,
+      index,
       profile,
       socStepIter,
       {nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy},
@@ -638,6 +651,8 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       additionalGridCharge.kilowattHours <= GRID_CHARGE_STRATEGY_THRESHOLD_KWH;
     const strategy: OracleEntry["strategy"] = additionalGridCharge.wattHours > 0
       ? "charge"
+      : transition.kind === TransitionKind.Limit
+        ? "limit"
       : isHoldTransition
         ? "hold"
         : "auto";
@@ -664,6 +679,35 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
   };
 }
 
+function buildLimitPreferredSlots(slotProfiles: SlotProfile[]): boolean[] {
+  return slotProfiles.map((profile, index) => prefersLimitStrategyForSlot(slotProfiles, index, profile));
+}
+
+function prefersLimitStrategyForSlot(slotProfiles: SlotProfile[], index: number, profile: SlotProfile): boolean {
+  if (!(profile.feedInTariff.eurPerKwh > SELECTIVE_FEED_IN_THRESHOLD_EUR_PER_KWH + EPSILON)) {
+    return false;
+  }
+
+  const referenceEnergy = Energy.fromKilowattHours(1);
+  const lowValueThreshold = EnergyPrice.fromEurPerKwh(LOW_FEED_IN_THRESHOLD_EUR_PER_KWH).costFor(referenceEnergy);
+  const feedInDeltaThreshold = EnergyPrice.fromEurPerKwh(FEED_IN_DELTA_THRESHOLD_EUR_PER_KWH).costFor(referenceEnergy);
+  const currentFeedInValue = profile.feedInTariff.costFor(referenceEnergy);
+  if (!(currentFeedInValue.eur > lowValueThreshold.eur + EPSILON)) {
+    return false;
+  }
+
+  return slotProfiles.slice(index + 1).some((candidate) => {
+    if (!(candidate.availableSolar.kilowattHours > candidate.loadAfterDirectUse.kilowattHours + EPSILON)) {
+      return false;
+    }
+
+    const candidateFeedInValue = candidate.feedInTariff.costFor(referenceEnergy);
+    const lowValueWindow = candidateFeedInValue.eur <= lowValueThreshold.eur;
+    const materiallyWorseWindow = currentFeedInValue.subtract(candidateFeedInValue).eur >= feedInDeltaThreshold.eur;
+    return lowValueWindow || materiallyWorseWindow;
+  });
+}
+
 function energyFromOptionalPowerWatts(powerWatts: number | undefined, duration: Duration): Energy | null {
   if (typeof powerWatts !== "number" || !Number.isFinite(powerWatts)) {
     return null;
@@ -677,11 +721,15 @@ function computeGridCost(gridEnergy: Energy, importPrice: EnergyPrice, feedInTar
 
 function adjustForPvExportDuringRollout(
   context: SimulationContext,
+  index: number,
   profile: SlotProfile,
   socStepIter: number,
   input: StateTransitionSnapshot,
 ): StateTransitionSnapshot {
   let {nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy} = input;
+  if (context.limitPreferredSlots[index]) {
+    return input;
+  }
   if (gridEnergy.wattHours < 0) {
     const socStepsToFull = Math.max(0, (context.numSoCStates - 1) - socStepIter);
     const socHeadroom = context.energyPerStep.multiply(socStepsToFull);

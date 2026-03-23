@@ -100,6 +100,8 @@ const costForecastSourceSchema = z.object({
     price_eur_per_kwh: z.number(),
     price_with_fee_ct_per_kwh: z.number(),
     price_with_fee_eur_per_kwh: z.number(),
+    feed_in_tariff_ct_per_kwh: nullableNumberSchema.optional(),
+    feed_in_tariff_eur_per_kwh: nullableNumberSchema.optional(),
     unit: z.string(),
   }),
 });
@@ -132,7 +134,7 @@ const oracleEntrySchema = z.object({
   end_soc_percent: nullableNumberSchema,
   target_soc_percent: nullableNumberSchema.optional(),
   grid_energy_wh: nullableNumberSchema,
-  strategy: z.union([z.literal("charge"), z.literal("auto"), z.literal("hold")]),
+  strategy: z.union([z.literal("charge"), z.literal("auto"), z.literal("hold"), z.literal("limit")]),
 });
 
 export type OracleEntry = z.infer<typeof oracleEntrySchema>;
@@ -158,9 +160,10 @@ export const snapshotPayloadSchema = z.object({
   recommended_final_soc_percent: nullableNumberSchema,
   charge_efficiency_percent: nullableNumberSchema.optional(),
   discharge_efficiency_percent: nullableNumberSchema.optional(),
-  current_mode: z.union([z.literal("charge"), z.literal("auto"), z.literal("hold")]).optional(),
+  current_mode: z.union([z.literal("charge"), z.literal("auto"), z.literal("hold"), z.literal("limit")]).optional(),
   price_snapshot_ct_per_kwh: nullableNumberSchema.optional(),
   price_snapshot_eur_per_kwh: nullableNumberSchema,
+  grid_fee_eur_per_kwh: nullableNumberSchema.optional(),
   projected_cost_eur: nullableNumberSchema,
   baseline_cost_eur: nullableNumberSchema,
   basic_battery_cost_eur: nullableNumberSchema.optional(),
@@ -195,6 +198,7 @@ export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   current_mode: true,
   price_snapshot_ct_per_kwh: true,
   price_snapshot_eur_per_kwh: true,
+  grid_fee_eur_per_kwh: true,
   projected_cost_eur: true,
   baseline_cost_eur: true,
   basic_battery_cost_eur: true,
@@ -209,6 +213,8 @@ export const snapshotSummarySchema = snapshotPayloadSchema.pick({
   forecast_samples: true,
   warnings: true,
   errors: true,
+}).extend({
+  show_feed_in_price_bars: z.boolean(),
 });
 
 export type SnapshotSummary = z.infer<typeof snapshotSummarySchema>;

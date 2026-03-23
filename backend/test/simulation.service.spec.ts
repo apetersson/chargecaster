@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { EnergyPrice, Percentage, normalizePriceSlots, TariffSlot } from "@chargecaster/domain";
+import { EnergyPrice, normalizePriceSlots, TariffSlot } from "@chargecaster/domain";
 
 import type { PriceSlot, SimulationConfig } from "@chargecaster/domain";
 import { parseEvccState } from "../src/config/schemas";
@@ -13,6 +13,26 @@ function createSlot(hour: number, price: number): PriceSlot {
   const start = new Date(Date.UTC(2025, 0, 1, hour, 0, 0));
   const end = new Date(Date.UTC(2025, 0, 1, hour + 1, 0, 0));
   return TariffSlot.fromDates(start, end, EnergyPrice.fromEurPerKwh(price), `era-${hour}`);
+}
+
+interface SunnySpotLimitFixture {
+  live_state: {
+    battery_soc: number;
+  };
+  slots: {
+    start: string;
+    end: string;
+    era_id: string;
+    price_eur_per_kwh: number;
+  }[];
+  feed_in_tariff_eur_per_kwh_by_slot: number[];
+  solar_generation_kwh_per_slot: number[];
+  house_load_watts_per_slot: number[];
+}
+
+function loadSunnySpotLimitFixture(): SunnySpotLimitFixture {
+  const fixturePath = join(process.cwd(), "test", "fixtures", "sunny-spot-limit-scenario.json");
+  return JSON.parse(readFileSync(fixturePath, "utf-8")) as SunnySpotLimitFixture;
 }
 
 const baseConfig: SimulationConfig = {
@@ -173,6 +193,60 @@ describe("simulateOptimalSchedule oracle output", () => {
     }
   });
 
+  it("changes the SoC path when sunny-spot turns a valuable export window into a real limit constraint", () => {
+    const slots: PriceSlot[] = [createSlot(0, 0.18), createSlot(1, 0.18), createSlot(2, 0.30)];
+    const config: SimulationConfig = {
+      battery: {
+        capacity_kwh: 10,
+        max_charge_power_w: 4000,
+        max_charge_power_solar_w: 4000,
+        max_discharge_power_w: 4000,
+        auto_mode_floor_soc: 5,
+        max_charge_soc_percent: 100,
+      },
+      price: {
+        grid_fee_eur_per_kwh: 0,
+        feed_in_tariff_eur_per_kwh: 0,
+      },
+      logic: {
+        interval_seconds: 300,
+        min_hold_minutes: 0,
+        allow_battery_export: true,
+      },
+    };
+    const sharedOptions = {
+      solarGenerationKwhPerSlot: [3.5, 3.5, 0],
+      houseLoadWattsPerSlot: [500, 500, 2000],
+      allowBatteryExport: true,
+    };
+
+    const sunny = simulateOptimalSchedule(
+      config,
+      {battery_soc: 40},
+      slots,
+      {
+        ...sharedOptions,
+        feedInTariffEurPerKwhBySlot: [0.02, 0.02, 0.02],
+      },
+    );
+    const sunnySpot = simulateOptimalSchedule(
+      config,
+      {battery_soc: 40},
+      slots,
+      {
+        ...sharedOptions,
+        feedInTariffEurPerKwhBySlot: [0.12, 0.01, 0.01],
+      },
+    );
+
+    expect(sunny.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(sunny.oracle_entries[0]?.start_soc_percent ?? 0);
+    expect(sunnySpot.oracle_entries[0]?.strategy).toBe("limit");
+    expect(sunnySpot.oracle_entries[0]?.end_soc_percent).toBeLessThanOrEqual(
+      sunnySpot.oracle_entries[0]?.start_soc_percent ?? 100,
+    );
+    expect(sunny.next_step_soc_percent).toBeGreaterThan(sunnySpot.next_step_soc_percent ?? 0);
+  });
+
   it("prefers grid charging for the its_cheap_charge_ffs snapshot", () => {
     const fixtureName = "its_cheap_charge_ffs.json";
     const projectRoot = process.cwd();
@@ -245,5 +319,57 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(result.oracle_entries.length).toBeGreaterThan(0);
     const firstEntry = result.oracle_entries[0];
     expect(firstEntry.strategy).toBe("charge");
+  });
+
+  it("uses limit before low-value sunny-spot hours and refills once feed-in collapses", () => {
+    const fixture = loadSunnySpotLimitFixture();
+    const config: SimulationConfig = {
+      battery: {
+        capacity_kwh: 10,
+        max_charge_power_w: 3000,
+        auto_mode_floor_soc: 5,
+        max_charge_power_solar_w: 3000,
+        max_discharge_power_w: 3000,
+        max_charge_soc_percent: 100,
+      },
+      price: {
+        grid_fee_eur_per_kwh: 0,
+        feed_in_tariff_eur_per_kwh: 0,
+      },
+      logic: {
+        interval_seconds: 300,
+        min_hold_minutes: 0,
+        allow_battery_export: true,
+      },
+    };
+
+    const slots: PriceSlot[] = fixture.slots.map((slot) =>
+      TariffSlot.fromDates(
+        new Date(slot.start),
+        new Date(slot.end),
+        EnergyPrice.fromEurPerKwh(slot.price_eur_per_kwh),
+        slot.era_id,
+      )
+    );
+    const result = simulateOptimalSchedule(
+      config,
+      fixture.live_state,
+      slots,
+      {
+        solarGenerationKwhPerSlot: fixture.solar_generation_kwh_per_slot,
+        houseLoadWattsPerSlot: fixture.house_load_watts_per_slot,
+        feedInTariffEurPerKwhBySlot: fixture.feed_in_tariff_eur_per_kwh_by_slot,
+        allowBatteryExport: true,
+      },
+    );
+
+    expect(result.oracle_entries).toHaveLength(fixture.slots.length);
+    expect(result.oracle_entries[0]?.strategy).toBe("limit");
+    expect(result.oracle_entries[1]?.strategy).toBe("limit");
+    expect(result.oracle_entries[2]?.strategy).toBe("limit");
+    expect(result.oracle_entries[0]?.end_soc_percent).toBeLessThanOrEqual(result.oracle_entries[0]?.start_soc_percent ?? 100);
+    expect(result.oracle_entries[3]?.strategy).toBe("auto");
+    expect(result.oracle_entries[3]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[2]?.end_soc_percent ?? 0);
+    expect(result.oracle_entries[5]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[3]?.end_soc_percent ?? 0);
   });
 });

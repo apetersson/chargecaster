@@ -1,10 +1,16 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { EnergyPrice } from "@chargecaster/domain";
 import type { SnapshotPayload, SnapshotSummary } from "@chargecaster/domain";
+import { RuntimeConfigService } from "../config/runtime-config.service";
 
 @Injectable()
 export class SummaryService {
   private readonly logger = new Logger(SummaryService.name);
+
+  constructor(
+    @Inject(RuntimeConfigService) private readonly runtimeConfig: RuntimeConfigService,
+  ) {
+  }
 
   toSummary(snapshot: SnapshotPayload): SnapshotSummary {
     this.logger.log(`Building summary for snapshot ${snapshot.timestamp}`);
@@ -28,6 +34,7 @@ export class SummaryService {
       price_snapshot_ct_per_kwh: snapshot.price_snapshot_ct_per_kwh ??
         (snapshotPrice ? snapshotPrice.ctPerKwh : null),
       price_snapshot_eur_per_kwh: snapshot.price_snapshot_eur_per_kwh,
+      grid_fee_eur_per_kwh: snapshot.grid_fee_eur_per_kwh ?? null,
       projected_cost_eur: snapshot.projected_cost_eur,
       baseline_cost_eur: snapshot.baseline_cost_eur,
       basic_battery_cost_eur: snapshot.basic_battery_cost_eur,
@@ -40,6 +47,7 @@ export class SummaryService {
       solar_forecast_discrepancy_end: snapshot.solar_forecast_discrepancy_end,
       forecast_hours: snapshot.forecast_hours,
       forecast_samples: snapshot.forecast_samples,
+      show_feed_in_price_bars: this.runtimeConfig.shouldShowFeedInPriceBars(),
       warnings: snapshot.warnings,
       errors: snapshot.errors,
     };

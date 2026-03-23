@@ -28,13 +28,16 @@ export interface FroniusApplyResult {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-type FroniusMode = "charge" | "auto" | "hold";
+type FroniusBatteryMode = "charge" | "auto" | "hold";
+type FroniusMode = FroniusBatteryMode | "limit";
 
 export type OptimisationCommand =
   | {charge: {untilTimestamp?: string | null}}
   | "charge"
   | "auto"
+  | "limit"
   | {auto: {floorSocPercent?: number | null}}
+  | {limit: {floorSocPercent?: number | null; maxChargePowerW?: number | null}}
   | {hold: {minSocPercent: number; observedSocPercent?: number | null; floorSocPercent?: number | null}};
 
 interface NormalisedStrategy {
@@ -42,6 +45,7 @@ interface NormalisedStrategy {
   manualTarget: Percentage | null;
   observedSocPercent: number | null;
   floorTarget: Percentage | null;
+  maxChargePower: Power | null;
 }
 
 interface DigestSession {
@@ -70,7 +74,7 @@ interface FroniusTimeTable {
 interface FroniusTimeOfUseEntry {
   Active: boolean;
   Power: Power;
-  ScheduleType: "CHARGE_MIN";
+  ScheduleType: "CHARGE_MIN" | "CHARGE_MAX";
   TimeTable: FroniusTimeTable;
   Weekdays: FroniusWeekdays;
 }
@@ -90,7 +94,7 @@ export class FroniusService {
   private workingBatteriesPath: string | null = null;
   private workingCommandsPrefix: string | null = null;
   private workingTimeOfUsePath: string | null = null;
-  private lastManagedTimeOfUseEntry: FroniusTimeOfUseEntry | null = null;
+  private lastManagedTimeOfUseEntries: FroniusTimeOfUseEntry[] = [];
   private digestSession: DigestSession | null = null;
 
   constructor(@Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService) {
@@ -210,10 +214,19 @@ export class FroniusService {
 
   private normaliseStrategy(input: OptimisationCommand): NormalisedStrategy {
     if (input === "charge") {
-      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null};
+      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null, maxChargePower: null};
     }
     if (input === "auto") {
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null};
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null, maxChargePower: null};
+    }
+    if (input === "limit") {
+      return {
+        mode: "limit",
+        manualTarget: null,
+        observedSocPercent: null,
+        floorTarget: null,
+        maxChargePower: Power.zero(),
+      };
     }
     if ("charge" in input) {
       return {
@@ -221,6 +234,7 @@ export class FroniusService {
         manualTarget: null,
         observedSocPercent: null,
         floorTarget: null,
+        maxChargePower: null,
       };
     }
     if ("hold" in input) {
@@ -236,12 +250,25 @@ export class FroniusService {
         manualTarget,
         observedSocPercent,
         floorTarget,
+        maxChargePower: null,
       };
     }
     if ("auto" in input) {
       const autoConfig = input.auto;
       const floorTarget = this.parsePercentage(autoConfig.floorSocPercent ?? null);
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget};
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget, maxChargePower: null};
+    }
+    if ("limit" in input) {
+      const limitConfig = input.limit;
+      const floorTarget = this.parsePercentage(limitConfig.floorSocPercent ?? null);
+      const maxChargePower = this.parseNonNegativePower(limitConfig.maxChargePowerW ?? 0);
+      return {
+        mode: "limit",
+        manualTarget: null,
+        observedSocPercent: null,
+        floorTarget,
+        maxChargePower,
+      };
     }
     throw new Error("Unsupported Fronius optimisation command.");
   }
@@ -269,6 +296,12 @@ export class FroniusService {
       }
       return Math.abs(this.lastAppliedTarget.percent - strategy.floorTarget.percent) <= TARGET_TOLERANCE_PERCENT;
     }
+    if (strategy.mode === "limit") {
+      if (!strategy.floorTarget || !this.lastAppliedTarget) {
+        return false;
+      }
+      return Math.abs(this.lastAppliedTarget.percent - strategy.floorTarget.percent) <= TARGET_TOLERANCE_PERCENT;
+    }
     return true;
   }
 
@@ -276,28 +309,24 @@ export class FroniusService {
     strategy: NormalisedStrategy,
     config: FroniusConnectionConfig,
   ): Promise<void> {
-    const managedPower = this.resolveChargeFloorPower();
-    if (managedPower == null) {
+    const desiredManagedEntries = this.buildManagedTimeOfUseEntries(strategy);
+    if (!desiredManagedEntries.length) {
       return;
     }
 
     const {entries: existingEntries, path: activePath} = await this.readTimeOfUseEntries(config);
-    const existingManagedEntries = this.findExistingManagedTimeOfUseEntries(existingEntries, managedPower);
+    const existingManagedEntries = this.findExistingManagedTimeOfUseEntries(existingEntries, desiredManagedEntries);
     const preservedEntries = existingEntries.filter((entry) => !existingManagedEntries.includes(entry));
-    const desiredManagedEntry = this.buildManagedChargeFloorEntry(
-      managedPower,
-      strategy.mode === "charge",
-    );
-    const desiredEntries = [...preservedEntries, desiredManagedEntry];
+    const desiredEntries = [...preservedEntries, ...desiredManagedEntries];
 
     if (this.timeOfUseEntriesEqual(existingEntries, desiredEntries)) {
-      this.lastManagedTimeOfUseEntry = desiredManagedEntry;
+      this.lastManagedTimeOfUseEntries = desiredManagedEntries;
       this.logger.verbose("Fronius time-of-use schedule already aligned; skipping update.");
       return;
     }
 
     await this.writeTimeOfUseEntries(config, activePath, desiredEntries);
-    this.lastManagedTimeOfUseEntry = desiredManagedEntry;
+    this.lastManagedTimeOfUseEntries = desiredManagedEntries;
   }
 
   private normaliseSummaryError(error: unknown): string | null {
@@ -350,7 +379,7 @@ export class FroniusService {
     return null;
   }
 
-  private normaliseMode(value: unknown): FroniusMode | null {
+  private normaliseMode(value: unknown): FroniusBatteryMode | null {
     if (typeof value !== "string") {
       return null;
     }
@@ -398,6 +427,17 @@ export class FroniusService {
       };
     }
 
+    if (strategy.mode === "limit") {
+      const floorSoc = this.resolveAutoFloor(strategy.floorTarget);
+      return {
+        body: {
+          BAT_M0_SOC_MIN: this.toPercentInteger(floorSoc),
+          BAT_M0_SOC_MODE: "auto",
+        },
+        target: floorSoc,
+      };
+    }
+
     const floorSoc = this.resolveAutoFloor(strategy.floorTarget);
     return {
       body: {
@@ -410,11 +450,14 @@ export class FroniusService {
 
   private resolveAutoFloor(explicitFloor: Percentage | null): Percentage {
     const configFloor = this.autoModeFloorOverride;
+    if (explicitFloor) {
+      if (configFloor) {
+        return explicitFloor.ratio >= configFloor.ratio ? explicitFloor : configFloor;
+      }
+      return explicitFloor;
+    }
     if (configFloor) {
       return configFloor;
-    }
-    if (explicitFloor) {
-      return explicitFloor;
     }
     return Percentage.fromPercent(5);
   }
@@ -458,6 +501,13 @@ export class FroniusService {
   private parsePositivePower(value: unknown): Power | null {
     const watts = this.parsePositiveNumber(value);
     return watts == null ? null : Power.fromWatts(watts);
+  }
+
+  private parseNonNegativePower(value: unknown): Power | null {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      return null;
+    }
+    return Power.fromWatts(value);
   }
 
   private buildUrl(host: string, path: string): string {
@@ -619,7 +669,7 @@ export class FroniusService {
       typeof active !== "boolean" ||
       typeof power !== "number" ||
       !Number.isFinite(power) ||
-      scheduleType !== "CHARGE_MIN" ||
+      (scheduleType !== "CHARGE_MIN" && scheduleType !== "CHARGE_MAX") ||
       !timeTable ||
       !weekdays
     ) {
@@ -628,7 +678,7 @@ export class FroniusService {
     return {
       Active: active,
       Power: Power.fromWatts(Math.round(power)),
-      ScheduleType: "CHARGE_MIN",
+      ScheduleType: scheduleType,
       TimeTable: timeTable,
       Weekdays: weekdays,
     };
@@ -661,27 +711,41 @@ export class FroniusService {
 
   private findExistingManagedTimeOfUseEntries(
     entries: FroniusTimeOfUseEntry[],
-    managedPower: Power,
+    managedEntries: FroniusTimeOfUseEntry[],
   ): FroniusTimeOfUseEntry[] {
-    if (this.lastManagedTimeOfUseEntry) {
+    if (this.lastManagedTimeOfUseEntries.length > 0) {
       const exactMatches = entries.filter((entry) =>
-        this.timeOfUseEntriesEqual([entry], [this.lastManagedTimeOfUseEntry as FroniusTimeOfUseEntry]),
+        this.lastManagedTimeOfUseEntries.some((managedEntry) => this.timeOfUseEntriesEqual([entry], [managedEntry])),
       );
       if (exactMatches.length > 0) {
         return exactMatches;
       }
     }
-    return entries.filter((entry) => this.isManagedChargeFloorEntry(entry, managedPower));
+    return entries.filter((entry) =>
+      managedEntries.some((managedEntry) => this.isManagedTimeOfUseEntry(entry, managedEntry)),
+    );
   }
 
-  private buildManagedChargeFloorEntry(
+  private buildManagedTimeOfUseEntries(strategy: NormalisedStrategy): FroniusTimeOfUseEntry[] {
+    const entries: FroniusTimeOfUseEntry[] = [];
+    const chargeFloorPower = this.resolveChargeFloorPower();
+    if (chargeFloorPower != null) {
+      entries.push(this.buildManagedTimeOfUseEntry("CHARGE_MIN", chargeFloorPower, strategy.mode === "charge"));
+    }
+    const limitPower = strategy.maxChargePower ?? Power.zero();
+    entries.push(this.buildManagedTimeOfUseEntry("CHARGE_MAX", limitPower, strategy.mode === "limit"));
+    return entries;
+  }
+
+  private buildManagedTimeOfUseEntry(
+    scheduleType: FroniusTimeOfUseEntry["ScheduleType"],
     power: Power,
     active: boolean,
   ): FroniusTimeOfUseEntry {
     return {
       Active: active,
       Power: power,
-      ScheduleType: "CHARGE_MIN",
+      ScheduleType: scheduleType,
       TimeTable: {
         Start: "00:00",
         End: "23:59",
@@ -702,10 +766,10 @@ export class FroniusService {
     };
   }
 
-  private isManagedChargeFloorEntry(entry: FroniusTimeOfUseEntry, managedPower: Power): boolean {
+  private isManagedTimeOfUseEntry(entry: FroniusTimeOfUseEntry, managedEntry: FroniusTimeOfUseEntry): boolean {
     const expectedWeekdays = this.buildAllWeekdays();
-    return entry.Power.equals(managedPower)
-      && entry.ScheduleType === "CHARGE_MIN"
+    return entry.Power.equals(managedEntry.Power)
+      && entry.ScheduleType === managedEntry.ScheduleType
       && entry.TimeTable.Start === "00:00"
       && entry.TimeTable.End === "23:59"
       && JSON.stringify(entry.Weekdays) === JSON.stringify(expectedWeekdays);

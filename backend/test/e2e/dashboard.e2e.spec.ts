@@ -208,13 +208,19 @@ describe("dashboard tRPC", () => {
     expect(summary.charge_efficiency_percent).toEqual(snapshot.charge_efficiency_percent);
     expect(summary.discharge_efficiency_percent).toEqual(snapshot.discharge_efficiency_percent);
     expect(summary.expected_feed_in_kwh).toEqual(snapshot.expected_feed_in_kwh);
+    expect(summary.grid_fee_eur_per_kwh).toEqual(config.price.grid_fee_eur_per_kwh);
     expect("solar_forecast_discrepancy_w" in summary).toBe(true);
+    expect(summary.show_feed_in_price_bars).toBe(true);
     expect(summary.charge_efficiency_percent).toBeGreaterThan(0);
     expect(summary.discharge_efficiency_percent).toBeGreaterThan(0);
     if (summary.solar_forecast_discrepancy_w == null) {
       expect(summary.solar_forecast_discrepancy_start).toBeUndefined();
       expect(summary.solar_forecast_discrepancy_end).toBeUndefined();
     }
+
+    const planningVariant = await client.dashboard.planningVariant.query();
+    expect(planningVariant.dryRunEnabled).toBe(true);
+    expect(planningVariant.variant).toBe("awattar-sunny");
 
     const history = await client.dashboard.history.query({ limit: 24 });
     expect(history.generated_at).toEqual(snapshot.timestamp);

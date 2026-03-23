@@ -49,4 +49,23 @@ describe("OptimisationCommandTranslator", () => {
       },
     });
   });
+
+  it("maps limit mode to a zero-charge cap with the planned floor", () => {
+    const translator = new OptimisationCommandTranslator();
+
+    const command = translator.fromSimulationSnapshot({
+      current_mode: "limit",
+      current_soc_percent: 42,
+      next_step_soc_percent: 30,
+      oracle_entries: [],
+      forecast_eras: [],
+    } as never);
+
+    expect(command).toEqual({
+      limit: {
+        floorSocPercent: 30,
+        maxChargePowerW: 0,
+      },
+    });
+  });
 });

@@ -1,11 +1,14 @@
 import { Injectable } from "@nestjs/common";
 
 import type { ConfigDocument } from "./schemas";
-import { getRuntimeConfig } from "./runtime-config";
+import { getRuntimeConfig, setRuntimeConfig } from "./runtime-config";
+
+export const PLANNING_VARIANTS = ["awattar-sunny", "awattar-sunny-spot"] as const;
+export type PlanningVariant = (typeof PLANNING_VARIANTS)[number];
 
 @Injectable()
 export class RuntimeConfigService {
-  private readonly document: ConfigDocument;
+  private document: ConfigDocument;
 
   constructor() {
     const config = getRuntimeConfig();
@@ -21,5 +24,30 @@ export class RuntimeConfigService {
 
   getDocumentRef(): ConfigDocument {
     return this.document;
+  }
+
+  getPlanningVariant(): PlanningVariant {
+    const configuredType = this.document.price?.feed_in?.type;
+    if (configuredType === "awattar-sunny-spot") {
+      return configuredType;
+    }
+    return "awattar-sunny";
+  }
+
+  isDryRunEnabled(): boolean {
+    return this.document.dry_run ?? false;
+  }
+
+  shouldShowFeedInPriceBars(): boolean {
+    return this.getPlanningVariant() === "awattar-sunny-spot" || this.isDryRunEnabled();
+  }
+
+  setPlanningVariant(variant: PlanningVariant): ConfigDocument {
+    const next = this.getDocument();
+    next.price ??= {};
+    next.price.feed_in = {type: variant};
+    this.document = next;
+    setRuntimeConfig(next);
+    return this.getDocument();
   }
 }

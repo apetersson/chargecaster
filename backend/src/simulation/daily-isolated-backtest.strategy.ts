@@ -383,7 +383,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     let totalWeightedValue = Money.zero();
     let totalDischargeEnergy = Energy.zero();
     for (const entry of oracle) {
-      if (entry.strategy !== "auto") {
+      if (entry.strategy !== "auto" && entry.strategy !== "limit") {
         continue;
       }
       const startSoc = entry.start_soc_percent ?? 0;

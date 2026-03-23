@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { initTRPC, type AnyProcedure, type AnyRouter, type ProcedureType } from "@trpc/server";
+import { TRPCError, initTRPC, type AnyProcedure, type AnyRouter, type ProcedureType } from "@trpc/server";
 import { z } from "zod";
 
 import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
@@ -10,7 +10,9 @@ import { SummaryService } from "../simulation/summary.service";
 import { OracleService } from "../simulation/oracle.service";
 import { BacktestService } from "../simulation/backtest.service";
 import { RuntimeConfigService } from "../config/runtime-config.service";
+import { PLANNING_VARIANTS } from "../config/runtime-config.service";
 import { SimulationConfigFactory } from "../config/simulation-config.factory";
+import { SimulationSeedService } from "../config/simulation-seed.service";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -71,6 +73,8 @@ const historyInputSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
 });
 
+const planningVariantSchema = z.enum(PLANNING_VARIANTS);
+
 @Injectable()
 export class TrpcRouter {
   public readonly router;
@@ -85,6 +89,7 @@ export class TrpcRouter {
     @Inject(BacktestService) private readonly backtestService: BacktestService,
     @Inject(RuntimeConfigService) private readonly runtimeConfig: RuntimeConfigService,
     @Inject(SimulationConfigFactory) private readonly configFactory: SimulationConfigFactory,
+    @Inject(SimulationSeedService) private readonly simulationSeedService: SimulationSeedService,
   ) {
     this.router = t.router({
       health: t.procedure.query(() => {
@@ -118,6 +123,31 @@ export class TrpcRouter {
           this.logger.log("tRPC.dashboard.oracle requested");
           return this.oracleService.build(this.simulationService.ensureSeedFromFixture());
         }),
+        planningVariant: t.procedure.query(() => {
+          const variant = this.runtimeConfig.getPlanningVariant();
+          const dryRunEnabled = this.runtimeConfig.isDryRunEnabled();
+          this.logger.log(`tRPC.dashboard.planningVariant requested (${variant}, dry_run=${dryRunEnabled})`);
+          return {variant, dryRunEnabled};
+        }),
+        setPlanningVariant: t.procedure
+          .input(z.object({variant: planningVariantSchema}))
+          .mutation(async ({input}) => {
+            const {variant} = input;
+            if (!this.runtimeConfig.isDryRunEnabled()) {
+              this.logger.warn(`Rejected planning variant switch (${variant}) because dry_run=false`);
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "Planning variant switching is only available in dry mode.",
+              });
+            }
+            this.logger.log(`tRPC.dashboard.setPlanningVariant requested (${variant})`);
+            this.runtimeConfig.setPlanningVariant(variant);
+            await this.simulationSeedService.seedFromConfig();
+            return {
+              variant: this.runtimeConfig.getPlanningVariant(),
+              dryRunEnabled: this.runtimeConfig.isDryRunEnabled(),
+            };
+          }),
         snapshot: t.procedure.query(({ctx}) => {
           const service = ctx.simulationService ?? this.simulationService;
           this.logger.log("tRPC.dashboard.snapshot requested");

@@ -125,6 +125,13 @@ describe("FroniusService", () => {
           TimeTable: {Start: "00:00", End: "23:59"},
           Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
         },
+        {
+          Active: false,
+          Power: 0,
+          ScheduleType: "CHARGE_MAX",
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
       ],
     });
   });
@@ -200,6 +207,13 @@ describe("FroniusService", () => {
           TimeTable: {Start: "00:00", End: "23:59"},
           Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
         },
+        {
+          Active: false,
+          Power: 0,
+          ScheduleType: "CHARGE_MAX",
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
       ],
     });
   });
@@ -249,6 +263,83 @@ describe("FroniusService", () => {
           Active: true,
           Power: 4000,
           ScheduleType: "CHARGE_MIN",
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
+        {
+          Active: false,
+          Power: 0,
+          ScheduleType: "CHARGE_MAX",
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
+      ],
+    });
+  });
+
+  it("uses an all-day CHARGE_MAX rule for limit mode while keeping CHARGE_MIN inactive", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T07:15:00.000Z"));
+
+    const responses = [
+      digestChallenge(),
+      jsonResponse({}),
+      jsonResponse({}),
+      jsonResponse({timeofuse: []}),
+      jsonResponse({writeSuccess: ["timeofuse"]}),
+      jsonResponse({}),
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: URL | string, init?: RequestInit) => {
+        requests.push({
+          url: input.toString(),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+        });
+        const next = responses.shift();
+        if (!next) {
+          throw new Error("Unexpected fetch call");
+        }
+        return next;
+      }),
+    );
+
+    const service = createService();
+    const result = await service.applyOptimization({
+      limit: {
+        floorSocPercent: 25,
+        maxChargePowerW: 0,
+      },
+    });
+
+    expect(result.errorMessage).toBeNull();
+
+    const batteryPost = requests.find((request) =>
+      request.method === "POST" && request.url.endsWith("/api/config/batteries")
+    );
+    expect(batteryPost?.body).toBe(JSON.stringify({
+      BAT_M0_SOC_MIN: 25,
+      BAT_M0_SOC_MODE: "auto",
+    }));
+
+    const touPost = requests.find((request) =>
+      request.method === "POST" && request.url.endsWith("/api/config/timeofuse")
+    );
+    expect(JSON.parse(touPost?.body ?? "{}")).toEqual({
+      timeofuse: [
+        {
+          Active: false,
+          Power: 4000,
+          ScheduleType: "CHARGE_MIN",
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
+        {
+          Active: true,
+          Power: 0,
+          ScheduleType: "CHARGE_MAX",
           TimeTable: {Start: "00:00", End: "23:59"},
           Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
         },
@@ -330,6 +421,13 @@ describe("FroniusService", () => {
           Active: false,
           Power: 4000,
           ScheduleType: "CHARGE_MIN",
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
+        {
+          Active: false,
+          Power: 0,
+          ScheduleType: "CHARGE_MAX",
           TimeTable: {Start: "00:00", End: "23:59"},
           Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
         },

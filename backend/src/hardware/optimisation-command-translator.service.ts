@@ -25,6 +25,15 @@ export class OptimisationCommandTranslator {
       }
       return "auto";
     }
+    if (mode === "limit") {
+      const floor = this.extractLimitFloor(snapshot);
+      return {
+        limit: {
+          floorSocPercent: floor,
+          maxChargePowerW: 0,
+        },
+      };
+    }
     if (mode === "hold") {
       const observedSoc = this.normalisePercent(snapshot.current_soc_percent);
       const holdTarget = this.extractHoldTarget(snapshot);
@@ -86,6 +95,10 @@ export class OptimisationCommandTranslator {
 
   private extractAutoFloor(snapshot: SimulationSnapshot): number | null {
     return this.normalisePercent(snapshot.next_step_soc_percent);
+  }
+
+  private extractLimitFloor(snapshot: SimulationSnapshot): number | null {
+    return this.normalisePercent(snapshot.next_step_soc_percent) ?? this.normalisePercent(snapshot.current_soc_percent);
   }
 
   private normalisePercent(value: unknown): number | null {
