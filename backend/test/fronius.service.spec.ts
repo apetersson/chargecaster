@@ -33,9 +33,6 @@ const createService = () =>
         max_charge_power_w: 4000,
         auto_mode_floor_soc: 5,
       },
-      location: {
-        timezone: "Europe/Vienna",
-      },
       logic: {
         interval_seconds: 300,
       },
@@ -125,8 +122,8 @@ describe("FroniusService", () => {
           Active: true,
           Power: 4000,
           ScheduleType: "CHARGE_MIN",
-          TimeTable: {Start: "19:30", End: "22:15"},
-          Weekdays: {Mon: false, Tue: false, Wed: false, Thu: false, Fri: true, Sat: false, Sun: false},
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
         },
       ],
     });
@@ -177,8 +174,8 @@ describe("FroniusService", () => {
             Active: true,
             Power: 4000,
             ScheduleType: "CHARGE_MIN",
-            TimeTable: {Start: "19:30", End: "22:15"},
-            Weekdays: {Mon: false, Tue: false, Wed: false, Thu: false, Fri: true, Sat: false, Sun: false},
+            TimeTable: {Start: "00:00", End: "23:59"},
+            Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
           },
         ],
       }),
@@ -200,14 +197,14 @@ describe("FroniusService", () => {
           Active: false,
           Power: 4000,
           ScheduleType: "CHARGE_MIN",
-          TimeTable: {Start: "22:16", End: "22:22"},
-          Weekdays: {Mon: false, Tue: false, Wed: false, Thu: false, Fri: true, Sat: false, Sun: false},
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
         },
       ],
     });
   });
 
-  it("formats managed time-of-use windows in the configured inverter timezone", async () => {
+  it("keeps the managed charge-floor entry as a permanent all-day row", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-23T01:00:30.000Z"));
 
@@ -252,8 +249,89 @@ describe("FroniusService", () => {
           Active: true,
           Power: 4000,
           ScheduleType: "CHARGE_MIN",
-          TimeTable: {Start: "02:00", End: "02:10"},
-          Weekdays: {Mon: true, Tue: false, Wed: false, Thu: false, Fri: false, Sat: false, Sun: false},
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
+      ],
+    });
+  });
+
+  it("deduplicates matching managed 24/7 entries even after a fresh restart", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T01:00:30.000Z"));
+
+    const responses = [
+      digestChallenge(),
+      jsonResponse({}),
+      jsonResponse({}),
+      jsonResponse({
+        timeofuse: [
+          {
+            Active: true,
+            Power: 4000,
+            ScheduleType: "CHARGE_MIN",
+            TimeTable: {Start: "00:00", End: "23:59"},
+            Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+          },
+          {
+            Active: false,
+            Power: 1800,
+            ScheduleType: "CHARGE_MIN",
+            TimeTable: {Start: "12:00", End: "13:00"},
+            Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+          },
+          {
+            Active: false,
+            Power: 4000,
+            ScheduleType: "CHARGE_MIN",
+            TimeTable: {Start: "00:00", End: "23:59"},
+            Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+          },
+        ],
+      }),
+      jsonResponse({writeSuccess: ["timeofuse"]}),
+      jsonResponse({}),
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: URL | string, init?: RequestInit) => {
+        requests.push({
+          url: input.toString(),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+        });
+        const next = responses.shift();
+        if (!next) {
+          throw new Error("Unexpected fetch call");
+        }
+        return next;
+      }),
+    );
+
+    const service = createService();
+    const result = await service.applyOptimization("auto");
+
+    expect(result.errorMessage).toBeNull();
+
+    const touPost = requests.find((request) =>
+      request.method === "POST" && request.url.endsWith("/api/config/timeofuse")
+    );
+    expect(JSON.parse(touPost?.body ?? "{}")).toEqual({
+      timeofuse: [
+        {
+          Active: false,
+          Power: 1800,
+          ScheduleType: "CHARGE_MIN",
+          TimeTable: {Start: "12:00", End: "13:00"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
+        },
+        {
+          Active: false,
+          Power: 4000,
+          ScheduleType: "CHARGE_MIN",
+          TimeTable: {Start: "00:00", End: "23:59"},
+          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
         },
       ],
     });

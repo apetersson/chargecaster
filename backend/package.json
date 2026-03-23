@@ -9,6 +9,7 @@
     "backend:dev:api": "SERVE_STATIC=false tsx watch src/main.ts",
     "start": "tsx src/main.ts",
     "start:api": "SERVE_STATIC=false tsx src/main.ts",
+    "smoke:fronius-fast-charge": "tsx scripts/smoke-fronius-fast-charge.ts",
     "load-forecast:train": "tsx scripts/train-load-forecast.ts",
     "load-forecast:evaluate": "tsx scripts/evaluate-load-forecast.ts",
     "load-forecast:replay-evaluate": "tsx scripts/replay-load-forecast.ts",

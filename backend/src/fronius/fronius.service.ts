@@ -18,8 +18,6 @@ const DIGEST_PREFIX = "digest";
 const AUTH_ERROR_SUMMARY_MESSAGE = "Unable to control battery because of authentication problem.";
 
 const TARGET_TOLERANCE_PERCENT = 0.5;
-const MIN_TIME_OF_USE_WINDOW_MINUTES = 2;
-const MAX_TIME_OF_USE_WINDOW_MINUTES = 15;
 const BATTERIES_PATH = "/api/config/batteries";
 const TIME_OF_USE_PATH = "/api/config/timeofuse";
 
@@ -44,7 +42,6 @@ interface NormalisedStrategy {
   manualTarget: Percentage | null;
   observedSocPercent: number | null;
   floorTarget: Percentage | null;
-  chargeUntil: Date | null;
 }
 
 interface DigestSession {
@@ -78,15 +75,6 @@ interface FroniusTimeOfUseEntry {
   Weekdays: FroniusWeekdays;
 }
 
-interface LocalDateParts {
-  year: number;
-  month: number;
-  day: number;
-  weekday: keyof FroniusWeekdays;
-  hour: string;
-  minute: string;
-}
-
 @Injectable()
 
 export class FroniusService {
@@ -97,8 +85,6 @@ export class FroniusService {
   private readonly autoModeFloorOverride: Percentage | null;
   private readonly maxChargeLimit: Percentage | null;
   private readonly chargeFloorPower: Power | null;
-  private readonly chargeFloorWindowMinutes: number;
-  private readonly timeZone: string | null;
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
   private workingBatteriesPath: string | null = null;
@@ -114,12 +100,6 @@ export class FroniusService {
     this.autoModeFloorOverride = this.parsePercentage(document.battery?.auto_mode_floor_soc ?? null);
     this.maxChargeLimit = this.parsePercentage(document.battery?.max_charge_soc_percent ?? null);
     this.chargeFloorPower = this.parsePositivePower(document.battery?.max_charge_power_w ?? null);
-    this.timeZone = this.parseTimeZone(document.location?.timezone ?? null);
-    const intervalSeconds = this.parsePositiveNumber(document.logic?.interval_seconds ?? null) ?? 300;
-    this.chargeFloorWindowMinutes = Math.min(
-      MAX_TIME_OF_USE_WINDOW_MINUTES,
-      Math.max(MIN_TIME_OF_USE_WINDOW_MINUTES, Math.ceil(intervalSeconds / 60) + 1),
-    );
     let froniusConfig: FroniusConnectionConfig | null = null;
     try {
       froniusConfig = requireFroniusConnectionConfig(document);
@@ -230,10 +210,10 @@ export class FroniusService {
 
   private normaliseStrategy(input: OptimisationCommand): NormalisedStrategy {
     if (input === "charge") {
-      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
+      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null};
     }
     if (input === "auto") {
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null};
     }
     if ("charge" in input) {
       return {
@@ -241,7 +221,6 @@ export class FroniusService {
         manualTarget: null,
         observedSocPercent: null,
         floorTarget: null,
-        chargeUntil: this.parseTimestamp(input.charge.untilTimestamp),
       };
     }
     if ("hold" in input) {
@@ -257,13 +236,12 @@ export class FroniusService {
         manualTarget,
         observedSocPercent,
         floorTarget,
-        chargeUntil: null,
       };
     }
     if ("auto" in input) {
       const autoConfig = input.auto;
       const floorTarget = this.parsePercentage(autoConfig.floorSocPercent ?? null);
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget, chargeUntil: null};
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget};
     }
     throw new Error("Unsupported Fronius optimisation command.");
   }
@@ -273,17 +251,6 @@ export class FroniusService {
       return null;
     }
     return Math.min(Math.max(value, 0), 100);
-  }
-
-  private parseTimestamp(value: string | null | undefined): Date | null {
-    if (typeof value !== "string" || value.trim().length === 0) {
-      return null;
-    }
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
-      return null;
-    }
-    return parsed;
   }
 
   private shouldSkipBatteryUpdate(strategy: NormalisedStrategy): boolean {
@@ -315,14 +282,11 @@ export class FroniusService {
     }
 
     const {entries: existingEntries, path: activePath} = await this.readTimeOfUseEntries(config);
-    const existingManagedEntry = this.findExistingManagedTimeOfUseEntry(existingEntries, managedPower);
-    const preservedEntries = existingManagedEntry
-      ? existingEntries.filter((entry) => entry !== existingManagedEntry)
-      : existingEntries;
+    const existingManagedEntries = this.findExistingManagedTimeOfUseEntries(existingEntries, managedPower);
+    const preservedEntries = existingEntries.filter((entry) => !existingManagedEntries.includes(entry));
     const desiredManagedEntry = this.buildManagedChargeFloorEntry(
       managedPower,
       strategy.mode === "charge",
-      strategy.chargeUntil,
     );
     const desiredEntries = [...preservedEntries, desiredManagedEntry];
 
@@ -494,20 +458,6 @@ export class FroniusService {
   private parsePositivePower(value: unknown): Power | null {
     const watts = this.parsePositiveNumber(value);
     return watts == null ? null : Power.fromWatts(watts);
-  }
-
-  private parseTimeZone(value: unknown): string | null {
-    if (typeof value !== "string" || value.trim().length === 0) {
-      return null;
-    }
-    const candidate = value.trim();
-    try {
-      new Intl.DateTimeFormat("en-GB", {timeZone: candidate}).format(new Date());
-      return candidate;
-    } catch {
-      this.logger.warn(`Invalid configured timezone "${candidate}"; falling back to server timezone.`);
-      return null;
-    }
   }
 
   private buildUrl(host: string, path: string): string {
@@ -709,163 +659,56 @@ export class FroniusService {
     return weekdays;
   }
 
-  private findExistingManagedTimeOfUseEntry(
+  private findExistingManagedTimeOfUseEntries(
     entries: FroniusTimeOfUseEntry[],
     managedPower: Power,
-  ): FroniusTimeOfUseEntry | null {
-    if (!this.lastManagedTimeOfUseEntry) {
-      const tailEntry = entries.at(-1) ?? null;
-      if (!tailEntry) {
-        return null;
+  ): FroniusTimeOfUseEntry[] {
+    if (this.lastManagedTimeOfUseEntry) {
+      const exactMatches = entries.filter((entry) =>
+        this.timeOfUseEntriesEqual([entry], [this.lastManagedTimeOfUseEntry as FroniusTimeOfUseEntry]),
+      );
+      if (exactMatches.length > 0) {
+        return exactMatches;
       }
-      const activeDays = Object.values(tailEntry.Weekdays).filter(Boolean).length;
-      if (tailEntry.Power.equals(managedPower) && activeDays === 1) {
-        return tailEntry;
-      }
-      return null;
     }
-    return entries.find((entry) => this.timeOfUseEntriesEqual([entry], [this.lastManagedTimeOfUseEntry as FroniusTimeOfUseEntry])) ?? null;
+    return entries.filter((entry) => this.isManagedChargeFloorEntry(entry, managedPower));
   }
 
   private buildManagedChargeFloorEntry(
     power: Power,
     active: boolean,
-    chargeUntil: Date | null,
   ): FroniusTimeOfUseEntry {
-    const now = new Date();
-    const start = new Date(now);
-    start.setSeconds(0, 0);
-    const fallbackEnd = new Date(start.getTime() + this.chargeFloorWindowMinutes * 60_000);
-    const startParts = this.getLocalDateParts(start);
-    const end = chargeUntil && chargeUntil.getTime() > start.getTime()
-      ? new Date(chargeUntil)
-      : fallbackEnd;
-    const endParts = this.getLocalDateParts(end);
-    if (
-      endParts.year !== startParts.year ||
-      endParts.month !== startParts.month ||
-      endParts.day !== startParts.day
-    ) {
-      return {
-        Active: active,
-        Power: power,
-        ScheduleType: "CHARGE_MIN",
-        TimeTable: {
-          Start: this.formatClockTime(start),
-          End: "23:59",
-        },
-        Weekdays: this.buildWeekdaysForDate(start),
-      };
-    }
-    if (end.getTime() <= start.getTime()) {
-      end.setTime(start.getTime() + 60_000);
-    }
     return {
       Active: active,
       Power: power,
       ScheduleType: "CHARGE_MIN",
       TimeTable: {
-        Start: this.formatClockTime(start),
-        End: this.formatClockTime(end),
+        Start: "00:00",
+        End: "23:59",
       },
-      Weekdays: this.buildWeekdaysForDate(start),
+      Weekdays: this.buildAllWeekdays(),
     };
   }
 
-  private buildWeekdaysForDate(date: Date): FroniusWeekdays {
-    const weekdays: FroniusWeekdays = {
-      Mon: false,
-      Tue: false,
-      Wed: false,
-      Thu: false,
-      Fri: false,
-      Sat: false,
-      Sun: false,
+  private buildAllWeekdays(): FroniusWeekdays {
+    return {
+      Mon: true,
+      Tue: true,
+      Wed: true,
+      Thu: true,
+      Fri: true,
+      Sat: true,
+      Sun: true,
     };
-    weekdays[this.getLocalDateParts(date).weekday] = true;
-    return weekdays;
   }
 
-  private formatClockTime(value: Date): string {
-    const parts = this.getLocalDateParts(value);
-    return `${parts.hour}:${parts.minute}`;
-  }
-
-  private getLocalDateParts(value: Date): LocalDateParts {
-    if (!this.timeZone) {
-      return {
-        year: value.getFullYear(),
-        month: value.getMonth() + 1,
-        day: value.getDate(),
-        weekday: this.systemWeekdayName(value),
-        hour: value.getHours().toString().padStart(2, "0"),
-        minute: value.getMinutes().toString().padStart(2, "0"),
-      };
-    }
-    const formatter = new Intl.DateTimeFormat("en-GB", {
-      timeZone: this.timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    });
-    const fields = formatter.formatToParts(value);
-    const year = this.extractNumericDatePart(fields, "year");
-    const month = this.extractNumericDatePart(fields, "month");
-    const day = this.extractNumericDatePart(fields, "day");
-    const hour = this.extractTextDatePart(fields, "hour");
-    const minute = this.extractTextDatePart(fields, "minute");
-    const weekdayToken = this.extractTextDatePart(fields, "weekday");
-    const weekday = this.parseWeekdayName(weekdayToken);
-    return {year, month, day, weekday, hour, minute};
-  }
-
-  private extractNumericDatePart(
-    fields: Intl.DateTimeFormatPart[],
-    partType: Intl.DateTimeFormatPartTypes,
-  ): number {
-    const value = this.extractTextDatePart(fields, partType);
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) {
-      throw new Error(`Unable to parse ${partType} from timezone-formatted date.`);
-    }
-    return parsed;
-  }
-
-  private extractTextDatePart(
-    fields: Intl.DateTimeFormatPart[],
-    partType: Intl.DateTimeFormatPartTypes,
-  ): string {
-    const match = fields.find((field) => field.type === partType)?.value;
-    if (!match) {
-      throw new Error(`Missing ${partType} in timezone-formatted date.`);
-    }
-    return match;
-  }
-
-  private parseWeekdayName(value: string): keyof FroniusWeekdays {
-    const normalized = value.slice(0, 3);
-    switch (normalized) {
-      case "Mon":
-      case "Tue":
-      case "Wed":
-      case "Thu":
-      case "Fri":
-      case "Sat":
-      case "Sun":
-        return normalized;
-      default:
-        throw new Error(`Unsupported weekday token "${value}" from timezone formatter.`);
-    }
-  }
-
-  private systemWeekdayName(value: Date): keyof FroniusWeekdays {
-    const dayIndex = value.getDay();
-    const dayNames: (keyof FroniusWeekdays)[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    return dayNames[dayIndex];
+  private isManagedChargeFloorEntry(entry: FroniusTimeOfUseEntry, managedPower: Power): boolean {
+    const expectedWeekdays = this.buildAllWeekdays();
+    return entry.Power.equals(managedPower)
+      && entry.ScheduleType === "CHARGE_MIN"
+      && entry.TimeTable.Start === "00:00"
+      && entry.TimeTable.End === "23:59"
+      && JSON.stringify(entry.Weekdays) === JSON.stringify(expectedWeekdays);
   }
 
   private serializeTimeOfUseEntry(entry: FroniusTimeOfUseEntry): Record<string, unknown> {
