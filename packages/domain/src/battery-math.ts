@@ -1,5 +1,6 @@
 import { Duration } from "./duration";
 import { Energy } from "./energy";
+import { Money } from "./money";
 import { Percentage } from "./percentage";
 import { Power } from "./power";
 import { EnergyPrice } from "./price";
@@ -50,12 +51,20 @@ export function inferBatteryPowerFromSocDelta(
   return Power.fromWatts(-powerFromEnergy(storedEnergyDelta, duration).watts);
 }
 
+export function computeGridEnergyCost(
+  gridEnergy: Energy,
+  importPrice: EnergyPrice,
+  feedInTariff: EnergyPrice,
+): Money {
+  return gridEnergy.wattHours >= 0
+    ? importPrice.costFor(gridEnergy)
+    : feedInTariff.costFor(gridEnergy);
+}
+
 export function computeGridEnergyCostEur(
   gridEnergy: Energy,
   importPrice: EnergyPrice,
   feedInTariff: EnergyPrice,
 ): number {
-  return gridEnergy.wattHours >= 0
-    ? importPrice.costFor(gridEnergy)
-    : feedInTariff.costFor(gridEnergy);
+  return computeGridEnergyCost(gridEnergy, importPrice, feedInTariff).eur;
 }

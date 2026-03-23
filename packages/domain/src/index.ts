@@ -1,4 +1,5 @@
 export { EnergyPrice } from "./price";
+export { Money } from "./money";
 export { Power } from "./power";
 export { Energy } from "./energy";
 export { Duration } from "./duration";
@@ -8,6 +9,7 @@ export { Scalar } from "./scalar";
 export { Percentage } from "./percentage";
 export {
   clampRatio,
+  computeGridEnergyCost,
   computeGridEnergyCostEur,
   energyDeltaFromSocPercent,
   energyFromPower,

@@ -1,4 +1,11 @@
 import { Energy } from "./energy";
+import { Money } from "./money";
+import { Duration } from "./duration";
+
+interface DurationWeightedEnergyPriceSample {
+  price: EnergyPrice;
+  duration: Duration;
+}
 
 export class EnergyPrice {
   private readonly eurPerKwhValue: number;
@@ -58,15 +65,37 @@ export class EnergyPrice {
     return this.eurPerKwhValue;
   }
 
+  add(other: EnergyPrice): EnergyPrice {
+    return new EnergyPrice(this.eurPerKwhValue + other.eurPerKwhValue);
+  }
+
   withAdditionalFee(eurPerKwh: number): EnergyPrice {
     return new EnergyPrice(this.eurPerKwhValue + eurPerKwh);
   }
 
-  costFor(energy: Energy): number {
-    return energy.kilowattHours * this.eurPerKwhValue;
+  costFor(energy: Energy): Money {
+    return Money.fromEur(energy.kilowattHours * this.eurPerKwhValue);
   }
 
   withMultiplier(factor: number): EnergyPrice {
     return new EnergyPrice(this.eurPerKwhValue * factor);
+  }
+
+  static weightedAverageByDuration(samples: DurationWeightedEnergyPriceSample[]): EnergyPrice {
+    if (samples.length === 0) {
+      throw new TypeError("EnergyPrice.weightedAverageByDuration requires at least one sample");
+    }
+    const totalDuration = samples.reduce(
+      (accumulator, sample) => accumulator.add(sample.duration),
+      Duration.zero(),
+    );
+    if (!(totalDuration.milliseconds > 0)) {
+      throw new TypeError("EnergyPrice.weightedAverageByDuration requires positive total duration");
+    }
+    const totalWeightedPrice = samples.reduce(
+      (accumulator, sample) => accumulator + sample.price.eurPerKwh * sample.duration.hours,
+      0,
+    );
+    return new EnergyPrice(totalWeightedPrice / totalDuration.hours);
   }
 }

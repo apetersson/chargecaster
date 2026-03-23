@@ -1,5 +1,6 @@
 import base from "../eslint.base.config";
 import globals from "globals";
+import noRawUnitArithmeticRule from "../eslint-rules/no-raw-unit-arithmetic";
 
 export default [
   ...base,
@@ -14,5 +15,18 @@ export default [
         ...globals.node,
       },
     },
-  }
+  },
+  {
+    files: ["src/simulation/optimal-schedule.ts"],
+    plugins: {
+      chargecaster: {
+        rules: {
+          "no-raw-unit-arithmetic": noRawUnitArithmeticRule,
+        },
+      },
+    },
+    rules: {
+      "chargecaster/no-raw-unit-arithmetic": "warn",
+    },
+  },
 ];

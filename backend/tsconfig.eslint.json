@@ -14,7 +14,7 @@
   "include": [
     "eslint.config.ts",
     "../eslint.base.config.ts",
+    "../eslint-rules/**/*.ts",
     "../types/**/*.d.ts"
   ]
 }
-

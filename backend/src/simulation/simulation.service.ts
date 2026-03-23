@@ -15,6 +15,7 @@ import {
   Duration,
   Energy,
   EnergyPrice,
+  Money,
   Percentage,
   Power,
   TimeSlot,
@@ -266,7 +267,7 @@ export class SimulationService {
       basic_battery_cost_eur: autoResult.projected_cost_eur,
       projected_savings_eur: result.projected_savings_eur,
       active_control_savings_eur: Number.isFinite(autoResult.projected_cost_eur) && Number.isFinite(result.projected_cost_eur)
-        ? autoResult.projected_cost_eur - result.projected_cost_eur
+        ? Money.fromEur(autoResult.projected_cost_eur).subtract(Money.fromEur(result.projected_cost_eur)).eur
         : null,
       projected_grid_power_w: result.projected_grid_power_w,
       expected_feed_in_kwh: result.expected_feed_in_kwh,
