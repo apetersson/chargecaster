@@ -38,7 +38,48 @@ export const useChartInstance = (
 
     chartInstance.current = chart;
 
+    let resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const triggerResize = (): void => {
+      const active = chartInstance.current;
+      if (!active) {
+        return;
+      }
+      active.resize();
+      active.update("none");
+    };
+    const scheduleResize = (): void => {
+      if (resizeTimeoutId) {
+        clearTimeout(resizeTimeoutId);
+      }
+      requestAnimationFrame(() => {
+        triggerResize();
+      });
+      resizeTimeoutId = setTimeout(() => {
+        triggerResize();
+      }, 180);
+    };
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        scheduleResize();
+      }
+    };
+    const handlePageShow = (): void => {
+      scheduleResize();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("focus", handlePageShow);
+    window.visualViewport?.addEventListener("resize", handlePageShow);
+
     return () => {
+      if (resizeTimeoutId) {
+        clearTimeout(resizeTimeoutId);
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("focus", handlePageShow);
+      window.visualViewport?.removeEventListener("resize", handlePageShow);
       chart.destroy();
       chartInstance.current = null;
     };
