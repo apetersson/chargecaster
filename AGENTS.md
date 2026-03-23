@@ -7,4 +7,4 @@
 
 # Commit Rule
 Commit as "conventional commit" style. Ideally 3 lines, not more. No co-author.
-Any commit should clearly state the reason for the change - and be well enough defined that a very competent LLM could re-author the changes from the previous state. If that is not possible, split up the commit into multiple.
+Any commit should clearly state the reason for the change - and be well enough defined that a very competent LLM could re-author the changes from the previous state. Also take hints from previous prompts to capture developer intent. If that is not possible, split up the commit into multiple.
