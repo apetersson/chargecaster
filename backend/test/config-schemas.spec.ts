@@ -71,14 +71,16 @@ describe("configuration schema parsers", () => {
       },
     });
 
+    const fronius = parsed.fronius as Record<string, unknown>;
     expect(parsed.fronius?.enabled).toBe(true);
-    expect("batteries_path" in ((parsed.fronius as Record<string, unknown>) ?? {})).toBe(false);
+    expect("batteries_path" in fronius).toBe(false);
     expect(parsed.location?.latitude).toBe(48.235);
     expect(parsed.location?.longitude).toBe(16.134);
     expect(parsed.solar?.[0]?.kwp).toBe(5);
     expect(parsed.load_forecast?.self_training_enabled).toBe(true);
     expect(parsed.logic?.interval_seconds).toBe(300);
-    expect("house_load_w" in ((parseConfigDocument({ logic: { house_load_w: 2200 } }).logic as Record<string, unknown>) ?? {})).toBe(false);
+    const logic = parseConfigDocument({ logic: { house_load_w: 2200 } }).logic as Record<string, unknown>;
+    expect("house_load_w" in logic).toBe(false);
     expect(() => parseConfigDocument({ solar: { direct_use_ratio: 0.6 } })).toThrow();
   });
 });

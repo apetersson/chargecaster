@@ -2,10 +2,10 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { Duration, Energy, Power } from "@chargecaster/domain";
 import type { HistoryPoint, RawSolarEntry } from "@chargecaster/domain";
 
-import type { ConfigDocument } from "./schemas";
-import { WeatherService, type SolarArrayConfig } from "./weather.service";
 import { StorageService } from "../storage/storage.service";
 import { parseTimestamp } from "../simulation/solar";
+import type { ConfigDocument } from "./schemas";
+import { WeatherService, type SolarArrayConfig } from "./weather.service";
 
 const MIN_PROXY_SOLAR_W = 150;
 const MIN_CALIBRATION_SAMPLES = 12;
@@ -241,7 +241,7 @@ function aggregateMeasuredSolarByHour(history: HistoryPoint[], timeZone: string)
     .sort((left, right) => left.hourUtc.localeCompare(right.hourUtc));
 }
 
-function aggregateProxyPowerByHour(rows: Array<{ hourUtc: string; expectedPowerW: number | null }>): Map<string, Power> {
+function aggregateProxyPowerByHour(rows: { hourUtc: string; expectedPowerW: number | null }[]): Map<string, Power> {
   const result = new Map<string, Power>();
   for (const row of rows) {
     const expectedPower = Power.fromWatts(row.expectedPowerW ?? 0);
@@ -270,7 +270,7 @@ function deriveCalibrationRatio(profile: SolarCalibrationProfile, localHour: num
   return clamp(blended, 0.1, 1.2);
 }
 
-function weightedAverageRatio(samples: Array<{ ratio: number; weight: number }>): number {
+function weightedAverageRatio(samples: { ratio: number; weight: number }[]): number {
   const weighted = samples.reduce((sum, sample) => sum + sample.ratio * sample.weight, 0);
   const totalWeight = samples.reduce((sum, sample) => sum + sample.weight, 0);
   return totalWeight > 0 ? weighted / totalWeight : DEFAULT_RATIO;

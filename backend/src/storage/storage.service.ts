@@ -206,13 +206,13 @@ export class StorageService implements OnModuleDestroy {
       SELECT id, fingerprint, observed_at, payload, simulation_payload
       FROM config_history
       ORDER BY observed_at ASC, id ASC
-    `).all() as Array<{
+    `).all() as {
       id: number;
       fingerprint: string;
       observed_at: string;
       payload: string;
       simulation_payload: string;
-    }>;
+    }[];
     return rows.map((row) => this.parseConfigSnapshotRow(row));
   }
 

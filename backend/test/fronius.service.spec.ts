@@ -40,7 +40,7 @@ const createService = () =>
   } as never);
 
 describe("FroniusService", () => {
-  const requests: Array<{url: string; method: string; body: string | null}> = [];
+  const requests: {url: string; method: string; body: string | null}[] = [];
 
   beforeEach(() => {
     requests.length = 0;
@@ -77,7 +77,7 @@ describe("FroniusService", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: URL | string, init?: RequestInit) => {
+      vi.fn((input: URL | string, init?: RequestInit) => {
         requests.push({
           url: input.toString(),
           method: init?.method ?? "GET",
@@ -145,7 +145,7 @@ describe("FroniusService", () => {
     ];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: URL | string, init?: RequestInit) => {
+      vi.fn((input: URL | string, init?: RequestInit) => {
         requests.push({
           url: input.toString(),
           method: init?.method ?? "GET",

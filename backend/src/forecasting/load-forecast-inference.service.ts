@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
-import { LoadForecastArtifactService, type ActiveLoadForecastArtifact } from "./load-forecast-artifact.service";
 import type { ConfigDocument } from "../config/schemas";
+import { LoadForecastArtifactService, type ActiveLoadForecastArtifact } from "./load-forecast-artifact.service";
 
 type CatBoostModelInstance = {
   loadModel: (path: string) => void;

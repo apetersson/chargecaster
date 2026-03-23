@@ -218,7 +218,13 @@ export class FroniusService {
   }
 
   private normaliseStrategy(input: OptimisationCommand): NormalisedStrategy {
-    if (typeof input === "object" && input !== null && "charge" in input) {
+    if (input === "charge") {
+      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
+    }
+    if (input === "auto") {
+      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
+    }
+    if ("charge" in input) {
       return {
         mode: "charge",
         manualTarget: null,
@@ -227,13 +233,7 @@ export class FroniusService {
         chargeUntil: this.parseTimestamp(input.charge.untilTimestamp),
       };
     }
-    if (input === "charge") {
-      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
-    }
-    if (input === "auto") {
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null, chargeUntil: null};
-    }
-    if (typeof input === "object" && input !== null && "hold" in input) {
+    if ("hold" in input) {
       const holdConfig = input.hold;
       const manualTarget = this.parsePercentage(holdConfig.minSocPercent);
       if (!manualTarget) {
@@ -249,7 +249,7 @@ export class FroniusService {
         chargeUntil: null,
       };
     }
-    if (typeof input === "object" && input !== null && "auto" in input) {
+    if ("auto" in input) {
       const autoConfig = input.auto;
       const floorTarget = this.parsePercentage(autoConfig.floorSocPercent ?? null);
       return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget, chargeUntil: null};
@@ -694,7 +694,7 @@ export class FroniusService {
         return null;
       }
       const activeDays = Object.values(tailEntry.Weekdays).filter(Boolean).length;
-      if (tailEntry.ScheduleType === "CHARGE_MIN" && tailEntry.Power.equals(managedPower) && activeDays === 1) {
+      if (tailEntry.Power.equals(managedPower) && activeDays === 1) {
         return tailEntry;
       }
       return null;

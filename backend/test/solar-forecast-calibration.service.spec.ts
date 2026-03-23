@@ -30,7 +30,7 @@ function createConfig(): ConfigDocument {
 }
 
 function buildHistory() {
-  const entries: Array<{ id: number; timestamp: string; payload: Record<string, unknown> }> = [];
+  const entries: { id: number; timestamp: string; payload: Record<string, unknown> }[] = [];
   let id = 1;
   for (let day = 1; day <= 4; day += 1) {
     for (const hour of [10, 11, 12, 13, 14]) {
@@ -57,7 +57,7 @@ function buildHistory() {
 }
 
 function buildProxyRows(arrays: SolarArrayConfig[]) {
-  const rows: Array<{
+  const rows: {
     latitude: number;
     longitude: number;
     kwp: number;
@@ -68,7 +68,7 @@ function buildProxyRows(arrays: SolarArrayConfig[]) {
     expectedPowerW: number | null;
     source: string;
     updatedAt: string;
-  }> = [];
+  }[] = [];
   for (const arrayConfig of arrays) {
     for (let day = 1; day <= 5; day += 1) {
       for (const hour of [10, 11, 12, 13, 14]) {

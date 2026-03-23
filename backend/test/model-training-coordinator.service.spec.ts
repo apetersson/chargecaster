@@ -62,7 +62,7 @@ describe("ModelTrainingCoordinator", () => {
     vi.useRealTimers();
   });
 
-  it("starts background training when the local history and time window gates pass", async () => {
+  it("starts background training when the local history and time window gates pass", () => {
     vi.setSystemTime(new Date("2026-03-13T02:15:00.000+01:00"));
     const storage = {
       listHistoryDayStatsBefore: () => createDayStats(70),
@@ -79,14 +79,14 @@ describe("ModelTrainingCoordinator", () => {
     } as unknown as ConfigFileService;
     const service = new ModelTrainingCoordinator(storage, artifactService, configFileService);
 
-    await service.maybeStartTraining(createConfig());
+    service.maybeStartTraining(createConfig());
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(spawnMock.mock.calls[0]?.[0]).toBe("python3");
     expect(spawnMock.mock.calls[0]?.[1]).toContain("/tmp/test-config.local.yaml");
   });
 
-  it("does not start self-training outside the allowed time window", async () => {
+  it("does not start self-training outside the allowed time window", () => {
     vi.setSystemTime(new Date("2026-03-13T12:15:00.000+01:00"));
     const storage = {
       listHistoryDayStatsBefore: () => createDayStats(70),
@@ -102,7 +102,7 @@ describe("ModelTrainingCoordinator", () => {
     } as unknown as ConfigFileService;
     const service = new ModelTrainingCoordinator(storage, artifactService, configFileService);
 
-    await service.maybeStartTraining(createConfig());
+    service.maybeStartTraining(createConfig());
 
     expect(spawnMock).not.toHaveBeenCalled();
   });

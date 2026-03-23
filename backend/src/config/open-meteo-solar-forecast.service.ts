@@ -52,7 +52,7 @@ export class OpenMeteoSolarForecastService {
           provider: "open_meteo",
         }) satisfies RawSolarEntry;
         })
-        .filter((entry) => (entry.energy_wh ?? 0) > 0);
+        .filter((entry) => entry.energy_wh > 0);
 
       this.logger.log(`Collected ${result.length} Open-Meteo solar forecast slots`);
       return result;

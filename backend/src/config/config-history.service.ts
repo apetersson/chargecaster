@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
+import { StorageService } from "../storage/storage.service";
 import type { ConfigDocument } from "./schemas";
 import { SimulationConfigFactory } from "./simulation-config.factory";
-import { StorageService } from "../storage/storage.service";
 
 @Injectable()
 export class ConfigHistoryService {

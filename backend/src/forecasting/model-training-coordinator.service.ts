@@ -5,8 +5,8 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 
 import type { ConfigDocument } from "../config/schemas";
 import { ConfigFileService } from "../config/config-file.service";
-import { LoadForecastArtifactService, loadForecastManifestSchema } from "./load-forecast-artifact.service";
 import { StorageService } from "../storage/storage.service";
+import { LoadForecastArtifactService, loadForecastManifestSchema } from "./load-forecast-artifact.service";
 
 const MIN_HISTORY_DAYS = 56;
 const MIN_NEW_DAYS_SINCE_LAST_TRAINING = 14;
@@ -24,14 +24,18 @@ export class ModelTrainingCoordinator {
     @Inject(ConfigFileService) private readonly configFileService: ConfigFileService,
   ) {}
 
-  async maybeStartTraining(config: ConfigDocument): Promise<void> {
+  maybeStartTraining(config: ConfigDocument): void {
     if (!config.load_forecast?.self_training_enabled) {
       return;
     }
     if (this.activeProcess) {
       return;
     }
-    const pythonExecutable = config.load_forecast.python_executable?.trim() || "python3";
+    const configuredPythonExecutable = config.load_forecast.python_executable?.trim();
+    const pythonExecutable =
+      configuredPythonExecutable && configuredPythonExecutable.length > 0
+        ? configuredPythonExecutable
+        : "python3";
     if (!isTrainingTimeWindow(new Date())) {
       return;
     }

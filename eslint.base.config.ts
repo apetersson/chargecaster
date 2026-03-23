@@ -3,6 +3,7 @@ import tseslint from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 import eslintPluginImport from "eslint-plugin-import";
 import eslintConfigPrettier from "eslint-config-prettier";
+import sonarjs from "eslint-plugin-sonarjs";
 
 export default [
   js.configs.recommended,
@@ -19,6 +20,7 @@ export default [
     plugins: {
       "@typescript-eslint": tseslint,
       import: eslintPluginImport,
+      sonarjs,
     },
     rules: {
       ...tseslint.configs["recommended-type-checked"].rules,
@@ -42,6 +44,7 @@ export default [
       "@typescript-eslint/array-type": "error",
       "@typescript-eslint/prefer-optional-chain": "error",
       "@typescript-eslint/no-explicit-any": "error",
+      "sonarjs/no-identical-functions": "warn",
     },
   },
 ];

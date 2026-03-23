@@ -2,10 +2,10 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { DemandForecastEntry, ForecastEra, HistoryPoint } from "@chargecaster/domain";
 import { extractForecastEraPrice, extractForecastEraSolar, parseTemporal, TimeSlot } from "@chargecaster/domain";
 
-import type { ConfigDocument } from "./schemas";
-import { WeatherService, type WeatherLocation } from "./weather.service";
 import { StorageService, type WeatherHourRecord } from "../storage/storage.service";
 import { LoadForecastInferenceService } from "../forecasting/load-forecast-inference.service";
+import type { ConfigDocument } from "./schemas";
+import { WeatherService, type WeatherLocation } from "./weather.service";
 
 const DEFAULT_HOUSE_LOAD_W = 2200;
 const MIN_HOUSE_LOAD_W = 150;
@@ -284,7 +284,7 @@ function buildFeatureVector(input: {
   contextIndex: number;
   rollingHomes: number[];
   historyByHour: Map<string, number>;
-  futurePriceStats: Array<{ next6hMean: number; next24hPercentile: number; next24hTopQuartileFlag: number }>;
+  futurePriceStats: { next6hMean: number; next24hPercentile: number; next24hTopQuartileFlag: number }[];
 }): number[] {
   const { context, contexts, contextIndex, rollingHomes, historyByHour, futurePriceStats } = input;
   const lagPrevHour = rollingHomes.at(-1) ?? DEFAULT_HOUSE_LOAD_W;
@@ -329,7 +329,7 @@ function buildFeatureVector(input: {
 
 function buildFuturePriceStats(
   contexts: ForecastHourContext[],
-): Array<{ next6hMean: number; next24hPercentile: number; next24hTopQuartileFlag: number }> {
+): { next6hMean: number; next24hPercentile: number; next24hTopQuartileFlag: number }[] {
   return contexts.map((context, index) => {
     const next6h = contexts.slice(index, index + 6).map((entry) => entry.priceEurPerKwh);
     const next24h = contexts.slice(index, index + 24).map((entry) => entry.priceEurPerKwh);
@@ -345,12 +345,12 @@ function buildFuturePriceStats(
   });
 }
 
-export function aggregateHistoryByHour(historyPoints: HistoryPoint[]): Array<{
+export function aggregateHistoryByHour(historyPoints: HistoryPoint[]): {
   hourUtc: string;
   homePowerW: number;
   solarPowerW: number;
   priceEurPerKwh: number;
-}> {
+}[] {
   const grouped = new Map<string, {
     homeSum: number;
     homeCount: number;
