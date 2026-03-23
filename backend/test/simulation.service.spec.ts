@@ -80,6 +80,7 @@ describe("simulateOptimalSchedule oracle output", () => {
       battery: {
         ...baseConfig.battery,
         max_charge_power_w: 0,
+        max_charge_power_solar_w: 0,
       },
       logic: {
         ...baseConfig.logic,
@@ -102,12 +103,18 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(result.oracle_entries).toHaveLength(2);
     const first = result.oracle_entries[0];
     expect(["auto", "hold"]).toContain(first.strategy);
+    expect(result.expected_feed_in_kwh).toBeGreaterThan(0);
     expect(first.grid_energy_wh).not.toBeNull();
     if (first.grid_energy_wh !== null) {
       const durationHours = slots[0].durationHours;
       const derivedPower = first.grid_energy_wh / durationHours;
       expect(derivedPower).toBeLessThanOrEqual(0);
     }
+    const expectedFeedInKwh = result.oracle_entries.reduce((total, entry) => {
+      const gridEnergyWh = entry.grid_energy_wh ?? 0;
+      return gridEnergyWh < 0 ? total + Math.abs(gridEnergyWh) / 1000 : total;
+    }, 0);
+    expect(result.expected_feed_in_kwh).toBeCloseTo(expectedFeedInKwh, 6);
 
     if (result.next_step_soc_percent !== null && first.end_soc_percent !== null) {
       expect(first.end_soc_percent).toBeCloseTo(result.next_step_soc_percent, 6);

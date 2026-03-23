@@ -35,6 +35,7 @@ export interface SimulationOutput {
   baseline_cost_eur: number;
   projected_savings_eur: number;
   projected_grid_power_w: number;
+  expected_feed_in_kwh: number;
   average_price_eur_per_kwh: number;
   forecast_samples: number;
   forecast_hours: number;
@@ -117,6 +118,7 @@ interface RolloutResult {
   baselineCost: number;
   gridEnergyTotalKwh: number;
   gridChargeTotalKwh: number;
+  feedInTotalKwh: number;
   oracleEntries: OracleEntry[];
 }
 
@@ -530,7 +532,7 @@ function buildSimulationOutput(
   policy: PolicyTransition[][],
 ): SimulationOutput {
   const rollout = runForwardPass(context, policy);
-  const {socPathSteps, costTotal, baselineCost, gridEnergyTotalKwh, gridChargeTotalKwh, oracleEntries} = rollout;
+  const {socPathSteps, costTotal, baselineCost, gridEnergyTotalKwh, gridChargeTotalKwh, feedInTotalKwh, oracleEntries} = rollout;
 
   const finalEnergy = socPathSteps[socPathSteps.length - 1] * context.energyPerStepKwh;
   const adjustedCost = costTotal - context.avgPriceEurPerKwh * finalEnergy;
@@ -569,6 +571,7 @@ function buildSimulationOutput(
     baseline_cost_eur: adjustedBaseline,
     projected_savings_eur: projectedSavings,
     projected_grid_power_w: projectedGridPowerW,
+    expected_feed_in_kwh: feedInTotalKwh,
     average_price_eur_per_kwh: context.avgPriceEurPerKwh,
     forecast_samples: context.slots.length,
     forecast_hours: context.totalDurationHours,
@@ -585,6 +588,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
   let baselineCost = 0;
   let gridEnergyTotalKwh = 0;
   let gridChargeTotalKwh = 0;
+  let feedInTotal = Energy.zero();
   let socStepIter = context.currentSoCStep;
 
   for (let idx = 0; idx < horizon; idx += 1) {
@@ -628,6 +632,9 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
 
     costTotal += computeGridCostEur(gridEnergyKwh, importPrice, feedInTariff);
     gridEnergyTotalKwh += gridEnergyKwh;
+    if (gridEnergyKwh < 0) {
+      feedInTotal = feedInTotal.add(Energy.fromKilowattHours(Math.abs(gridEnergyKwh)));
+    }
     const baselineGridImportKwh = profile.baselineGridImportKwh;
     const gridImportKwh = Math.max(0, gridEnergyKwh);
     const additionalGridChargeKwhRaw = storedEnergyChangeKwh > 0 ? Math.max(0, gridImportKwh - baselineGridImportKwh) : 0;
@@ -668,7 +675,15 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     socStepIter = nextSoCStep;
   }
 
-  return {socPathSteps, costTotal, baselineCost, gridEnergyTotalKwh, gridChargeTotalKwh, oracleEntries};
+  return {
+    socPathSteps,
+    costTotal,
+    baselineCost,
+    gridEnergyTotalKwh,
+    gridChargeTotalKwh,
+    feedInTotalKwh: feedInTotal.kilowattHours,
+    oracleEntries,
+  };
 }
 
 function energyFromOptionalPowerWatts(powerWatts: number | undefined, duration: Duration): Energy | null {

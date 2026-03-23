@@ -99,6 +99,10 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
           <span className="value small">{peakSolarAdjustmentLabel}</span>
         </div>
         <div className="metric">
+          <span className="label">Expected Feed-in</span>
+          <span className="value small">{formatNumber(data.expected_feed_in_kwh, "kWh")}</span>
+        </div>
+        <div className="metric">
           <span className="label">Forecast Horizon</span>
           <span className="value small">{formatNumber(data.forecast_hours, " h")}</span>
         </div>

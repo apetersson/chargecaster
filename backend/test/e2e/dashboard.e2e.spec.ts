@@ -207,6 +207,7 @@ describe("dashboard tRPC", () => {
     expect(summary.recommended_final_soc_percent).toEqual(snapshot.recommended_final_soc_percent);
     expect(summary.charge_efficiency_percent).toEqual(snapshot.charge_efficiency_percent);
     expect(summary.discharge_efficiency_percent).toEqual(snapshot.discharge_efficiency_percent);
+    expect(summary.expected_feed_in_kwh).toEqual(snapshot.expected_feed_in_kwh);
     expect("solar_forecast_discrepancy_w" in summary).toBe(true);
     expect(summary.charge_efficiency_percent).toBeGreaterThan(0);
     expect(summary.discharge_efficiency_percent).toBeGreaterThan(0);
