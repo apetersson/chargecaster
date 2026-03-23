@@ -3,12 +3,9 @@ import type { HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecas
 import {
   Duration,
   Energy,
-  EnergyPrice,
-  Money,
   Percentage,
   Power,
   TimeSlot,
-  computeGridEnergyCost,
   energyDeltaFromSocPercent,
   energyFromPower,
   energyFromSoc,
@@ -16,7 +13,11 @@ import {
   powerFromEnergy,
   socFromEnergy,
 } from "@chargecaster/domain";
+import { Money } from "../../../packages/domain/src/money";
+import { computeGridEnergyCost } from "../../../packages/domain/src/battery-math";
+import { EnergyPrice } from "../../../packages/domain/src/price";
 import { StorageService } from "../storage/storage.service";
+import { DynamicPriceConfigService } from "../config/dynamic-price-config.service";
 import { normalizeHistoryList } from "./history.serializer";
 import type {
   BacktestInterval,
@@ -38,11 +39,15 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
 
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
+    @Inject(DynamicPriceConfigService) private readonly dynamicPriceConfigService: DynamicPriceConfigService,
   ) {}
 
-  run(snapshot: SnapshotPayload, config: SimulationConfig): BacktestResult {
+  run(snapshot: SnapshotPayload, config: SimulationConfig, options?: BuildDailyBacktestOptions): BacktestResult {
     const history = this.loadLast24hHistory();
-    return this.runForHistory(history, config, {snapshot});
+    return this.runForHistory(history, config, {
+      configDocument: options?.configDocument,
+      snapshot,
+    });
   }
 
   buildDailyEntry(
@@ -60,8 +65,10 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     }
 
     const result = this.runForHistory(points, config, {
+      configDocument: options?.configDocument,
       snapshot: options?.snapshot,
       marginalPrice: marginalPrice ?? undefined,
+      initialSimSocPercent: options?.initialSimSocPercent,
     });
     if (result.history_points_used < 2) {
       return null;
@@ -95,7 +102,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
         continue;
       }
       samples.push({
-        price: EnergyPrice.fromEurPerKwh(point.price_eur_per_kwh).add(gridFee),
+        price: EnergyPrice.fromEurPerKwh(point.price_eur_per_kwh).withAdditionalFee(gridFee.eurPerKwh),
         duration,
       });
     }
@@ -119,6 +126,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     history: HistoryPoint[],
     config: SimulationConfig,
     options?: {
+      configDocument?: BuildDailyBacktestOptions["configDocument"];
       snapshot?: SnapshotPayload;
       marginalPrice?: number;
       initialSimSocPercent?: number | null;
@@ -142,7 +150,9 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       ? Power.fromWatts(Math.max(0, Number(config.battery.max_charge_power_solar_w)))
       : null;
     const gridFee = resolveGridFee(config);
-    const feedInTariff = resolveFeedInTariff(config);
+    const feedInTariffByInterval = options?.configDocument
+      ? this.dynamicPriceConfigService.buildFeedInTariffScheduleFromHistory(options.configDocument, config, history)
+      : null;
     const houseLoadFallback = Power.fromWatts(2200);
     const marginalPrice =
       options?.marginalPrice ?? (options?.snapshot ? this.deriveMarginalDischargePrice(options.snapshot, config) : null);
@@ -177,7 +187,10 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       const duration = Duration.fromMilliseconds(intervalMs);
 
       const priceEur = Number(current.price_eur_per_kwh ?? 0);
-      const importPrice = EnergyPrice.fromEurPerKwh(priceEur).add(gridFee);
+      const importPrice = EnergyPrice.fromEurPerKwh(priceEur).withAdditionalFee(gridFee.eurPerKwh);
+      const feedInTariff = EnergyPrice.fromEurPerKwh(
+        Number(feedInTariffByInterval?.[i] ?? config.price.feed_in_tariff_eur_per_kwh ?? 0),
+      );
 
       const homePower = current.home_power_w != null && Number.isFinite(current.home_power_w)
         ? Power.fromWatts(current.home_power_w)
@@ -360,7 +373,10 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     for (const era of eras) {
       const costSource = era.sources.find((source) => source.type === "cost");
       if (costSource) {
-        eraPriceMap.set(era.era_id, EnergyPrice.fromEurPerKwh(costSource.payload.price_eur_per_kwh).add(gridFee));
+        eraPriceMap.set(
+          era.era_id,
+          EnergyPrice.fromEurPerKwh(costSource.payload.price_eur_per_kwh).withAdditionalFee(gridFee.eurPerKwh),
+        );
       }
     }
 
@@ -397,7 +413,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       const costSource = era.sources.find((source) => source.type === "cost");
       if (costSource && hours > 0) {
         durationSamples.push({
-          price: EnergyPrice.fromEurPerKwh(costSource.payload.price_eur_per_kwh).add(gridFee),
+          price: EnergyPrice.fromEurPerKwh(costSource.payload.price_eur_per_kwh).withAdditionalFee(gridFee.eurPerKwh),
           duration: Duration.fromHours(hours),
         });
       }
@@ -408,7 +424,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
 
     const snapshotPrice = snapshot.price_snapshot_eur_per_kwh;
     return (typeof snapshotPrice === "number" && Number.isFinite(snapshotPrice))
-      ? EnergyPrice.fromEurPerKwh(snapshotPrice).add(gridFee).eurPerKwh
+      ? EnergyPrice.fromEurPerKwh(snapshotPrice).withAdditionalFee(gridFee.eurPerKwh).eurPerKwh
       : gridFee.eurPerKwh;
   }
 
@@ -484,9 +500,4 @@ function serializeBacktestInterval(interval: BacktestInterval): BacktestInterval
 function resolveGridFee(config: SimulationConfig): EnergyPrice {
   const gridFeeEurPerKwh = config.price.grid_fee_eur_per_kwh;
   return EnergyPrice.fromEurPerKwh(gridFeeEurPerKwh ?? 0);
-}
-
-function resolveFeedInTariff(config: SimulationConfig): EnergyPrice {
-  const feedInTariffEurPerKwh = config.price.feed_in_tariff_eur_per_kwh;
-  return EnergyPrice.fromEurPerKwh(Math.max(0, feedInTariffEurPerKwh ?? 0));
 }

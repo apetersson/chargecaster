@@ -20,6 +20,7 @@ export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
   houseLoadWattsPerSlot?: (number | undefined)[];
   feedInTariffEurPerKwh?: number;
+  feedInTariffEurPerKwhBySlot?: (number | undefined)[];
   allowBatteryExport?: boolean;
   allowGridChargeFromGrid?: boolean;
   chargeEfficiency?: Percentage;
@@ -73,6 +74,7 @@ interface SlotProfile {
   priceTotal: EnergyPrice;
   baselineGridEnergy: Energy;
   baselineGridImport: Energy;
+  feedInTariff: EnergyPrice;
   gridChargeLimit: Energy;
   solarChargeLimit: Energy;
   totalChargeLimit: Energy;
@@ -101,7 +103,6 @@ interface SimulationContext {
   maxChargePower: Power;
   maxSolarChargePower: Power | null;
   maxDischargePower: Power | null;
-  feedInTariff: EnergyPrice;
   allowBatteryExport: boolean;
   allowGridChargeFromGrid: boolean;
   chargeEfficiency: Percentage;
@@ -161,12 +162,9 @@ function prepareSimulationContext(
   const normalizedOptions = {
     solarGenerationPerSlotKwh: options.solarGenerationKwhPerSlot ?? [],
     houseLoadWattsPerSlot: options.houseLoadWattsPerSlot ?? [],
-    feedInTariff: EnergyPrice.fromEurPerKwh(
-      Math.max(
-        0,
-        Number(options.feedInTariffEurPerKwh ?? price.feed_in_tariff_eur_per_kwh ?? 0),
-      ),
-    ),
+    feedInTariffBySlot: slots.map((_, index) => EnergyPrice.fromEurPerKwh(
+      Number(options.feedInTariffEurPerKwhBySlot?.[index] ?? options.feedInTariffEurPerKwh ?? price.feed_in_tariff_eur_per_kwh ?? 0),
+    )),
     allowBatteryExport:
       typeof options.allowBatteryExport === "boolean"
         ? options.allowBatteryExport
@@ -245,6 +243,7 @@ function prepareSimulationContext(
     slots,
     solarGenerationPerSlotKwh: normalizedOptions.solarGenerationPerSlotKwh,
     houseLoadWattsPerSlot: normalizedOptions.houseLoadWattsPerSlot,
+    feedInTariffBySlot: normalizedOptions.feedInTariffBySlot,
     fallbackHouseLoad,
     networkTariff,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
@@ -275,7 +274,6 @@ function prepareSimulationContext(
     maxChargePower,
     maxSolarChargePower,
     maxDischargePower,
-    feedInTariff: normalizedOptions.feedInTariff,
     allowBatteryExport: normalizedOptions.allowBatteryExport,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
     chargeEfficiency: normalizedOptions.chargeEfficiency,
@@ -287,6 +285,7 @@ function buildSlotProfiles(params: {
   slots: PriceSlot[];
   solarGenerationPerSlotKwh: number[];
   houseLoadWattsPerSlot: (number | undefined)[];
+  feedInTariffBySlot: EnergyPrice[];
   fallbackHouseLoad: Power;
   networkTariff: EnergyPrice;
   allowGridChargeFromGrid: boolean;
@@ -329,6 +328,7 @@ function buildSlotProfiles(params: {
       priceTotal,
       baselineGridEnergy,
       baselineGridImport,
+      feedInTariff: params.feedInTariffBySlot[index] ?? EnergyPrice.fromEurPerKwh(0),
       gridChargeLimit,
       solarChargeLimit,
       totalChargeLimit: gridChargeLimit.add(solarChargeLimit),
@@ -380,7 +380,6 @@ function evaluateStateTransitions(
     maxAllowedSoCStep,
     minAllowedSoCStep,
     allowBatteryExport,
-    feedInTariff,
     chargeEfficiency,
     dischargeEfficiency,
   } = context;
@@ -455,7 +454,7 @@ function evaluateStateTransitions(
     if (!futureCost) {
       continue;
     }
-    const slotCost = computeGridCost(gridEnergy, profile.priceTotal, feedInTariff);
+    const slotCost = computeGridCost(gridEnergy, profile.priceTotal, profile.feedInTariff);
     const totalCost = slotCost.add(futureCost);
     if (!bestCost || totalCost.eur < bestCost.eur) {
       bestCost = totalCost;
@@ -580,7 +579,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       context.dischargeEfficiency,
     );
     const importPrice = profile.priceTotal;
-    baselineCost = baselineCost.add(computeGridCost(profile.baselineGridEnergy, importPrice, context.feedInTariff));
+    baselineCost = baselineCost.add(computeGridCost(profile.baselineGridEnergy, importPrice, profile.feedInTariff));
     let gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
 
     ({nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy} = adjustForPvExportDuringRollout(
@@ -606,7 +605,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       gridEnergy = Energy.zero();
     }
 
-    costTotal = costTotal.add(computeGridCost(gridEnergy, importPrice, context.feedInTariff));
+    costTotal = costTotal.add(computeGridCost(gridEnergy, importPrice, profile.feedInTariff));
     gridEnergyTotal = gridEnergyTotal.add(gridEnergy);
     if (gridEnergy.wattHours < 0) {
       feedInTotal = feedInTotal.add(Energy.fromWattHours(Math.abs(gridEnergy.wattHours)));

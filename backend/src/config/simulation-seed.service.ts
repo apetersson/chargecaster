@@ -6,6 +6,7 @@ import { FroniusService } from "../fronius/fronius.service";
 import { OptimisationCommandTranslator } from "../hardware/optimisation-command-translator.service";
 import { ModelTrainingCoordinator } from "../forecasting/model-training-coordinator.service";
 import { SimulationPreparationService } from "./simulation-preparation.service";
+import { DynamicPriceConfigService } from "./dynamic-price-config.service";
 import { RuntimeConfigService } from "./runtime-config.service";
 
 @Injectable()
@@ -17,6 +18,7 @@ export class SimulationSeedService implements OnModuleDestroy {
 
   constructor(
     @Inject(RuntimeConfigService) private readonly configState: RuntimeConfigService,
+    @Inject(DynamicPriceConfigService) private readonly dynamicPriceConfigService: DynamicPriceConfigService,
     @Inject(SimulationPreparationService) private readonly preparationService: SimulationPreparationService,
     @Inject(SimulationService) private readonly simulationService: SimulationService,
     @Inject(FroniusService) private readonly froniusService: FroniusService,
@@ -34,8 +36,14 @@ export class SimulationSeedService implements OnModuleDestroy {
     try {
       const rawConfig = this.configState.getDocument();
       this.logger.verbose("Loaded configuration from runtime state.");
+      const effectiveConfig = await this.dynamicPriceConfigService.refreshAndApply(rawConfig);
 
-      const prepared = await this.preparationService.prepare(rawConfig);
+      const prepared = await this.preparationService.prepare(effectiveConfig);
+      const feedInTariffEurPerKwhBySlot = await this.dynamicPriceConfigService.buildFeedInTariffScheduleFromForecast(
+        rawConfig,
+        prepared.simulationConfig,
+        prepared.forecast,
+      );
       this.nextIntervalSeconds = prepared.intervalSeconds;
 
       if (!prepared.forecast.length) {
@@ -54,6 +62,7 @@ export class SimulationSeedService implements OnModuleDestroy {
         config: prepared.simulationConfig,
         liveState: prepared.liveState,
         forecast: prepared.forecast,
+        feedInTariffEurPerKwhBySlot: feedInTariffEurPerKwhBySlot ?? undefined,
         solarForecast: prepared.solarForecast,
         forecastEras: prepared.forecastEras,
         demandForecast: prepared.demandForecast,
@@ -70,7 +79,7 @@ export class SimulationSeedService implements OnModuleDestroy {
       });
       this.logger.log("Seeded snapshot using config data.");
       await this.applyFronius(snapshot);
-      this.modelTrainingCoordinator.maybeStartTraining(rawConfig);
+      this.modelTrainingCoordinator.maybeStartTraining(effectiveConfig);
     } catch (error) {
       this.logger.error(`Simulation seed failed: ${describeError(error)}`);
       throw error;

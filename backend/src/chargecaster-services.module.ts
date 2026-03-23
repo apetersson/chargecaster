@@ -16,6 +16,10 @@ import { SimulationPreparationService } from "./config/simulation-preparation.se
 import { SimulationSeedService } from "./config/simulation-seed.service";
 import { SimulationConfigFactory } from "./config/simulation-config.factory";
 import { ConfigHistoryService } from "./config/config-history.service";
+import { DynamicPriceConfigService } from "./config/dynamic-price-config.service";
+import { AwattarSunnyFeedInPriceProvider } from "./config/price-providers/awattar-sunny-feed-in-price.provider";
+import { AwattarSunnySpotFeedInPriceProvider } from "./config/price-providers/awattar-sunny-spot-feed-in-price.provider";
+import { EControlGridFeePriceProvider } from "./config/price-providers/e-control-grid-fee-price.provider";
 import { MarketDataService } from "./config/market-data.service";
 import { EvccDataService } from "./config/evcc-data.service";
 import { ForecastAssemblyService } from "./config/forecast-assembly.service";
@@ -53,6 +57,10 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     ConfigFileService,
     SimulationConfigFactory,
     ConfigHistoryService,
+    EControlGridFeePriceProvider,
+    AwattarSunnyFeedInPriceProvider,
+    AwattarSunnySpotFeedInPriceProvider,
+    DynamicPriceConfigService,
     MarketDataService,
     EvccDataService,
     ForecastAssemblyService,
@@ -81,6 +89,10 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     ConfigFileService,
     SimulationConfigFactory,
     ConfigHistoryService,
+    EControlGridFeePriceProvider,
+    AwattarSunnyFeedInPriceProvider,
+    AwattarSunnySpotFeedInPriceProvider,
+    DynamicPriceConfigService,
     MarketDataService,
     EvccDataService,
     ForecastAssemblyService,

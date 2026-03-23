@@ -17,7 +17,7 @@ import { AppModule } from "./app.module";
 import { ConfigFileService } from "./config/config-file.service";
 import { ConfigHistoryService } from "./config/config-history.service";
 import { setRuntimeConfig } from "./config/runtime-config";
-import type { ConfigDocument } from "./config/schemas";
+import { resolveEnergyPriceConfig, type ConfigDocument } from "./config/schemas";
 import { SimulationService } from "./simulation/simulation.service";
 import { SimulationSeedService } from "./config/simulation-seed.service";
 import { BacktestMaterializationService } from "./simulation/backtest-materialization.service";
@@ -191,7 +191,7 @@ function validateConfigDocument(document: ConfigDocument): void {
     throw new Error("battery.capacity_kwh must be a positive number.");
   }
 
-  const market = document.market_data;
+  const market = resolveEnergyPriceConfig(document);
   if (market) {
     const priorities = new Map<number, string[]>();
     const register = (name: string, priority: number | undefined) => {
@@ -199,7 +199,7 @@ function validateConfigDocument(document: ConfigDocument): void {
         return;
       }
       if (priority < 0) {
-        throw new Error(`market_data.${name}.priority must be a non-negative integer.`);
+        throw new Error(`price.energy.${name}.priority must be a non-negative integer.`);
       }
       const bucket = priorities.get(priority) ?? [];
       bucket.push(name);
@@ -212,7 +212,7 @@ function validateConfigDocument(document: ConfigDocument): void {
 
     for (const [priority, providers] of priorities.entries()) {
       if (providers.length > 1) {
-        throw new Error(`Duplicate market_data priority ${priority} assigned to ${providers.join(", ")}.`);
+        throw new Error(`Duplicate price.energy priority ${priority} assigned to ${providers.join(", ")}.`);
       }
     }
   }

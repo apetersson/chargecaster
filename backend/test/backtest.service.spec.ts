@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HistoryPoint, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
+import type { ConfigDocument } from "../src/config/schemas";
+import { DynamicPriceConfigService } from "../src/config/dynamic-price-config.service";
+import { AwattarSunnyFeedInPriceProvider } from "../src/config/price-providers/awattar-sunny-feed-in-price.provider";
+import { AwattarSunnySpotFeedInPriceProvider } from "../src/config/price-providers/awattar-sunny-spot-feed-in-price.provider";
+import { EControlGridFeePriceProvider } from "../src/config/price-providers/e-control-grid-fee-price.provider";
 import { BacktestService } from "../src/simulation/backtest.service";
 import { ContinuousBacktestStrategy } from "../src/simulation/continuous-backtest.strategy";
 import { StorageService, type HistoryRecord } from "../src/storage/storage.service";
@@ -90,6 +95,18 @@ const config: SimulationConfig = {
   },
 };
 
+const configDocument: ConfigDocument = {
+  dry_run: true,
+  price: {
+    grid_fee: {
+      type: "e-control",
+    },
+    feed_in: {
+      type: "awattar-sunny",
+    },
+  },
+};
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -100,10 +117,103 @@ function createService(storage: StorageService): BacktestService {
       findConfigSnapshotForTimestamp: () => null,
     });
   }
-  return new BacktestService(storage, new ContinuousBacktestStrategy(storage));
+  const dynamicPriceConfigService = createDynamicPriceConfigService(storage);
+  return new BacktestService(storage, dynamicPriceConfigService, new ContinuousBacktestStrategy(storage, dynamicPriceConfigService));
+}
+
+function createDynamicPriceConfigService(storage: StorageService): DynamicPriceConfigService {
+  return new DynamicPriceConfigService(
+    storage,
+    new EControlGridFeePriceProvider(),
+    new AwattarSunnyFeedInPriceProvider(),
+    new AwattarSunnySpotFeedInPriceProvider(),
+  );
 }
 
 describe("BacktestService daily history", () => {
+  it("applies current dynamic tariff overrides for the live backtest run", () => {
+    const storage = {
+      listHistory: () => toHistoryRecords([
+        createHistoryPoint("2026-03-07T00:00:00.000Z"),
+        createHistoryPoint("2026-03-07T00:05:00.000Z"),
+      ]),
+      getLatestDynamicPriceRecordAt: (priceKey: string, source: string) => {
+        if (priceKey === "grid_fee_eur_per_kwh" && source === "e-control") {
+          return {
+            priceKey: "grid_fee_eur_per_kwh",
+            source,
+            effectiveAt: "2025-12-31T23:00:00.000Z",
+            observedAt: "2026-03-01T00:00:00.000Z",
+            valueEurPerKwh: 0.12,
+            metadata: {},
+          };
+        }
+        if (priceKey === "feed_in_tariff_eur_per_kwh" && source === "awattar-sunny") {
+          return {
+            priceKey: "feed_in_tariff_eur_per_kwh",
+            source,
+            effectiveAt: "2026-02-28T23:00:00.000Z",
+            observedAt: "2026-03-01T00:00:00.000Z",
+            valueEurPerKwh: 0.08,
+            metadata: {},
+          };
+        }
+        return null;
+      },
+    } as unknown as StorageService;
+
+    const fakeStrategy = {
+      name: "continuous",
+      requiresSequentialState: false,
+      run: vi.fn((_snapshot: SnapshotPayload, runtimeConfig: SimulationConfig) => ({
+        generated_at: "2026-03-08T00:00:00.000Z",
+        actual_total_cost_eur: runtimeConfig.price.grid_fee_eur_per_kwh ?? 0,
+        simulated_total_cost_eur: runtimeConfig.price.feed_in_tariff_eur_per_kwh ?? 0,
+        simulated_start_soc_percent: 0,
+        actual_final_soc_percent: 0,
+        simulated_final_soc_percent: 0,
+        soc_value_adjustment_eur: 0,
+        adjusted_actual_cost_eur: 0,
+        adjusted_simulated_cost_eur: 0,
+        savings_eur: 0,
+        avg_price_eur_per_kwh: 0,
+        history_points_used: 2,
+        span_hours: 1,
+        intervals: [],
+      })),
+      buildDailyEntry: vi.fn(),
+    };
+
+    const service = new BacktestService(storage, createDynamicPriceConfigService(storage), fakeStrategy);
+    const result = service.run(snapshot, configDocument, config);
+
+    expect(result.actual_total_cost_eur).toBe(0.12);
+    expect(result.simulated_total_cost_eur).toBe(0.08);
+  });
+
+  it("includes effective tariff inputs in cache fingerprints even with config snapshots", () => {
+    const storage = {} as StorageService;
+    const service = createService(storage);
+    const sourceFingerprint = "snapshot-fingerprint";
+
+    const fingerprintA = service.buildCacheFingerprint({
+      ...config,
+      price: {
+        ...config.price,
+        grid_fee_eur_per_kwh: 0.04,
+      },
+    }, sourceFingerprint);
+    const fingerprintB = service.buildCacheFingerprint({
+      ...config,
+      price: {
+        ...config.price,
+        grid_fee_eur_per_kwh: 0.05,
+      },
+    }, sourceFingerprint);
+
+    expect(fingerprintA).not.toBe(fingerprintB);
+  });
+
   it("skips partial UTC days near the history boundary", () => {
     const fullDay = createDay("2026-03-05");
     const partialDay = createDay("2026-03-06", 13);
@@ -129,7 +239,7 @@ describe("BacktestService daily history", () => {
     } as unknown as StorageService;
 
     const service = createService(storage);
-    const page = service.runDailyHistory(snapshot, config, 7, 0);
+    const page = service.runDailyHistory(snapshot, configDocument, config, 7, 0);
 
     expect(page.hasMore).toBe(false);
     expect(page.entries).toHaveLength(1);
@@ -200,7 +310,7 @@ describe("BacktestService daily history", () => {
     } as unknown as StorageService;
 
     const service = createService(storage);
-    const page = service.runDailyHistory(snapshot, config, 2, 0);
+    const page = service.runDailyHistory(snapshot, configDocument, config, 2, 0);
 
     expect(page.entries.map((entry) => entry.date)).toEqual(["2026-03-07", "2026-03-06"]);
     expect(page.entries[0]?.result.intervals.length).toBeGreaterThan(0);
@@ -279,7 +389,7 @@ describe("BacktestService daily history", () => {
     } as unknown as StorageService;
 
     const service = createService(storage);
-    const detail = service.getDailyHistoryDetail(snapshot, config, "2026-03-06");
+    const detail = service.getDailyHistoryDetail(snapshot, configDocument, config, "2026-03-06");
 
     expect(detail?.date).toBe("2026-03-06");
     expect(detail?.result.intervals.length).toBeGreaterThan(0);
@@ -377,8 +487,8 @@ describe("BacktestService daily history", () => {
         },
     } as unknown as StorageService;
 
-    const service = new BacktestService(storage, fakeStrategy);
-    const page = service.runDailyHistory(snapshot, config, 2, 0);
+    const service = new BacktestService(storage, createDynamicPriceConfigService(storage), fakeStrategy);
+    const page = service.runDailyHistory(snapshot, configDocument, config, 2, 0);
 
     expect(page.entries.map((entry) => [entry.date, entry.result.actual_total_cost_eur])).toEqual([
       ["2026-03-07", 4200],
@@ -424,7 +534,7 @@ describe("BacktestService inferred site demand", () => {
     } as Pick<StorageService, "listHistory"> as StorageService;
 
     const service = createService(storage);
-    const result = service.run(snapshot, config);
+    const result = service.run(snapshot, configDocument, config);
 
     expect(result.history_points_used).toBe(2);
     expect(result.actual_total_cost_eur).toBeCloseTo(0.75, 6);
@@ -484,7 +594,7 @@ describe("BacktestService continuous daily carry", () => {
       },
     } as Pick<StorageService, "listHistoryRangeAsc"> as StorageService;
 
-    const strategy = new ContinuousBacktestStrategy(storage);
+    const strategy = new ContinuousBacktestStrategy(storage, createDynamicPriceConfigService(storage));
     const entry = strategy.buildDailyEntry("2026-03-06", config, {
       initialSimSocPercent: 5,
     });
@@ -552,11 +662,65 @@ describe("BacktestService continuous daily carry", () => {
     } as unknown as StorageService;
 
     const service = createService(storage);
-    const page = service.runDailyHistory(snapshot, config, 2, 0);
+    const page = service.runDailyHistory(snapshot, configDocument, config, 2, 0);
     const latestDay = page.entries.find((entry) => entry.date === "2026-03-06");
 
     expect(latestDay?.result.intervals[0]?.simulated_soc_percent).toBeGreaterThan(80);
     expect(latestDay?.result.simulated_final_soc_percent).toBe(5);
+  });
+});
+
+describe("BacktestService dynamic feed-in providers", () => {
+  it("uses hourly SUNNY Spot export pricing during daily backtests", () => {
+    const dayPoints: HistoryPoint[] = [
+      {
+        timestamp: "2026-03-06T10:00:00.000Z",
+        battery_soc_percent: 50,
+        price_eur_per_kwh: 0.1,
+        grid_power_w: -1000,
+        solar_power_w: 1000,
+        solar_forecast_power_w: 1000,
+        solar_energy_wh: 1000,
+        home_power_w: 0,
+        ev_charge_power_w: null,
+        site_demand_power_w: 0,
+      },
+      {
+        timestamp: "2026-03-06T11:00:00.000Z",
+        battery_soc_percent: 50,
+        price_eur_per_kwh: 0.1,
+        grid_power_w: 0,
+        solar_power_w: 0,
+        solar_forecast_power_w: 0,
+        solar_energy_wh: 0,
+        home_power_w: 0,
+        ev_charge_power_w: null,
+        site_demand_power_w: 0,
+      },
+    ];
+    const storage = {
+      listHistoryRangeAsc: (startInclusive: string, endExclusive: string) => (
+        startInclusive === "2026-03-06T00:00:00.000Z" && endExclusive === "2026-03-07T00:00:00.000Z"
+          ? toHistoryRecords(dayPoints)
+          : []
+      ),
+    } as Pick<StorageService, "listHistoryRangeAsc"> as StorageService;
+
+    const strategy = new ContinuousBacktestStrategy(storage, createDynamicPriceConfigService(storage));
+    const entry = strategy.buildDailyEntry("2026-03-06", config, {
+      configDocument: {
+        dry_run: true,
+        price: {
+          feed_in: {
+            type: "awattar-sunny-spot",
+          },
+        },
+      },
+      fallbackMarginalPrice: 0.2,
+    });
+
+    expect(entry).not.toBeNull();
+    expect(entry?.result.intervals[0]?.actual_cost_eur).toBeCloseTo(-0.081, 6);
   });
 });
 
@@ -608,8 +772,8 @@ describe("StorageService listAllHistoryAsc", () => {
         ...createDay("2026-03-07"),
       ]);
 
-      const result = service.materializeHistoricalDailyBacktests(config, {today: "2026-03-08"});
-      const fingerprint = service.buildCacheFingerprint(config);
+      const result = service.materializeHistoricalDailyBacktests(configDocument, config, {today: "2026-03-08"});
+      const fingerprint = service.buildCacheFingerprint(config, storage.buildConfigFingerprint(configDocument));
       const cached = storage.listDailyBacktestSummaries(fingerprint, ["2026-03-05", "2026-03-06", "2026-03-07"]);
 
       expect(result.materialized).toBe(2);
@@ -644,7 +808,7 @@ describe("StorageService listAllHistoryAsc", () => {
         ...createDay("2026-03-07"),
       ]);
 
-      const fingerprint = service.buildCacheFingerprint(config);
+      const fingerprint = service.buildCacheFingerprint(config, storage.buildConfigFingerprint(configDocument));
       storage.upsertDailyBacktestSummaries([
         {
           date: "2026-03-05",
@@ -670,7 +834,7 @@ describe("StorageService listAllHistoryAsc", () => {
         },
       ]);
 
-      const result = service.materializeHistoricalDailyBacktests(config, {
+      const result = service.materializeHistoricalDailyBacktests(configDocument, config, {
         today: "2026-03-08",
         missingOnly: true,
       });
@@ -688,6 +852,84 @@ describe("StorageService listAllHistoryAsc", () => {
       }
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("reuses cached missingOnly entries keyed by historical tariff overrides", () => {
+    const listDailyBacktestSummaries = vi.fn((fingerprint: string, dates: string[]) => (
+      fingerprint === "historical-cache"
+        ? [{
+          date: dates[0]!,
+          configFingerprint: fingerprint,
+          updatedAt: "2026-03-08T00:00:00.000Z",
+          payload: {
+            generated_at: "2026-03-08T00:00:00.000Z",
+            actual_total_cost_eur: 1,
+            simulated_total_cost_eur: 1,
+            simulated_start_soc_percent: 1,
+            actual_final_soc_percent: 1,
+            simulated_final_soc_percent: 1,
+            soc_value_adjustment_eur: 0,
+            adjusted_actual_cost_eur: 1,
+            adjusted_simulated_cost_eur: 1,
+            savings_eur: 0,
+            avg_price_eur_per_kwh: 0.2,
+            history_points_used: 288,
+            span_hours: 24,
+          },
+          strategy: "continuous",
+          simulatedStartSocPercent: 1,
+          simulatedFinalSocPercent: 1,
+        }]
+        : []
+    ));
+    const storage = {
+      listHistoryDayStatsBefore: () => [
+        {
+          date: "2026-03-06",
+          firstTimestamp: "2026-03-06T00:00:00.000Z",
+          lastTimestamp: "2026-03-06T23:55:00.000Z",
+          pointCount: 288,
+        },
+        {
+          date: "2026-03-05",
+          firstTimestamp: "2026-03-05T00:00:00.000Z",
+          lastTimestamp: "2026-03-05T23:55:00.000Z",
+          pointCount: 288,
+        },
+      ],
+      findConfigSnapshotForTimestamp: () => ({
+        id: 1,
+        fingerprint: "snapshot-config",
+        observedAt: "2026-03-01T00:00:00.000Z",
+        payload: configDocument,
+        simulationConfig: config,
+      }),
+      getLatestDynamicPriceRecordAt: () => ({
+        priceKey: "grid_fee_eur_per_kwh",
+        source: "e-control",
+        effectiveAt: "2025-12-31T23:00:00.000Z",
+        observedAt: "2026-03-02T00:00:00.000Z",
+        valueEurPerKwh: 0.12,
+        metadata: {},
+      }),
+      listDailyBacktestSummaries,
+      upsertDailyBacktestSummaries: vi.fn(),
+    } as unknown as StorageService;
+
+    const service = createService(storage);
+    vi.spyOn(service, "buildCacheFingerprint").mockImplementation((runtimeConfig, sourceFingerprint) => (
+      sourceFingerprint === "snapshot-config" && runtimeConfig.price.grid_fee_eur_per_kwh === 0.12
+        ? "historical-cache"
+        : "other-cache"
+    ));
+
+    const result = service.materializeHistoricalDailyBacktests(configDocument, config, {
+      today: "2026-03-07",
+      missingOnly: true,
+    });
+
+    expect(result.materialized).toBe(0);
+    expect(listDailyBacktestSummaries).toHaveBeenCalledWith("historical-cache", ["2026-03-05"]);
   });
 
   it("clears legacy daily backtest summaries when ledger columns are introduced", () => {

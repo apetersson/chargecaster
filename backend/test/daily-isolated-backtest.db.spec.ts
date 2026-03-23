@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { SimulationConfig } from "@chargecaster/domain";
 import { ConfigFileService } from "../src/config/config-file.service";
+import { DynamicPriceConfigService } from "../src/config/dynamic-price-config.service";
+import { AwattarSunnyFeedInPriceProvider } from "../src/config/price-providers/awattar-sunny-feed-in-price.provider";
+import { AwattarSunnySpotFeedInPriceProvider } from "../src/config/price-providers/awattar-sunny-spot-feed-in-price.provider";
+import { EControlGridFeePriceProvider } from "../src/config/price-providers/e-control-grid-fee-price.provider";
 import { SimulationConfigFactory } from "../src/config/simulation-config.factory";
 import { ContinuousBacktestStrategy } from "../src/simulation/continuous-backtest.strategy";
 import { DailyIsolatedBacktestStrategy } from "../src/simulation/daily-isolated-backtest.strategy";
@@ -136,8 +140,14 @@ async function loadDbContext(): Promise<{
   }
 
   storage = new StorageService();
-  const isolated = new DailyIsolatedBacktestStrategy(storage);
-  const continuous = new ContinuousBacktestStrategy(storage);
+  const dynamicPriceConfigService = new DynamicPriceConfigService(
+    storage,
+    new EControlGridFeePriceProvider(),
+    new AwattarSunnyFeedInPriceProvider(),
+    new AwattarSunnySpotFeedInPriceProvider(),
+  );
+  const isolated = new DailyIsolatedBacktestStrategy(storage, dynamicPriceConfigService);
+  const continuous = new ContinuousBacktestStrategy(storage, dynamicPriceConfigService);
   const configFactory = new SimulationConfigFactory();
   const document = await configFile.loadDocument(configPath);
   const config = configFactory.create(document);

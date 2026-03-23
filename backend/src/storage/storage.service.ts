@@ -80,6 +80,15 @@ export interface ConfigSnapshotRecord {
   simulationConfig: SimulationConfig;
 }
 
+export interface DynamicPriceRecord {
+  priceKey: "grid_fee_eur_per_kwh" | "feed_in_tariff_eur_per_kwh";
+  source: string;
+  effectiveAt: string;
+  observedAt: string;
+  valueEurPerKwh: number;
+  metadata: Record<string, unknown>;
+}
+
 @Injectable()
 export class StorageService implements OnModuleDestroy {
   private readonly dbPath: string;
@@ -151,6 +160,182 @@ export class StorageService implements OnModuleDestroy {
       JSON.stringify(entry.payload),
       JSON.stringify(entry.simulationConfig),
     );
+  }
+
+  upsertDynamicPriceRecord(entry: DynamicPriceRecord): void {
+    this.logger.log(
+      `Recording dynamic price ${entry.priceKey} from ${entry.source} at ${entry.effectiveAt} (${entry.valueEurPerKwh.toFixed(6)} EUR/kWh)`,
+    );
+    this.db.prepare(`
+      INSERT INTO dynamic_price_history (
+        price_key,
+        source,
+        effective_at,
+        observed_at,
+        value_eur_per_kwh,
+        metadata
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(price_key, source, effective_at, observed_at) DO NOTHING
+    `).run(
+      entry.priceKey,
+      entry.source,
+      entry.effectiveAt,
+      entry.observedAt,
+      entry.valueEurPerKwh,
+      JSON.stringify(entry.metadata ?? {}),
+    );
+  }
+
+  listDynamicPriceRecords(): DynamicPriceRecord[] {
+    const rows = this.db.prepare(`
+      SELECT
+        price_key,
+        source,
+        effective_at,
+        observed_at,
+        value_eur_per_kwh,
+        metadata
+      FROM dynamic_price_history
+      ORDER BY effective_at ASC, observed_at ASC, source ASC
+    `).all() as {
+      price_key: DynamicPriceRecord["priceKey"];
+      source: string;
+      effective_at: string;
+      observed_at: string;
+      value_eur_per_kwh: number;
+      metadata: string;
+    }[];
+    return rows.map((row) => ({
+      priceKey: row.price_key,
+      source: row.source,
+      effectiveAt: row.effective_at,
+      observedAt: row.observed_at,
+      valueEurPerKwh: row.value_eur_per_kwh,
+      metadata: this.parseDynamicPriceMetadata(row.metadata),
+    }));
+  }
+
+  getLatestDynamicPriceRecordsAt(timestamp: string): Partial<Record<DynamicPriceRecord["priceKey"], DynamicPriceRecord>> {
+    const rows = this.db.prepare(`
+      SELECT
+        price_key,
+        source,
+        effective_at,
+        observed_at,
+        value_eur_per_kwh,
+        metadata
+      FROM dynamic_price_history
+      WHERE effective_at <= ?
+      ORDER BY effective_at DESC, observed_at DESC, rowid DESC
+    `).all(timestamp) as {
+      price_key: DynamicPriceRecord["priceKey"];
+      source: string;
+      effective_at: string;
+      observed_at: string;
+      value_eur_per_kwh: number;
+      metadata: string;
+    }[];
+
+    const latest: Partial<Record<DynamicPriceRecord["priceKey"], DynamicPriceRecord>> = {};
+    for (const row of rows) {
+      if (latest[row.price_key]) {
+        continue;
+      }
+      latest[row.price_key] = {
+        priceKey: row.price_key,
+        source: row.source,
+        effectiveAt: row.effective_at,
+        observedAt: row.observed_at,
+        valueEurPerKwh: row.value_eur_per_kwh,
+        metadata: this.parseDynamicPriceMetadata(row.metadata),
+      };
+    }
+    return latest;
+  }
+
+  getLatestDynamicPriceRecordAt(
+    priceKey: DynamicPriceRecord["priceKey"],
+    source: string,
+    timestamp: string,
+  ): DynamicPriceRecord | null {
+    const row = this.db.prepare(`
+      SELECT
+        price_key,
+        source,
+        effective_at,
+        observed_at,
+        value_eur_per_kwh,
+        metadata
+      FROM dynamic_price_history
+      WHERE price_key = ?
+        AND source = ?
+        AND effective_at <= ?
+      ORDER BY effective_at DESC, observed_at DESC, rowid DESC
+      LIMIT 1
+    `).get(priceKey, source, timestamp) as {
+      price_key: DynamicPriceRecord["priceKey"];
+      source: string;
+      effective_at: string;
+      observed_at: string;
+      value_eur_per_kwh: number;
+      metadata: string;
+    } | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      priceKey: row.price_key,
+      source: row.source,
+      effectiveAt: row.effective_at,
+      observedAt: row.observed_at,
+      valueEurPerKwh: row.value_eur_per_kwh,
+      metadata: this.parseDynamicPriceMetadata(row.metadata),
+    };
+  }
+
+  getLatestDynamicPriceRecordForEffectiveAt(
+    priceKey: DynamicPriceRecord["priceKey"],
+    source: string,
+    effectiveAt: string,
+  ): DynamicPriceRecord | null {
+    const row = this.db.prepare(`
+      SELECT
+        price_key,
+        source,
+        effective_at,
+        observed_at,
+        value_eur_per_kwh,
+        metadata
+      FROM dynamic_price_history
+      WHERE price_key = ?
+        AND source = ?
+        AND effective_at = ?
+      ORDER BY observed_at DESC, rowid DESC
+      LIMIT 1
+    `).get(priceKey, source, effectiveAt) as {
+      price_key: DynamicPriceRecord["priceKey"];
+      source: string;
+      effective_at: string;
+      observed_at: string;
+      value_eur_per_kwh: number;
+      metadata: string;
+    } | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      priceKey: row.price_key,
+      source: row.source,
+      effectiveAt: row.effective_at,
+      observedAt: row.observed_at,
+      valueEurPerKwh: row.value_eur_per_kwh,
+      metadata: this.parseDynamicPriceMetadata(row.metadata),
+    };
   }
 
   getLatestConfigSnapshot(): ConfigSnapshotRecord | null {
@@ -629,6 +814,21 @@ export class StorageService implements OnModuleDestroy {
         CREATE INDEX IF NOT EXISTS idx_config_history_fingerprint
           ON config_history (fingerprint, observed_at DESC);
     `);
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS dynamic_price_history
+        (
+            price_key         TEXT NOT NULL,
+            source            TEXT NOT NULL,
+            effective_at      TEXT NOT NULL,
+            observed_at       TEXT NOT NULL,
+            value_eur_per_kwh REAL NOT NULL,
+            metadata          TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (price_key, source, effective_at, observed_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dynamic_price_history_lookup
+          ON dynamic_price_history (price_key, source, effective_at DESC, observed_at DESC);
+    `);
+    this.ensureDynamicPriceHistorySchema();
 
     this.db.exec(`
         CREATE TABLE IF NOT EXISTS daily_backtest_summaries
@@ -737,6 +937,51 @@ export class StorageService implements OnModuleDestroy {
     return rows.some((row) => row.name === column);
   }
 
+  private ensureDynamicPriceHistorySchema(): void {
+    const existing = this.db.prepare(`
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'dynamic_price_history'
+    `).get() as { sql?: string } | undefined;
+    const createSql = existing?.sql ?? "";
+    if (createSql.includes("PRIMARY KEY (price_key, source, effective_at, observed_at)")) {
+      return;
+    }
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS dynamic_price_history_v2
+      (
+          price_key         TEXT NOT NULL,
+          source            TEXT NOT NULL,
+          effective_at      TEXT NOT NULL,
+          observed_at       TEXT NOT NULL,
+          value_eur_per_kwh REAL NOT NULL,
+          metadata          TEXT NOT NULL DEFAULT '{}',
+          PRIMARY KEY (price_key, source, effective_at, observed_at)
+      );
+      INSERT OR IGNORE INTO dynamic_price_history_v2 (
+        price_key,
+        source,
+        effective_at,
+        observed_at,
+        value_eur_per_kwh,
+        metadata
+      )
+      SELECT
+        price_key,
+        source,
+        effective_at,
+        observed_at,
+        value_eur_per_kwh,
+        metadata
+      FROM dynamic_price_history;
+      DROP TABLE dynamic_price_history;
+      ALTER TABLE dynamic_price_history_v2 RENAME TO dynamic_price_history;
+      CREATE INDEX IF NOT EXISTS idx_dynamic_price_history_lookup
+        ON dynamic_price_history (price_key, source, effective_at DESC, observed_at DESC);
+    `);
+  }
+
   private addColumnIfMissing(table: string, column: string, definition: string): void {
     if (this.tableHasColumn(table, column)) {
       return;
@@ -771,5 +1016,17 @@ export class StorageService implements OnModuleDestroy {
       payload: parseConfigDocument(JSON.parse(row.payload)),
       simulationConfig: simulationConfigSchema.parse(JSON.parse(row.simulation_payload)),
     };
+  }
+
+  private parseDynamicPriceMetadata(raw: string): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      this.logger.warn("Failed to parse dynamic price metadata; returning empty metadata object.");
+    }
+    return {};
   }
 }

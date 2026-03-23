@@ -35,6 +35,84 @@ export const fromEvccConfigSchema = z.object({
 }).strip();
 export type FromEvccConfig = z.infer<typeof fromEvccConfigSchema>;
 
+const priceScalarSchema = z.union([z.number(), z.string()]).optional();
+type PriceScalarConfigValue = z.infer<typeof priceScalarSchema>;
+
+const dynamicPriceSourceSectionSchema = z.object({
+  enabled: optionalBooleanSchema.optional().default(true),
+});
+
+export const awattarSunnyPriceSourceConfigSchema = dynamicPriceSourceSectionSchema
+  .extend({
+    url: optionalStringSchema.optional(),
+  })
+  .strip();
+export type AwattarSunnyPriceSourceConfig = z.infer<typeof awattarSunnyPriceSourceConfigSchema>;
+
+export const eControlPriceSourceConfigSchema = dynamicPriceSourceSectionSchema
+  .extend({
+    url: optionalStringSchema.optional(),
+  })
+  .strip();
+export type EControlPriceSourceConfig = z.infer<typeof eControlPriceSourceConfigSchema>;
+
+const dynamicPriceConfigSchema = z.object({
+  awattar_sunny: awattarSunnyPriceSourceConfigSchema.optional(),
+  e_control: eControlPriceSourceConfigSchema.optional(),
+  wiener_netze: eControlPriceSourceConfigSchema.optional(),
+}).strip();
+
+export const energyPriceConfigSchema = z.object({
+  awattar: awattarConfigSchema.optional(),
+  entsoe: entsoeNewConfigSchema.optional(),
+  from_evcc: fromEvccConfigSchema.optional(),
+}).strip();
+export type EnergyPriceConfig = z.infer<typeof energyPriceConfigSchema>;
+
+export const eControlNetzbereichSchema = z.enum([
+  "Burgenland",
+  "Graz",
+  "Innsbruck",
+  "Kärnten",
+  "Klagenfurt",
+  "Kleinwalsertal",
+  "Linz",
+  "Niederösterreich",
+  "Oberösterreich",
+  "Salzburg",
+  "Steiermark",
+  "Tirol",
+  "Vorarlberg",
+  "Wien",
+]);
+export type EControlNetzbereich = z.infer<typeof eControlNetzbereichSchema>;
+
+export const gridFeeProviderRefSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("static"),
+    eur_per_kwh: priceScalarSchema,
+  }).strip(),
+  z.object({
+    type: z.literal("e-control"),
+    netzbereich: eControlNetzbereichSchema.optional(),
+  }).strip(),
+]);
+export type GridFeeProviderRef = z.infer<typeof gridFeeProviderRefSchema>;
+
+export const feedInProviderRefSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("static"),
+    eur_per_kwh: priceScalarSchema,
+  }).strip(),
+  z.object({
+    type: z.literal("awattar-sunny"),
+  }).strip(),
+  z.object({
+    type: z.literal("awattar-sunny-spot"),
+  }).strip(),
+]);
+export type FeedInProviderRef = z.infer<typeof feedInProviderRefSchema>;
+
 const configSectionSchema = z.object({
   enabled: optionalBooleanSchema.optional().default(true),
 });
@@ -64,6 +142,10 @@ const priceConfigSchema = z
   .object({
     grid_fee_eur_per_kwh: optionalNumberSchema.optional(),
     feed_in_tariff_eur_per_kwh: optionalNumberSchema.optional(),
+    energy: energyPriceConfigSchema.optional(),
+    grid_fee: gridFeeProviderRefSchema.optional(),
+    feed_in: feedInProviderRefSchema.optional(),
+    dynamic: dynamicPriceConfigSchema.optional(),
   })
   .strip();
 
@@ -107,12 +189,6 @@ const evccConfigSchema = configSectionSchema
   })
   .strip();
 
-const marketConfigSchema = z.object({
-  awattar: awattarConfigSchema.optional(),
-  entsoe: entsoeNewConfigSchema.optional(),
-  from_evcc: fromEvccConfigSchema.optional(),
-}).strip();
-
 const loggingConfigSchema = z
   .object({
     level: optionalStringSchema.optional(),
@@ -130,12 +206,49 @@ export const configDocumentSchema = z
     solar: z.array(solarArrayConfigSchema).optional(),
     load_forecast: loadForecastConfigSchema.optional(),
     evcc: evccConfigSchema.optional(),
-    market_data: marketConfigSchema.optional(),
+    market_data: energyPriceConfigSchema.optional(),
     logging: loggingConfigSchema.optional(),
   })
   .strict();
 
 export type ConfigDocument = z.infer<typeof configDocumentSchema>;
+
+function parseScalarPriceValue(value: PriceScalarConfigValue): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+export function resolveEnergyPriceConfig(config: ConfigDocument): EnergyPriceConfig | undefined {
+  return config.price?.energy ?? config.market_data;
+}
+
+export function resolveConfiguredStaticGridFeeEurPerKwh(config: ConfigDocument): number | null {
+  if (config.price?.grid_fee?.type === "static") {
+    return parseScalarPriceValue(config.price.grid_fee.eur_per_kwh) ?? 0;
+  }
+  return parseScalarPriceValue(config.price?.grid_fee_eur_per_kwh as PriceScalarConfigValue);
+}
+
+export function resolveConfiguredStaticFeedInTariffEurPerKwh(config: ConfigDocument): number | null {
+  if (config.price?.feed_in?.type === "static") {
+    const value = parseScalarPriceValue(config.price.feed_in.eur_per_kwh);
+    return value != null ? Math.max(0, value) : 0;
+  }
+  const legacyValue = parseScalarPriceValue(config.price?.feed_in_tariff_eur_per_kwh as PriceScalarConfigValue);
+  return legacyValue != null ? Math.max(0, legacyValue) : null;
+}
 
 export interface ParsedEvccState {
   forecast: RawForecastEntry[];

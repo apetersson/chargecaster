@@ -7,19 +7,19 @@ import {
 } from "@chargecaster/domain";
 import { Logger } from "@nestjs/common";
 import type { EntsoeNewConfig } from "../schemas";
-import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
+import { EnergyPriceProvider, EnergyPriceProviderContext, EnergyPriceProviderResult } from "./provider.types";
 import { clampHorizon } from "./provider.utils";
 
 const BASE_URL = "https://newtransparency.entsoe.eu/market/energyPrices/load";
 const REQUEST_TIMEOUT_MS = 15000;
 const SLOT_15M_MS = 15 * 60 * 1000;
 
-export class EntsoeNewProvider implements MarketProvider {
+export class EntsoeNewProvider implements EnergyPriceProvider {
   readonly key = "entsoe";
   private readonly logger = new Logger(EntsoeNewProvider.name);
   constructor(private readonly cfg?: EntsoeNewConfig) {}
 
-  async collect(ctx: MarketProviderContext): Promise<MarketProviderResult> {
+  async collect(ctx: EnergyPriceProviderContext): Promise<EnergyPriceProviderResult> {
     try {
       const ranges = this.buildDayWindows(this.cfg?.max_hours ?? 72);
       this.logger.log(`Fetching ENTSO-E transparency data across ${ranges.length} window(s)`);

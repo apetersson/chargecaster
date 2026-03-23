@@ -1,14 +1,14 @@
 import { Logger } from "@nestjs/common";
 import { derivePriceSnapshot, EnergyPrice, normalizePriceSlots, type RawForecastEntry } from "@chargecaster/domain";
 import type { FromEvccConfig } from "../schemas";
-import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
+import { EnergyPriceProvider, EnergyPriceProviderContext, EnergyPriceProviderResult } from "./provider.types";
 
-export class FromEvccProvider implements MarketProvider {
+export class FromEvccProvider implements EnergyPriceProvider {
   readonly key = "from_evcc";
   private readonly logger = new Logger(FromEvccProvider.name);
   constructor(private readonly evccForecast: RawForecastEntry[] = [], private readonly _cfg?: FromEvccConfig) {}
 
-  collect(ctx: MarketProviderContext): Promise<MarketProviderResult> {
+  collect(ctx: EnergyPriceProviderContext): Promise<EnergyPriceProviderResult> {
     const forecast = Array.isArray(this.evccForecast) ? this.evccForecast : [];
     const priceSnapshot = derivePriceSnapshot(
       normalizePriceSlots(forecast),

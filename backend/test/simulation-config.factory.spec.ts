@@ -15,8 +15,14 @@ describe("SimulationConfigFactory", () => {
         max_charge_power_solar_w: 2500,
       },
       price: {
-        grid_fee_eur_per_kwh: "0.03",
-        feed_in_tariff_eur_per_kwh: 0.08,
+        grid_fee: {
+          type: "static",
+          eur_per_kwh: "0.03",
+        },
+        feed_in: {
+          type: "static",
+          eur_per_kwh: 0.08,
+        },
       },
       logic: {
         interval_seconds: 600,

@@ -147,24 +147,27 @@ export class TrpcRouter {
         backtest: t.procedure.query(() => {
           this.logger.log("tRPC.dashboard.backtest requested");
           const snapshot = this.simulationService.ensureSeedFromFixture();
-          const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
-          return this.backtestService.run(snapshot, simConfig);
+          const configDocument = this.runtimeConfig.getDocumentRef();
+          const simConfig = this.configFactory.create(configDocument);
+          return this.backtestService.run(snapshot, configDocument, simConfig);
         }),
         backtestHistory: t.procedure
           .input(z.object({ limit: z.number().int().min(1).max(31).default(7), skip: z.number().int().min(0).default(0) }))
           .query(({ input }) => {
             this.logger.log(`tRPC.dashboard.backtestHistory requested (limit=${input.limit}, skip=${input.skip})`);
             const snapshot = this.simulationService.ensureSeedFromFixture();
-            const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
-            return this.backtestService.runDailyHistory(snapshot, simConfig, input.limit, input.skip);
+            const configDocument = this.runtimeConfig.getDocumentRef();
+            const simConfig = this.configFactory.create(configDocument);
+            return this.backtestService.runDailyHistory(snapshot, configDocument, simConfig, input.limit, input.skip);
           }),
         backtestHistoryDetail: t.procedure
           .input(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }))
           .query(({ input }) => {
             this.logger.log(`tRPC.dashboard.backtestHistoryDetail requested (date=${input.date})`);
             const snapshot = this.simulationService.ensureSeedFromFixture();
-            const simConfig = this.configFactory.create(this.runtimeConfig.getDocumentRef());
-            return this.backtestService.getDailyHistoryDetail(snapshot, simConfig, input.date);
+            const configDocument = this.runtimeConfig.getDocumentRef();
+            const simConfig = this.configFactory.create(configDocument);
+            return this.backtestService.getDailyHistoryDetail(snapshot, configDocument, simConfig, input.date);
           }),
       }),
     });

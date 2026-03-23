@@ -1,5 +1,6 @@
 import type { BacktestResultSummary, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
 import { EnergyPrice, Money, Percentage, Power, TimeSlot } from "@chargecaster/domain";
+import type { ConfigDocument } from "../config/schemas";
 
 export interface BacktestInterval {
   slot: TimeSlot;
@@ -66,6 +67,7 @@ export interface DailyHistoryIndex {
 }
 
 export interface BuildDailyBacktestOptions {
+  configDocument?: ConfigDocument;
   snapshot?: SnapshotPayload;
   fallbackMarginalPrice?: number;
   initialSimSocPercent?: number | null;
@@ -74,7 +76,7 @@ export interface BuildDailyBacktestOptions {
 export interface DailyBacktestStrategy {
   readonly name: string;
   readonly requiresSequentialState: boolean;
-  run(snapshot: SnapshotPayload, config: SimulationConfig): BacktestResult;
+  run(snapshot: SnapshotPayload, config: SimulationConfig, options?: BuildDailyBacktestOptions): BacktestResult;
   buildDailyEntry(date: string, config: SimulationConfig, options?: BuildDailyBacktestOptions): DailyBacktestEntry | null;
 }
 

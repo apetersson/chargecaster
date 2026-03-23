@@ -7,18 +7,18 @@ import {
 } from "@chargecaster/domain";
 import { Logger } from "@nestjs/common";
 import { parseMarketForecast, type AwattarConfig } from "../schemas";
-import { MarketProvider, MarketProviderContext, MarketProviderResult } from "./provider.types";
+import { EnergyPriceProvider, EnergyPriceProviderContext, EnergyPriceProviderResult } from "./provider.types";
 import { clampHorizon } from "./provider.utils";
 
 const DEFAULT_MARKET_DATA_URL = "https://api.awattar.de/v1/marketdata";
 const REQUEST_TIMEOUT_MS = 15000;
 
-export class AwattarProvider implements MarketProvider {
+export class AwattarProvider implements EnergyPriceProvider {
   readonly key = "awattar";
   private readonly logger = new Logger(AwattarProvider.name);
   constructor(private readonly cfg?: AwattarConfig) {}
 
-  async collect(ctx: MarketProviderContext): Promise<MarketProviderResult> {
+  async collect(ctx: EnergyPriceProviderContext): Promise<EnergyPriceProviderResult> {
     const endpoint = this.cfg?.url ?? DEFAULT_MARKET_DATA_URL;
     try {
       this.logger.log(`Fetching Awattar market data from ${endpoint}`);

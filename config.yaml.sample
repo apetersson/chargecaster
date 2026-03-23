@@ -12,7 +12,40 @@ evcc:
   base_url: "http://evcc.invalid:7070"
 
 price:
-  grid_fee_eur_per_kwh: 0.11
+  energy:
+    awattar:
+      priority: 2
+      url: "https://api.awattar.de/v1/marketdata"
+      max_hours: 72
+    # Optional ENTSO-E new-transparency provider (use at your own risk; unofficial API)
+    # entsoe:
+    #   priority: 1
+    #   zone: "BZN|10YDE-ENBW-----N"
+    #   tz: "CET"
+    #   max_hours: 168
+    #   aggregate_hourly: false
+    from_evcc:
+      priority: 3
+  grid_fee:
+    type: "e-control"
+    netzbereich: "Wien"
+    # Supported netzbereich values:
+    # Burgenland, Graz, Innsbruck, Kärnten, Klagenfurt, Kleinwalsertal,
+    # Linz, Niederösterreich, Oberösterreich, Salzburg, Steiermark,
+    # Tirol, Vorarlberg, Wien
+    # Current scope: Netzebene 7 / residential non-demand-metered only.
+    # Stored as gross EUR/kWh and only for usage-dependent ct/kWh items.
+    # Fixed Euro/Zählpunkt items stay out of the optimizer.
+    # Static fallback:
+    # type: "static"
+    # eur_per_kwh: 0.1008
+  feed_in:
+    type: "awattar-sunny"
+    # Static fallback:
+    # type: "static"
+    # eur_per_kwh: 0.05
+    # Alternative hourly export pricing:
+    # type: "awattar-sunny-spot"
 
 location:
   latitude: 48.000
@@ -43,19 +76,3 @@ load_forecast:
   model_dir: "../data/models/load-forecast"
   self_training_enabled: false
   python_executable: "python3"
-
-market_data:
-  awattar:
-    priority: 2
-    url: "https://api.awattar.de/v1/marketdata"
-    max_hours: 72
-  # Optional ENTSO-E new-transparency provider (use at your own risk; unofficial API)
-  # entsoe:
-  #   priority: 1
-  #   zone: "BZN|10YDE-ENBW-----N"
-  #   tz: "CET"
-  #   max_hours: 168
-  #   aggregate_hourly: false   # set true to time-weight average 15m prices into hourly
-  # Fallback to EVCC-provided price forecast if others are empty
-  from_evcc:
-    priority: 3

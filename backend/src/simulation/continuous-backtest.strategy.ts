@@ -23,6 +23,7 @@ export class ContinuousBacktestStrategy extends DailyIsolatedBacktestStrategy {
     }
 
     const result = this.runForHistory(points, config, {
+      configDocument: options?.configDocument,
       snapshot: options?.snapshot,
       marginalPrice: marginalPrice ?? undefined,
       initialSimSocPercent: options?.initialSimSocPercent,

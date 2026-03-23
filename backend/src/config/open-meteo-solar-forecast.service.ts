@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { Energy, Power } from "@chargecaster/domain";
 import type { RawSolarEntry } from "@chargecaster/domain";
 
-import type { ConfigDocument } from "./schemas";
+import { resolveEnergyPriceConfig, type ConfigDocument } from "./schemas";
 import { WeatherService, type SolarArrayConfig } from "./weather.service";
 
 const DEFAULT_SOLAR_FORECAST_HOURS = 72;
@@ -91,9 +91,10 @@ function normalizeSolarArrays(config: ConfigDocument): SolarArrayConfig[] {
 }
 
 function resolveSolarForecastHours(config: ConfigDocument): number {
+  const energyConfig = resolveEnergyPriceConfig(config);
   const configured = [
-    config.market_data?.awattar?.max_hours,
-    config.market_data?.entsoe?.max_hours,
+    energyConfig?.awattar?.max_hours,
+    energyConfig?.entsoe?.max_hours,
   ]
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
   return configured.length ? Math.max(...configured) : DEFAULT_SOLAR_FORECAST_HOURS;

@@ -34,6 +34,7 @@ export interface SimulationInput {
   config: SimulationConfig;
   liveState: { battery_soc?: number | null };
   forecast: RawForecastEntry[];
+  feedInTariffEurPerKwhBySlot?: (number | undefined)[];
   warnings?: string[];
   errors?: string[];
   priceSnapshotEurPerKwh?: number | null;
@@ -197,6 +198,7 @@ export class SimulationService {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
       feedInTariffEurPerKwh: feedInTariff.eurPerKwh,
+      feedInTariffEurPerKwhBySlot: input.feedInTariffEurPerKwhBySlot,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
       dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
@@ -244,6 +246,7 @@ export class SimulationService {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
       feedInTariffEurPerKwh: feedInTariff.eurPerKwh,
+      feedInTariffEurPerKwhBySlot: input.feedInTariffEurPerKwhBySlot,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: false,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,

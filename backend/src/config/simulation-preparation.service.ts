@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 
 import type { DemandForecastEntry, ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
 import { parseTimestamp } from "../simulation/solar";
-import type { ConfigDocument } from "./schemas";
+import { resolveEnergyPriceConfig, type ConfigDocument } from "./schemas";
 import { SimulationConfigFactory } from "./simulation-config.factory";
 import { MarketDataService } from "./market-data.service";
 import { EvccDataService } from "./evcc-data.service";
@@ -193,7 +193,12 @@ export class SimulationPreparationService {
     let solarForecast: RawSolarEntry[] = [];
 
     const evccResult = await this.evccDataService.collect(configFile.evcc, warnings);
-    const marketResult = await this.marketDataService.collect(configFile.market_data, simulationConfig, warnings, evccResult.forecast);
+    const marketResult = await this.marketDataService.collect(
+      resolveEnergyPriceConfig(configFile),
+      simulationConfig,
+      warnings,
+      evccResult.forecast,
+    );
     this.logger.verbose(
       `Market data fetch summary: raw_slots=${marketResult.forecast.length}, price_snapshot=${marketResult.priceSnapshot ?? "n/a"}`,
     );

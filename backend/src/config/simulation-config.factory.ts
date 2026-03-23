@@ -1,7 +1,11 @@
 import { Injectable } from "@nestjs/common";
 
 import type { SimulationConfig } from "@chargecaster/domain";
-import type { ConfigDocument } from "./schemas";
+import {
+  resolveConfiguredStaticFeedInTariffEurPerKwh,
+  resolveConfiguredStaticGridFeeEurPerKwh,
+  type ConfigDocument,
+} from "./schemas";
 
 function coerceNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -24,7 +28,6 @@ function coerceNumber(value: unknown): number | null {
 export class SimulationConfigFactory {
   create(config: ConfigDocument): SimulationConfig {
     const battery = config.battery ?? {};
-    const price = config.price ?? {};
     const logic = config.logic ?? {};
 
     const capacity = coerceNumber(battery.capacity_kwh) ?? 0;
@@ -40,8 +43,8 @@ export class SimulationConfigFactory {
         ? undefined
         : Math.min(Math.max(maxChargeSocRaw, 0), 100);
 
-    const gridFee = coerceNumber(price.grid_fee_eur_per_kwh) ?? 0;
-    const feedInTariffRaw = coerceNumber(price.feed_in_tariff_eur_per_kwh);
+    const gridFee = resolveConfiguredStaticGridFeeEurPerKwh(config) ?? 0;
+    const feedInTariffRaw = resolveConfiguredStaticFeedInTariffEurPerKwh(config);
     const feedInTariff =
       feedInTariffRaw != null && feedInTariffRaw >= 0 ? feedInTariffRaw : null;
 

@@ -66,6 +66,24 @@ describe("configuration schema parsers", () => {
         model_dir: "../data/models/load-forecast",
         self_training_enabled: true,
       },
+      price: {
+        energy: {
+          awattar: {
+            priority: 2,
+            max_hours: 72,
+          },
+          from_evcc: {
+            priority: 3,
+          },
+        },
+        grid_fee: {
+          type: "e-control",
+          netzbereich: "Graz",
+        },
+        feed_in: {
+          type: "awattar-sunny-spot",
+        },
+      },
       logic: {
         interval_seconds: 300,
       },
@@ -78,6 +96,10 @@ describe("configuration schema parsers", () => {
     expect(parsed.location?.longitude).toBe(16.134);
     expect(parsed.solar?.[0]?.kwp).toBe(5);
     expect(parsed.load_forecast?.self_training_enabled).toBe(true);
+    expect(parsed.price?.energy?.awattar?.priority).toBe(2);
+    expect(parsed.price?.grid_fee?.type).toBe("e-control");
+    expect(parsed.price?.grid_fee?.type === "e-control" ? parsed.price.grid_fee.netzbereich : null).toBe("Graz");
+    expect(parsed.price?.feed_in?.type).toBe("awattar-sunny-spot");
     expect(parsed.logic?.interval_seconds).toBe(300);
     const logic = parseConfigDocument({ logic: { house_load_w: 2200 } }).logic as Record<string, unknown>;
     expect("house_load_w" in logic).toBe(false);

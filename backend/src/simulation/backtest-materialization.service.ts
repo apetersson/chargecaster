@@ -51,8 +51,9 @@ export class BacktestMaterializationService implements OnModuleDestroy {
 
     this.runInProgress = true;
     try {
-      const config = this.configFactory.create(this.runtimeConfig.getDocumentRef());
-      const result = this.backtestService.materializeHistoricalDailyBacktests(config, {dates, missingOnly});
+      const configDocument = this.runtimeConfig.getDocumentRef();
+      const config = this.configFactory.create(configDocument);
+      const result = this.backtestService.materializeHistoricalDailyBacktests(configDocument, config, {dates, missingOnly});
       this.logger.log(
         `Backtest materialization ${reason} complete: materialized=${result.materialized}, skipped=${result.skipped}`,
       );

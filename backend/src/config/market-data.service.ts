@@ -1,18 +1,18 @@
 import { Injectable, Logger } from "@nestjs/common";
 
 import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
-import type { ConfigDocument } from "./schemas";
+import type { EnergyPriceConfig } from "./schemas";
 import { AwattarProvider } from "./providers/awattar.provider";
 import { EntsoeNewProvider } from "./providers/entsoe_new.provider";
 import { FromEvccProvider } from "./providers/from_evcc.provider";
-import type { MarketProvider, MarketProviderContext } from "./providers/provider.types";
+import type { EnergyPriceProvider, EnergyPriceProviderContext } from "./providers/provider.types";
 
 @Injectable()
 export class MarketDataService {
   private readonly logger = new Logger(MarketDataService.name);
 
   async collect(
-    config: ConfigDocument["market_data"] | undefined,
+    config: EnergyPriceConfig | undefined,
     simulationConfig: SimulationConfig,
     warnings: string[],
     evccFallback?: RawForecastEntry[],
@@ -29,24 +29,24 @@ export class MarketDataService {
 
     for (const p of providers) {
       this.logger.log(`Collecting market data via provider ${p.key}`);
-      let impl: MarketProvider | null = null;
+      let impl: EnergyPriceProvider | null = null;
       if (p.key === "awattar") {
         if (!awattarCfg) {
-          throw new Error("market_data.awattar is referenced by priority but missing in config");
+          throw new Error("price.energy.awattar is referenced by priority but missing in config");
         }
         impl = new AwattarProvider(awattarCfg);
       } else if (p.key === "entsoe") {
         if (!entsoeCfg) {
-          throw new Error("market_data.entsoe is referenced by priority but missing in config");
+          throw new Error("price.energy.entsoe is referenced by priority but missing in config");
         }
         impl = new EntsoeNewProvider(entsoeCfg);
       } else {
         if (!fromEvccCfg) {
-          throw new Error("market_data.from_evcc is referenced by priority but missing in config");
+          throw new Error("price.energy.from_evcc is referenced by priority but missing in config");
         }
         impl = new FromEvccProvider(Array.isArray(evccFallback) ? evccFallback : [], fromEvccCfg);
       }
-      const ctx: MarketProviderContext = {simulationConfig, warnings};
+      const ctx: EnergyPriceProviderContext = {simulationConfig, warnings};
       const {forecast, priceSnapshot} = await impl.collect(ctx);
       this.logger.verbose(
         `Provider ${p.key} returned forecast=${forecast.length}, price_snapshot=${priceSnapshot ?? "n/a"}`,
