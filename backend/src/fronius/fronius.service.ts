@@ -78,6 +78,15 @@ interface FroniusTimeOfUseEntry {
   Weekdays: FroniusWeekdays;
 }
 
+interface LocalDateParts {
+  year: number;
+  month: number;
+  day: number;
+  weekday: keyof FroniusWeekdays;
+  hour: string;
+  minute: string;
+}
+
 @Injectable()
 
 export class FroniusService {
@@ -89,6 +98,7 @@ export class FroniusService {
   private readonly maxChargeLimit: Percentage | null;
   private readonly chargeFloorPower: Power | null;
   private readonly chargeFloorWindowMinutes: number;
+  private readonly timeZone: string | null;
   private lastAppliedTarget: Percentage | null = null;
   private lastAppliedMode: FroniusMode | null = null;
   private workingBatteriesPath: string | null = null;
@@ -104,6 +114,7 @@ export class FroniusService {
     this.autoModeFloorOverride = this.parsePercentage(document.battery?.auto_mode_floor_soc ?? null);
     this.maxChargeLimit = this.parsePercentage(document.battery?.max_charge_soc_percent ?? null);
     this.chargeFloorPower = this.parsePositivePower(document.battery?.max_charge_power_w ?? null);
+    this.timeZone = this.parseTimeZone(document.location?.timezone ?? null);
     const intervalSeconds = this.parsePositiveNumber(document.logic?.interval_seconds ?? null) ?? 300;
     this.chargeFloorWindowMinutes = Math.min(
       MAX_TIME_OF_USE_WINDOW_MINUTES,
@@ -485,6 +496,20 @@ export class FroniusService {
     return watts == null ? null : Power.fromWatts(watts);
   }
 
+  private parseTimeZone(value: unknown): string | null {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return null;
+    }
+    const candidate = value.trim();
+    try {
+      new Intl.DateTimeFormat("en-GB", {timeZone: candidate}).format(new Date());
+      return candidate;
+    } catch {
+      this.logger.warn(`Invalid configured timezone "${candidate}"; falling back to server timezone.`);
+      return null;
+    }
+  }
+
   private buildUrl(host: string, path: string): string {
     const trimmedHost = host.endsWith("/") ? host.slice(0, -1) : host;
     const normalizedHost = trimmedHost.startsWith("http://") || trimmedHost.startsWith("https://")
@@ -711,16 +736,26 @@ export class FroniusService {
     const start = new Date(now);
     start.setSeconds(0, 0);
     const fallbackEnd = new Date(start.getTime() + this.chargeFloorWindowMinutes * 60_000);
+    const startParts = this.getLocalDateParts(start);
     const end = chargeUntil && chargeUntil.getTime() > start.getTime()
       ? new Date(chargeUntil)
       : fallbackEnd;
+    const endParts = this.getLocalDateParts(end);
     if (
-      end.getFullYear() !== start.getFullYear() ||
-      end.getMonth() !== start.getMonth() ||
-      end.getDate() !== start.getDate()
+      endParts.year !== startParts.year ||
+      endParts.month !== startParts.month ||
+      endParts.day !== startParts.day
     ) {
-      end.setFullYear(start.getFullYear(), start.getMonth(), start.getDate());
-      end.setHours(23, 59, 0, 0);
+      return {
+        Active: active,
+        Power: power,
+        ScheduleType: "CHARGE_MIN",
+        TimeTable: {
+          Start: this.formatClockTime(start),
+          End: "23:59",
+        },
+        Weekdays: this.buildWeekdaysForDate(start),
+      };
     }
     if (end.getTime() <= start.getTime()) {
       end.setTime(start.getTime() + 60_000);
@@ -747,16 +782,90 @@ export class FroniusService {
       Sat: false,
       Sun: false,
     };
-    const dayIndex = date.getDay();
-    const dayNames: (keyof FroniusWeekdays)[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    weekdays[dayNames[dayIndex]] = true;
+    weekdays[this.getLocalDateParts(date).weekday] = true;
     return weekdays;
   }
 
   private formatClockTime(value: Date): string {
-    const hours = value.getHours().toString().padStart(2, "0");
-    const minutes = value.getMinutes().toString().padStart(2, "0");
-    return `${hours}:${minutes}`;
+    const parts = this.getLocalDateParts(value);
+    return `${parts.hour}:${parts.minute}`;
+  }
+
+  private getLocalDateParts(value: Date): LocalDateParts {
+    if (!this.timeZone) {
+      return {
+        year: value.getFullYear(),
+        month: value.getMonth() + 1,
+        day: value.getDate(),
+        weekday: this.systemWeekdayName(value),
+        hour: value.getHours().toString().padStart(2, "0"),
+        minute: value.getMinutes().toString().padStart(2, "0"),
+      };
+    }
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: this.timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    const fields = formatter.formatToParts(value);
+    const year = this.extractNumericDatePart(fields, "year");
+    const month = this.extractNumericDatePart(fields, "month");
+    const day = this.extractNumericDatePart(fields, "day");
+    const hour = this.extractTextDatePart(fields, "hour");
+    const minute = this.extractTextDatePart(fields, "minute");
+    const weekdayToken = this.extractTextDatePart(fields, "weekday");
+    const weekday = this.parseWeekdayName(weekdayToken);
+    return {year, month, day, weekday, hour, minute};
+  }
+
+  private extractNumericDatePart(
+    fields: Intl.DateTimeFormatPart[],
+    partType: Intl.DateTimeFormatPartTypes,
+  ): number {
+    const value = this.extractTextDatePart(fields, partType);
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Unable to parse ${partType} from timezone-formatted date.`);
+    }
+    return parsed;
+  }
+
+  private extractTextDatePart(
+    fields: Intl.DateTimeFormatPart[],
+    partType: Intl.DateTimeFormatPartTypes,
+  ): string {
+    const match = fields.find((field) => field.type === partType)?.value;
+    if (!match) {
+      throw new Error(`Missing ${partType} in timezone-formatted date.`);
+    }
+    return match;
+  }
+
+  private parseWeekdayName(value: string): keyof FroniusWeekdays {
+    const normalized = value.slice(0, 3);
+    switch (normalized) {
+      case "Mon":
+      case "Tue":
+      case "Wed":
+      case "Thu":
+      case "Fri":
+      case "Sat":
+      case "Sun":
+        return normalized;
+      default:
+        throw new Error(`Unsupported weekday token "${value}" from timezone formatter.`);
+    }
+  }
+
+  private systemWeekdayName(value: Date): keyof FroniusWeekdays {
+    const dayIndex = value.getDay();
+    const dayNames: (keyof FroniusWeekdays)[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return dayNames[dayIndex];
   }
 
   private serializeTimeOfUseEntry(entry: FroniusTimeOfUseEntry): Record<string, unknown> {
