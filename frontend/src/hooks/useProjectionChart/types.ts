@@ -7,8 +7,9 @@ export type SeriesSource = "history" | "forecast" | "gap";
 export interface ProjectionPoint extends ScatterDataPoint {
   source: SeriesSource;
   xEnd?: number | null;
+  feedInY?: number | null;
   isCurrentMarker?: boolean;
-  // Optional strategy annotation for forecast price bars ("auto" | "charge" | "hold")
+  // Optional strategy annotation for forecast price bars.
   // copied from OracleEntry["strategy"].
   strategy?: OracleEntry["strategy"];
 }

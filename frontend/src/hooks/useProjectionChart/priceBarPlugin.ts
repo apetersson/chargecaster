@@ -2,6 +2,10 @@ import type { Plugin } from "chart.js";
 
 import {
   DEFAULT_SLOT_DURATION_MS,
+  FEED_IN_PRICE_BORDER,
+  FEED_IN_PRICE_FILL,
+  FEED_IN_PRICE_HISTORY_BAR_BG,
+  FEED_IN_PRICE_HISTORY_BAR_BORDER,
   PRICE_BORDER,
   PRICE_BORDER_AUTO,
   PRICE_BORDER_CHARGE,
@@ -39,7 +43,10 @@ const priceBarPlugin: Plugin = {
       const points = dataset.data as ProjectionPoint[];
       for (const point of points) {
         const value = point.y;
-        if (Number.isNaN(value)) {
+        const feedInValue = point.feedInY;
+        const hasImportBar = Number.isFinite(value);
+        const hasFeedInBar = Number.isFinite(feedInValue);
+        if (!hasImportBar && !hasFeedInBar) {
           continue;
         }
         const startValue = point.x;
@@ -51,13 +58,13 @@ const priceBarPlugin: Plugin = {
           : startValue + DEFAULT_SLOT_DURATION_MS;
         const left = xScale.getPixelForValue(startValue);
         const right = xScale.getPixelForValue(endValue);
-        const top = yScale.getPixelForValue(value);
         const base = yScale.getPixelForValue(0);
 
         const barLeft = Math.min(left, right);
         const barWidth = Math.max(1, Math.abs(right - left));
-        const barTop = Math.min(top, base);
-        const barHeight = Math.max(1, Math.abs(base - top));
+        const barCount = hasImportBar && hasFeedInBar ? 2 : 1;
+        const innerGap = barCount === 2 ? Math.min(4, barWidth * 0.08) : 0;
+        const segmentWidth = Math.max(1, (barWidth - innerGap) / barCount);
 
         // Pick forecast color by oracle strategy: auto -> pinkish blue, charge -> greenish blue
         const forecastFill: string =
@@ -65,6 +72,8 @@ const priceBarPlugin: Plugin = {
             ? PRICE_FILL_CHARGE
             : point.strategy === "auto"
               ? PRICE_FILL_AUTO
+              : point.strategy === "limit"
+                ? PRICE_FILL_HOLD
               : point.strategy === "hold"
                 ? PRICE_FILL_HOLD
                 : PRICE_FILL;
@@ -72,19 +81,57 @@ const priceBarPlugin: Plugin = {
           ? PRICE_BORDER_CHARGE
           : point.strategy === "auto"
             ? PRICE_BORDER_AUTO
+            : point.strategy === "limit"
+              ? PRICE_BORDER_HOLD
             : point.strategy === "hold"
               ? PRICE_BORDER_HOLD
               : PRICE_BORDER;
 
-        ctx.save();
-        ctx.fillStyle = resolveBarColors(point, forecastFill, PRICE_HISTORY_BAR_BG);
-        ctx.strokeStyle = resolveBarColors(point, forecastBorder, PRICE_HISTORY_BAR_BORDER);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.rect(barLeft, barTop, barWidth, barHeight);
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
+        const drawBar = (
+          barValue: number,
+          leftPx: number,
+          widthPx: number,
+          fillColor: string,
+          borderColor: string,
+        ): void => {
+          const top = yScale.getPixelForValue(barValue);
+          const barTop = Math.min(top, base);
+          const barHeight = Math.max(1, Math.abs(base - top));
+          ctx.save();
+          ctx.fillStyle = fillColor;
+          ctx.strokeStyle = borderColor;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.rect(leftPx, barTop, widthPx, barHeight);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        };
+
+        if (hasImportBar) {
+          drawBar(
+            value,
+            barLeft,
+            segmentWidth,
+            resolveBarColors(point, forecastFill, PRICE_HISTORY_BAR_BG),
+            resolveBarColors(point, forecastBorder, PRICE_HISTORY_BAR_BORDER),
+          );
+        }
+
+        if (hasFeedInBar) {
+          const feedInLeft = hasImportBar ? barLeft + segmentWidth + innerGap : barLeft;
+          const normalizedFeedInValue = point.feedInY;
+          if (typeof normalizedFeedInValue !== "number" || !Number.isFinite(normalizedFeedInValue)) {
+            continue;
+          }
+          drawBar(
+            normalizedFeedInValue,
+            feedInLeft,
+            segmentWidth,
+            resolveBarColors(point, FEED_IN_PRICE_FILL, FEED_IN_PRICE_HISTORY_BAR_BG),
+            resolveBarColors(point, FEED_IN_PRICE_BORDER, FEED_IN_PRICE_HISTORY_BAR_BORDER),
+          );
+        }
       }
     });
   },

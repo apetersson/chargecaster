@@ -13,7 +13,7 @@ const DAILY_LOAD_ALL_PAGE_SIZE = 31;
 type DailyBacktestDetailsByDate = Partial<Record<string, DailyBacktestDetail>>;
 type DailyBacktestErrorsByDate = Partial<Record<string, string>>;
 
-type UseBacktestHistoryState = {
+export type UseBacktestHistoryState = {
   backtest: BacktestResult | null;
   backtestLoading: boolean;
   backtestError: string | null;

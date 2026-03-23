@@ -49,6 +49,57 @@ section.card h2 {
     font-size: 1.2rem;
 }
 
+.section-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+}
+
+.section-card-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.section-card-header h2 {
+    margin: 0;
+}
+
+.section-card-subtitle {
+    margin: 0;
+    color: rgba(226, 232, 240, 0.72);
+    font-size: 0.92rem;
+}
+
+.section-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.section-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.section-title-group {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.section-title-group h2 {
+    margin: 0;
+}
+
 section.card.banner {
     display: flex;
     justify-content: space-between;
@@ -59,6 +110,15 @@ section.card.banner {
 /* Dedicated area that owns chart height, so the card can auto-size */
 .chart-viewport {
     height: 360px;
+}
+
+.chart-footer-controls {
+    margin-top: 1rem;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
 }
 
 .history-detail-chart {
@@ -74,6 +134,7 @@ section.card.banner {
 .chart-controls {
     display: inline-flex;
     gap: 0.4rem;
+    flex-wrap: wrap;
 }
 
 .chart-controls .chip {
@@ -86,45 +147,105 @@ section.card.banner {
     font-size: 0.8rem;
 }
 
+.chart-controls .chip:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
 .chart-controls .chip.active {
     background: rgba(56, 189, 248, 0.25);
     border-color: rgba(56, 189, 248, 0.6);
     color: #e0f2fe;
 }
 
-.grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 1rem;
-}
-
-.metric {
+.control-group {
     display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
 }
 
-.metric .label {
-    font-size: 0.85rem;
+.control-label {
+    font-size: 0.75rem;
     opacity: 0.75;
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
-.metric .value {
-    font-size: 1.6rem;
+.metric-groups-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+}
+
+.metric-group-card {
+    margin: 0;
+    padding: 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(15, 23, 42, 0.35);
+}
+
+.metric-group-title {
+    margin: 0 0 0.9rem;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(191, 219, 254, 0.9);
+}
+
+.metric-group-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.metric-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    padding: 0.8rem 0.9rem;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.metric-tile-label {
+    font-size: 0.72rem;
+    opacity: 0.72;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+}
+
+.metric-tile-value {
+    min-width: 0;
     font-weight: 600;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
 }
 
-.metric .value.small {
-    font-size: 1rem;
+.metric-tile-headline .metric-tile-value {
+    font-size: 1.45rem;
 }
 
-.metric .value.positive {
+.metric-tile-supporting .metric-tile-value {
+    font-size: 0.98rem;
+}
+
+.metric-tile-tone-default {
+    color: #f8fafc;
+}
+
+.metric-tile-tone-brand {
+    color: #38bdf8;
+}
+
+.metric-tile-tone-positive {
     color: var(--positive, #4caf50);
 }
 
-.metric .value.negative {
+.metric-tile-tone-negative {
     color: var(--negative, #f44336);
 }
 
@@ -250,12 +371,6 @@ tr:nth-child(odd) {
     letter-spacing: 0.04em;
 }
 
-small.timestamp {
-    display: block;
-    margin-top: 0.5rem;
-    opacity: 0.7;
-}
-
 ul {
     margin: 0;
     padding-left: 1.1rem;
@@ -265,12 +380,12 @@ li + li {
     margin-top: 0.45rem;
 }
 
-.metric.strategy .value {
-    color: #38bdf8;
-}
+@media (max-width: 720px) {
+    .metric-group-grid {
+        grid-template-columns: 1fr;
+    }
 
-.metric.strategy .value,
-.metric .value.strategy {
-    color: #38bdf8;
-    font-weight: 600;
+    .metric-tile-headline .metric-tile-value {
+        font-size: 1.25rem;
+    }
 }

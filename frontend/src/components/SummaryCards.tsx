@@ -2,11 +2,28 @@ import type { JSX } from "react";
 
 import type { SnapshotSummary } from "../types";
 import { formatDate, formatNumber, formatPercent, formatSignedNumber, formatTimeRange, statusClass } from "../utils/format";
+import type { UseBacktestHistoryState } from "../hooks/useBacktestHistory";
+import SectionCardHeader from "./common/SectionCardHeader";
+import BacktestSummaryGrid from "./backtest/BacktestSummaryGrid";
+import MetricGroupCard from "./metrics/MetricGroupCard";
+import MetricTile from "./metrics/MetricTile";
 
-function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | null {
+function SummaryCards({
+  data,
+  backtestState,
+}: {
+  data: SnapshotSummary | null;
+  backtestState: UseBacktestHistoryState;
+}): JSX.Element | null {
   if (!data) {
     return null;
   }
+  const {
+    backtest,
+    backtestLoading,
+    backtestError,
+    refreshBacktest,
+  } = backtestState;
   const {label, className} = statusClass(data.errors, data.warnings);
 
   const currentMode = data.current_mode ?? null;
@@ -19,6 +36,9 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
     }
     if (currentMode === "hold") {
       return "Hold";
+    }
+    if (currentMode === "limit") {
+      return "Limit";
     }
     return "";
   })();
@@ -38,80 +58,92 @@ function SummaryCards({data}: { data: SnapshotSummary | null }): JSX.Element | n
     }
     return `${charge}/${discharge}`;
   })();
+  const projectedSavingsTone = (data.projected_savings_eur ?? 0) >= 0 ? "positive" : "negative";
+  const activeControlSavingsTone = (data.active_control_savings_eur ?? 0) >= 0 ? "positive" : "negative";
 
   return (
     <section className="card">
-      <div className="grid">
-        <div className="metric strategy">
-          <span className="label">Current Strategy</span>
-          <span className="value strategy">{actionLabel}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Status</span>
-          <span className={className}>{label}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Current SOC</span>
-          <span className="value">{formatPercent(data.current_soc_percent)}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Charge/Discharge Eff.</span>
-          <span className="value small">{batteryEfficiencyLabel}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Baseline Cost</span>
-          <span className="value small">{formatNumber(data.baseline_cost_eur, " €")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Basic Battery Cost</span>
-          <span className="value small">{formatNumber(data.basic_battery_cost_eur, " €")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Price Snapshot</span>
-          <span className="value small">
-            {formatNumber(
+      <SectionCardHeader
+        title="Future Plan and Past Savings"
+        subtitle="Forecast-based strategy and projected outcome, plus historical savings evidence."
+        actions={(
+          <button
+            type="button"
+            className="refresh-button"
+            onClick={refreshBacktest}
+            disabled={backtestLoading}
+          >
+            {backtestLoading ? "Refreshing savings..." : "Refresh savings"}
+          </button>
+        )}
+      />
+      <div className="metric-groups-grid">
+        <MetricGroupCard title="Future Decision">
+          <MetricTile label="Current Strategy" value={actionLabel || "n/a"} tone="brand" emphasis="headline" />
+          <MetricTile label="Current SOC" value={formatPercent(data.current_soc_percent)} emphasis="headline" />
+          <MetricTile label="Status" value={<span className={className}>{label}</span>} />
+          <MetricTile
+            label="Price Snapshot"
+            value={formatNumber(
               data.price_snapshot_ct_per_kwh ??
               (data.price_snapshot_eur_per_kwh != null
                 ? data.price_snapshot_eur_per_kwh * 100
                 : null),
               " ct/kWh",
             )}
-          </span>
-        </div>
-        <div className="metric">
-          <span className="label">Projected Cost</span>
-          <span className="value small">{formatNumber(data.projected_cost_eur, " €")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">PV/Battery Savings</span>
-          <span className="value small">{formatNumber(data.projected_savings_eur, " €")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Active Control Projected Savings</span>
-          <span className="value small">{formatNumber(data.active_control_savings_eur, " €")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Projected Grid Power</span>
-          <span className="value small">{formatNumber(data.projected_grid_power_w, " W")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Peak Solar Adj.</span>
-          <span className="value small">{peakSolarAdjustmentLabel}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Expected Feed-in</span>
-          <span className="value small">{formatNumber(data.expected_feed_in_kwh, "kWh")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Forecast Horizon</span>
-          <span className="value small">{formatNumber(data.forecast_hours, " h")}</span>
-        </div>
-        <div className="metric">
-          <span className="label">Forecast Samples</span>
-          <span className="value small">{formatNumber(data.forecast_samples, " slots")}</span>
-        </div>
+          />
+        </MetricGroupCard>
+
+        <MetricGroupCard title="Future Outcome">
+          <MetricTile label="Projected Cost" value={formatNumber(data.projected_cost_eur, " €")} emphasis="headline" />
+          <MetricTile label="PV/Battery Savings" value={formatNumber(data.projected_savings_eur, " €")} tone={projectedSavingsTone} />
+          <MetricTile
+            label="Active Control Projected Savings"
+            value={formatNumber(data.active_control_savings_eur, " €")}
+            tone={activeControlSavingsTone}
+            emphasis="headline"
+          />
+          <MetricTile label="Expected Feed-in" value={formatNumber(data.expected_feed_in_kwh, " kWh")} />
+          <MetricTile label="Baseline Cost" value={formatNumber(data.baseline_cost_eur, " €")} />
+          <MetricTile label="Basic Battery Cost" value={formatNumber(data.basic_battery_cost_eur, " €")} />
+        </MetricGroupCard>
+
+        <MetricGroupCard title="Live System Context">
+          <MetricTile label="Charge/Discharge Eff." value={batteryEfficiencyLabel} />
+          <MetricTile label="Projected Grid Power" value={formatNumber(data.projected_grid_power_w, " W")} />
+          <MetricTile
+            label="Grid Fee"
+            value={formatNumber(
+              data.grid_fee_eur_per_kwh != null
+                ? data.grid_fee_eur_per_kwh * 100
+                : null,
+              " ct/kWh",
+            )}
+          />
+        </MetricGroupCard>
+
+        <MetricGroupCard title="Future Forecast Context">
+          <MetricTile label="Forecast Horizon" value={formatNumber(data.forecast_hours, " h")} />
+          <MetricTile label="Forecast Samples" value={formatNumber(data.forecast_samples, " slots")} />
+          <MetricTile label="Peak Solar Adj." value={peakSolarAdjustmentLabel} />
+          <MetricTile label="Last update" value={formatDate(data.timestamp)} />
+        </MetricGroupCard>
+
+        {backtestError ? (
+          <MetricGroupCard title="Past Savings Check">
+            <MetricTile label="Status" value={<span className="status err">{backtestError}</span>} />
+          </MetricGroupCard>
+        ) : !backtest || backtest.history_points_used < 2 ? (
+          <MetricGroupCard title="Past Savings Check">
+            <MetricTile
+              label="Status"
+              value={backtestLoading ? "Loading..." : "Not enough history data"}
+            />
+          </MetricGroupCard>
+        ) : (
+          <BacktestSummaryGrid data={backtest} />
+        )}
       </div>
-      <small className="timestamp">Last update: {formatDate(data.timestamp)}</small>
     </section>
   );
 }

@@ -34,6 +34,18 @@ import type {
 const eraStartMs = (era: DerivedEra): number => era.slot.start.getTime();
 const eraEndMs = (era: DerivedEra): number => era.slot.end.getTime();
 const eraMidpointMs = (era: DerivedEra): number => era.slot.midpoint().getTime();
+const resolveFeedInTariffCents = (era: ForecastEra): number | null => {
+  const costSource = era.sources.find((source) => source.type === "cost");
+  if (!costSource) {
+    return null;
+  }
+  const cents = costSource.payload.feed_in_tariff_ct_per_kwh;
+  if (typeof cents === "number" && Number.isFinite(cents)) {
+    return cents;
+  }
+  const eur = costSource.payload.feed_in_tariff_eur_per_kwh;
+  return typeof eur === "number" && Number.isFinite(eur) ? eur * 100 : null;
+};
 
 const resolveInitialSoCPercent = (
   summary: SnapshotSummary | null,
@@ -258,6 +270,7 @@ const buildDemandSeries = (
 const buildPriceSeries = (
   history: HistoryPoint[],
   futureEras: DerivedEra[],
+  summary: SnapshotSummary | null,
 ): ProjectionPoint[] => {
   const historyPoints = history
     .map((entry) => toHistoryPoint(entry.timestamp, resolvePriceValue(entry)))
@@ -287,15 +300,18 @@ const buildPriceSeries = (
   });
 
   const futurePoints: ProjectionPoint[] = [];
+  const showFeedInPriceBars = summary?.show_feed_in_price_bars ?? false;
   for (const era of futureEras) {
     const price = era.price?.ctPerKwh ?? null;
     if (!isFiniteNumber(price)) {
       continue;
     }
+    const feedInPrice = showFeedInPriceBars ? resolveFeedInTariffCents(era.era) : null;
     futurePoints.push({
       x: eraStartMs(era),
       xEnd: eraEndMs(era),
       y: price,
+      feedInY: feedInPrice,
       source: "forecast",
       strategy: era.oracle?.strategy,
     });
@@ -358,7 +374,7 @@ export const buildDatasets = (
   const gridSeries = buildGridSeries(history, futureEras);
   const solarSeries = buildSolarSeries(history, futureEras);
   const demandSeries = buildDemandSeries(history, demandForecast);
-  const priceSeries = buildPriceSeries(history, futureEras);
+  const priceSeries = buildPriceSeries(history, futureEras, summary);
   const powerSeries = [...gridSeries, ...solarSeries, ...demandSeries];
 
   const datasets: ChartDataset<"line", ProjectionPoint[]>[] = [

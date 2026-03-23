@@ -4,14 +4,29 @@ import HistoryTable from "./components/HistoryTable";
 import MessageList from "./components/MessageList";
 import SummaryCards from "./components/SummaryCards";
 import TrajectoryTable from "./components/TrajectoryTable";
-import BacktestCard from "./components/BacktestCard";
+import DailyHistoryCard from "./components/DailyHistoryCard";
 import { useDashboardData } from "./hooks/useDashboardData";
+import { useBacktestHistory } from "./hooks/useBacktestHistory";
 import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChart";
 import { useIsMobile } from "./hooks/useIsMobile";
 
 function App(): JSX.Element {
-  const { summary, history, forecast, demandForecast, oracleEntries, loading, error, refresh } = useDashboardData();
+  const {
+    summary,
+    history,
+    forecast,
+    demandForecast,
+    oracleEntries,
+    planningVariant,
+    planningVariantDryRunEnabled,
+    setPlanningVariant,
+    switchingPlanningVariant,
+    loading,
+    error,
+    refresh,
+  } = useDashboardData();
   const isMobile = useIsMobile();
+  const backtestState = useBacktestHistory();
   const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
   const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
 
@@ -35,9 +50,9 @@ function App(): JSX.Element {
       ) : null}
 
       <section className="card chart">
-        <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-          <div style={{display: "flex", alignItems: "center", gap: 8}}>
-            <h2 style={{marginRight: 8}}>Charge Planning</h2>
+        <div className="section-toolbar">
+          <div className="section-title-group">
+            <h2>Charge Planning</h2>
           </div>
           <div className="chart-controls" role="group" aria-label="Chart display">
             <button
@@ -61,11 +76,38 @@ function App(): JSX.Element {
         <div className="chart-viewport">
           <canvas ref={projectionChartRef} aria-label="SOC projection chart"/>
         </div>
+        {planningVariantDryRunEnabled ? (
+          <div className="chart-footer-controls">
+            <div className="control-group" role="group" aria-label="Charge planning variant">
+              <span className="control-label">Variant</span>
+              <div className="chart-controls">
+                <button
+                  type="button"
+                  className={`chip ${planningVariant === "awattar-sunny" ? "active" : ""}`}
+                  onClick={() => setPlanningVariant("awattar-sunny")}
+                  aria-pressed={planningVariant === "awattar-sunny"}
+                  disabled={switchingPlanningVariant}
+                >
+                  awattar-sunny
+                </button>
+                <button
+                  type="button"
+                  className={`chip ${planningVariant === "awattar-sunny-spot" ? "active" : ""}`}
+                  onClick={() => setPlanningVariant("awattar-sunny-spot")}
+                  aria-pressed={planningVariant === "awattar-sunny-spot"}
+                  disabled={switchingPlanningVariant}
+                >
+                  awattar-sunny-spot
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </section>
 
-      <SummaryCards data={summary}/>
+      <SummaryCards data={summary} backtestState={backtestState} />
 
-      <BacktestCard />
+      <DailyHistoryCard backtestState={backtestState} />
 
       <TrajectoryTable forecast={forecast} demandForecast={demandForecast} oracleEntries={oracleEntries}/>
 
@@ -85,9 +127,9 @@ function App(): JSX.Element {
           onClick={() => {
             refresh();
           }}
-          disabled={loading}
+          disabled={loading || switchingPlanningVariant}
         >
-          {loading ? "Refreshing..." : "Refresh now"}
+          {switchingPlanningVariant ? "Switching variant..." : loading ? "Refreshing..." : "Refresh now"}
         </button>
       </section>
     </>

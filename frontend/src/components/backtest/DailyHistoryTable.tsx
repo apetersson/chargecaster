@@ -14,7 +14,6 @@ type DailyHistoryTableProps = {
   detailByDate: Partial<Record<string, DailyBacktestDetail>>;
   detailLoadingDate: string | null;
   detailErrorByDate: Partial<Record<string, string>>;
-  onRefresh: () => void;
   onLoadMore: () => void;
   onLoadAll: () => void;
   onToggleDetail: (date: string) => void;
@@ -35,20 +34,13 @@ function DailyHistoryTable({
   detailByDate,
   detailLoadingDate,
   detailErrorByDate,
-  onRefresh,
   onLoadMore,
   onLoadAll,
   onToggleDetail,
 }: DailyHistoryTableProps): JSX.Element {
-  const dividerStyle = {
-    marginTop: "1rem",
-    borderTop: "1px solid var(--border, #333)",
-    paddingTop: "1rem",
-  };
-
   if (error) {
     return (
-      <div style={dividerStyle}>
+      <div>
         <p className="status err">{error}</p>
       </div>
     );
@@ -56,7 +48,7 @@ function DailyHistoryTable({
 
   if (!entries || entries.length === 0) {
     return (
-      <div style={dividerStyle}>
+      <div>
         <p className="status">{loading ? "Computing..." : "No full calendar days in history yet."}</p>
       </div>
     );
@@ -65,19 +57,7 @@ function DailyHistoryTable({
   const totalSavings = entries.reduce((sum, entry) => sum + entry.result.savings_eur, 0);
 
   return (
-    <div style={dividerStyle}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-        <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Daily History ({entries.length} days)</span>
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={onRefresh}
-          disabled={loading}
-          style={{ fontSize: "0.75rem", padding: "4px 8px" }}
-        >
-          {loading ? "..." : "Refresh"}
-        </button>
-      </div>
+    <div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
           <thead>

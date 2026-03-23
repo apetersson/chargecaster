@@ -112,11 +112,15 @@ export const computeBounds = (
 
   for (const point of points) {
     const value = point.y;
-    if (!Number.isFinite(value)) {
-      continue;
+    if (Number.isFinite(value)) {
+      dataMin = dataMin === null ? value : Math.min(dataMin, value);
+      dataMax = dataMax === null ? value : Math.max(dataMax, value);
     }
-    dataMin = dataMin === null ? value : Math.min(dataMin, value);
-    dataMax = dataMax === null ? value : Math.max(dataMax, value);
+    const feedInValue = point.feedInY;
+    if (typeof feedInValue === "number" && Number.isFinite(feedInValue)) {
+      dataMin = dataMin === null ? feedInValue : Math.min(dataMin, feedInValue);
+      dataMax = dataMax === null ? feedInValue : Math.max(dataMax, feedInValue);
+    }
   }
 
   if (dataMin === null || dataMax === null) {

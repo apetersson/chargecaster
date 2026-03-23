@@ -16,6 +16,7 @@ export type {
 
 export type RouterOutputs = inferRouterOutputs<AppRouter>;
 export type DashboardOutputs = RouterOutputs["dashboard"];
+export type PlanningVariant = DashboardOutputs["planningVariant"]["variant"];
 
 export interface BacktestInterval {
   timestamp: string;

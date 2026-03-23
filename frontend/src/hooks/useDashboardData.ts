@@ -7,6 +7,7 @@ import type {
   ForecastEra,
   HistoryPoint,
   OracleEntry,
+  PlanningVariant,
 } from "../types";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -41,6 +42,10 @@ type DashboardDataState = {
   forecast: ForecastEra[];
   demandForecast: DemandForecastEntry[];
   oracleEntries: OracleEntry[];
+  planningVariant: PlanningVariant;
+  planningVariantDryRunEnabled: boolean;
+  setPlanningVariant: (variant: PlanningVariant) => void;
+  switchingPlanningVariant: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => void;
@@ -52,6 +57,9 @@ export function useDashboardData(): DashboardDataState {
   const [forecast, setForecast] = useState<ForecastEra[]>([]);
   const [demandForecast, setDemandForecast] = useState<DemandForecastEntry[]>([]);
   const [oracleEntries, setOracleEntries] = useState<OracleEntry[]>([]);
+  const [planningVariant, setPlanningVariantState] = useState<PlanningVariant>("awattar-sunny");
+  const [planningVariantDryRunEnabled, setPlanningVariantDryRunEnabled] = useState(false);
+  const [switchingPlanningVariant, setSwitchingPlanningVariant] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,12 +67,13 @@ export function useDashboardData(): DashboardDataState {
     const execute = async () => {
       try {
         setLoading(true);
-        const [summaryData, historyData, forecastData, demandForecastData, oracleData] = await Promise.all([
+        const [summaryData, historyData, forecastData, demandForecastData, oracleData, planningVariantData] = await Promise.all([
           trpcClient.dashboard.summary.query(),
           trpcClient.dashboard.history.query(),
           trpcClient.dashboard.forecast.query(),
           trpcClient.dashboard.demandForecast.query(),
           trpcClient.dashboard.oracle.query(),
+          trpcClient.dashboard.planningVariant.query(),
         ]);
 
         setSummary(summaryData);
@@ -79,6 +88,8 @@ export function useDashboardData(): DashboardDataState {
         setForecast(forecastData.eras);
         setDemandForecast(demandForecastData.entries);
         setOracleEntries(oracleData.entries);
+        setPlanningVariantState(planningVariantData.variant);
+        setPlanningVariantDryRunEnabled(planningVariantData.dryRunEnabled);
         setError(null);
       } catch (err) {
         setError(getErrorMessage(err));
@@ -89,6 +100,29 @@ export function useDashboardData(): DashboardDataState {
 
     void execute();
   }, []);
+
+  const setPlanningVariant = useCallback((variant: PlanningVariant) => {
+    if (!planningVariantDryRunEnabled) {
+      setError("Planning variant switching is only available in dry mode.");
+      return;
+    }
+
+    const execute = async () => {
+      try {
+        setSwitchingPlanningVariant(true);
+        const result = await trpcClient.dashboard.setPlanningVariant.mutate({variant});
+        setPlanningVariantState(result.variant);
+        setPlanningVariantDryRunEnabled(result.dryRunEnabled);
+        refresh();
+      } catch (err) {
+        setError(getErrorMessage(err));
+      } finally {
+        setSwitchingPlanningVariant(false);
+      }
+    };
+
+    void execute();
+  }, [planningVariantDryRunEnabled, refresh]);
 
   useEffect(() => {
     refresh();
@@ -104,6 +138,10 @@ export function useDashboardData(): DashboardDataState {
     forecast,
     demandForecast,
     oracleEntries,
+    planningVariant,
+    planningVariantDryRunEnabled,
+    setPlanningVariant,
+    switchingPlanningVariant,
     loading,
     error,
     refresh,
