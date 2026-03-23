@@ -36,14 +36,14 @@ function resolveSlotDuration(entry: RawForecastEntry, start: Date, explicitEnd: 
     return between.milliseconds > 0 ? between : null;
   }
 
-  const durationHours = Number(entry.duration_hours ?? entry.durationHours ?? Number.NaN);
-  if (Number.isFinite(durationHours) && durationHours > 0) {
-    return Duration.fromHours(durationHours);
+  const hoursValue = Number(entry.duration_hours ?? entry.durationHours ?? Number.NaN);
+  if (Number.isFinite(hoursValue) && hoursValue > 0) {
+    return Duration.fromHours(hoursValue);
   }
 
-  const durationMinutes = Number(entry.duration_minutes ?? entry.durationMinutes ?? Number.NaN);
-  if (Number.isFinite(durationMinutes) && durationMinutes > 0) {
-    return Duration.fromMinutes(durationMinutes);
+  const minutesValue = Number(entry.duration_minutes ?? entry.durationMinutes ?? Number.NaN);
+  if (Number.isFinite(minutesValue) && minutesValue > 0) {
+    return Duration.fromMinutes(minutesValue);
   }
 
   return null;
@@ -76,7 +76,7 @@ export function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
     const slot = TariffSlot.fromTimeSlot(TimeSlot.fromStartAndDuration(start, slotDuration), energyPrice, eraId);
     const key = slot.start.getTime();
     const existing = slotsByStart.get(key);
-    if (!existing || slot.price < existing.price) {
+    if (!existing || slot.energyPrice.eurPerKwh < existing.energyPrice.eurPerKwh) {
       slotsByStart.set(key, slot);
     }
   }

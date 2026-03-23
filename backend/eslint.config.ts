@@ -17,7 +17,12 @@ export default [
     },
   },
   {
-    files: ["src/simulation/optimal-schedule.ts"],
+    files: [
+      "src/simulation/optimal-schedule.ts",
+      "src/simulation/battery-efficiency.service.ts",
+      "src/simulation/daily-isolated-backtest.strategy.ts",
+      "src/simulation/simulation.service.ts",
+    ],
     plugins: {
       chargecaster: {
         rules: {

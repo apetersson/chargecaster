@@ -4,9 +4,11 @@ import {
   Duration,
   Energy,
   EnergyPrice,
+  Money,
   Percentage,
   Power,
-  computeGridEnergyCostEur,
+  TimeSlot,
+  computeGridEnergyCost,
   energyDeltaFromSocPercent,
   energyFromPower,
   energyFromSoc,
@@ -17,6 +19,8 @@ import {
 import { StorageService } from "../storage/storage.service";
 import { normalizeHistoryList } from "./history.serializer";
 import type {
+  BacktestInterval,
+  BacktestIntervalPayload,
   BacktestResult,
   BuildDailyBacktestOptions,
   DailyBacktestEntry,
@@ -70,16 +74,15 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     config: SimulationConfig,
     options?: BuildDailyBacktestOptions,
   ): number | null {
-    const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
+    const gridFee = resolveGridFee(config);
     const nextDayPoints = this.loadUtcDayHistory(this.nextUtcDate(date));
     return (nextDayPoints.length >= 2
-      ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFeeEur)
+      ? this.deriveMarginalPriceFromHistory(nextDayPoints, gridFee)
       : null) ?? options?.fallbackMarginalPrice ?? null;
   }
 
-  protected deriveMarginalPriceFromHistory(points: HistoryPoint[], gridFeeEur: number): number | null {
-    let totalWeightedPrice = 0;
-    let totalHours = 0;
+  protected deriveMarginalPriceFromHistory(points: HistoryPoint[], gridFee: EnergyPrice): number | null {
+    const samples: { price: EnergyPrice; duration: Duration }[] = [];
     for (let i = 0; i < points.length - 1; i += 1) {
       const point = points[i];
       if (point.price_eur_per_kwh == null || !Number.isFinite(point.price_eur_per_kwh)) {
@@ -87,14 +90,16 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       }
       const t0 = new Date(point.timestamp).getTime();
       const t1 = new Date(points[i + 1].timestamp).getTime();
-      const hours = (t1 - t0) / MS_PER_HOUR;
-      if (hours <= 0 || hours > 2) {
+      const duration = Duration.fromMilliseconds(t1 - t0);
+      if (duration.milliseconds <= 0 || duration.hours > 2) {
         continue;
       }
-      totalWeightedPrice += (point.price_eur_per_kwh + gridFeeEur) * hours;
-      totalHours += hours;
+      samples.push({
+        price: EnergyPrice.fromEurPerKwh(point.price_eur_per_kwh).add(gridFee),
+        duration,
+      });
     }
-    return totalHours > 0 ? totalWeightedPrice / totalHours : null;
+    return samples.length > 0 ? EnergyPrice.weightedAverageByDuration(samples).eurPerKwh : null;
   }
 
   protected nextUtcDate(date: string): string {
@@ -136,8 +141,8 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     const maxChargePowerSolar = config.battery.max_charge_power_solar_w != null
       ? Power.fromWatts(Math.max(0, Number(config.battery.max_charge_power_solar_w)))
       : null;
-    const gridFeeEur = Number(config.price.grid_fee_eur_per_kwh ?? 0);
-    const feedInTariffEur = Math.max(0, Number(config.price.feed_in_tariff_eur_per_kwh ?? 0));
+    const gridFee = resolveGridFee(config);
+    const feedInTariff = resolveFeedInTariff(config);
     const houseLoadFallback = Power.fromWatts(2200);
     const marginalPrice =
       options?.marginalPrice ?? (options?.snapshot ? this.deriveMarginalDischargePrice(options.snapshot, config) : null);
@@ -154,10 +159,10 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       ? Number(options?.initialSimSocPercent)
       : firstSoc;
     const initialRelativeSocDiffPercent = firstSoc - simSocPercent;
-    const intervals: BacktestResult["intervals"] = [];
-    let actualTotalCost = 0;
-    let simulatedTotalCost = 0;
-    let cumulativeCashSavings = 0;
+    const intervals: BacktestInterval[] = [];
+    let actualTotalCost = Money.zero();
+    let simulatedTotalCost = Money.zero();
+    let cumulativeCashSavings = Money.zero();
 
     for (let i = 0; i < history.length - 1; i += 1) {
       const current = history[i];
@@ -165,16 +170,14 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
 
       const t0 = new Date(current.timestamp).getTime();
       const t1 = new Date(next.timestamp).getTime();
-      const durationMs = t1 - t0;
-      if (durationMs <= 0 || durationMs > MS_PER_HOUR * 2) {
+      const intervalMs = t1 - t0;
+      if (intervalMs <= 0 || intervalMs > MS_PER_HOUR * 2) {
         continue;
       }
-      const durationHours = durationMs / MS_PER_HOUR;
-      const duration = Duration.fromMilliseconds(durationMs);
+      const duration = Duration.fromMilliseconds(intervalMs);
 
       const priceEur = Number(current.price_eur_per_kwh ?? 0);
-      const importPrice = EnergyPrice.fromEurPerKwh(priceEur + gridFeeEur);
-      const feedInTariff = EnergyPrice.fromEurPerKwh(feedInTariffEur);
+      const importPrice = EnergyPrice.fromEurPerKwh(priceEur).add(gridFee);
 
       const homePower = current.home_power_w != null && Number.isFinite(current.home_power_w)
         ? Power.fromWatts(current.home_power_w)
@@ -213,7 +216,7 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
         : Power.fromWatts(siteDemand.watts - solarPower.watts - inferredBatteryPower.watts);
 
       const actualGridEnergy = energyFromPower(actualGridPower, duration);
-      const actualCost = computeGridEnergyCostEur(actualGridEnergy, importPrice, feedInTariff);
+      const actualCost = computeGridEnergyCost(actualGridEnergy, importPrice, feedInTariff);
 
       const netLoad = Power.fromWatts(siteDemand.watts - solarPower.watts);
       const simulatedSocStartPercent = simSocPercent;
@@ -261,38 +264,38 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       }
 
       const simGridEnergy = energyFromPower(simGridPower, duration);
-      const simCost = computeGridEnergyCostEur(simGridEnergy, importPrice, feedInTariff);
+      const simCost = computeGridEnergyCost(simGridEnergy, importPrice, feedInTariff);
 
-      actualTotalCost += actualCost;
-      simulatedTotalCost += simCost;
-      const cashSavings = simCost - actualCost;
-      cumulativeCashSavings += cashSavings;
+      actualTotalCost = actualTotalCost.add(actualCost);
+      simulatedTotalCost = simulatedTotalCost.add(simCost);
+      const cashSavings = simCost.subtract(actualCost);
+      cumulativeCashSavings = cumulativeCashSavings.add(cashSavings);
       const relativeSocDiffPercent = (nextSocPercent - simSocPercent) - initialRelativeSocDiffPercent;
-      const inventoryValue = energyDeltaFromSocPercent(relativeSocDiffPercent, capacity).kilowattHours * marginalPrice;
+      const inventoryValue = EnergyPrice.fromEurPerKwh(marginalPrice).costFor(
+        energyDeltaFromSocPercent(relativeSocDiffPercent, capacity),
+      );
 
       intervals.push({
-        timestamp: current.timestamp,
-        end_timestamp: next.timestamp,
-        duration_hours: durationHours,
-        price_eur_per_kwh: priceEur,
-        home_power_w: homePower.watts,
-        site_demand_power_w: siteDemand.watts,
-        synthetic_hidden_load_w: measuredSiteDemand == null ? hiddenLoad.watts : 0,
-        solar_power_w: solarPower.watts,
-        actual_grid_power_w: actualGridPower.watts,
-        actual_soc_percent: actualSocPercent,
-        simulated_soc_start_percent: simulatedSocStartPercent,
-        simulated_soc_percent: simSocPercent,
-        simulated_grid_power_w: simGridPower.watts,
-        actual_cost_eur: actualCost,
-        simulated_cost_eur: simCost,
-        cash_savings_eur: cashSavings,
-        cumulative_cash_savings_eur: cumulativeCashSavings,
-        inventory_value_eur: inventoryValue,
-        cumulative_savings_eur: cumulativeCashSavings + inventoryValue,
-        actual_charge_from_solar_w: actualChargeFromSolar.watts,
-        actual_charge_from_grid_w: actualChargeFromGrid.watts,
-        simulated_charge_from_solar_w: simulatedChargeFromSolar.watts,
+        slot: TimeSlot.fromDates(new Date(current.timestamp), new Date(next.timestamp)),
+        price: EnergyPrice.fromEurPerKwh(priceEur),
+        homePower,
+        siteDemandPower: siteDemand,
+        syntheticHiddenLoad: measuredSiteDemand == null ? hiddenLoad : Power.zero(),
+        solarPower,
+        actualGridPower,
+        actualSoc,
+        simulatedSocStart: Percentage.fromPercent(simulatedSocStartPercent),
+        simulatedSoc: Percentage.fromPercent(simSocPercent),
+        simulatedGridPower: simGridPower,
+        actualCost,
+        simulatedCost: simCost,
+        cashSavings,
+        cumulativeCashSavings,
+        inventoryValue,
+        cumulativeSavings: cumulativeCashSavings.add(inventoryValue),
+        actualChargeFromSolar,
+        actualChargeFromGrid,
+        simulatedChargeFromSolar,
       });
     }
 
@@ -303,10 +306,11 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
     const simFinalSoc = simSocPercent;
 
     const socDiffPercent = (actualFinalSoc - simFinalSoc) - initialRelativeSocDiffPercent;
-    const socDiffKwh = energyDeltaFromSocPercent(socDiffPercent, capacity).kilowattHours;
-    const socValueAdj = socDiffKwh * marginalPrice;
+    const socValueAdj = EnergyPrice.fromEurPerKwh(marginalPrice).costFor(
+      energyDeltaFromSocPercent(socDiffPercent, capacity),
+    );
 
-    const adjustedActualCost = actualTotalCost - socValueAdj;
+    const adjustedActualCost = actualTotalCost.subtract(socValueAdj);
     const adjustedSimCost = simulatedTotalCost;
 
     const firstTs = new Date(history[0].timestamp).getTime();
@@ -315,25 +319,25 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
 
     this.logger.log(
       `Backtest complete: ${intervals.length} intervals, span=${spanHours.toFixed(1)}h, ` +
-      `actual=${actualTotalCost.toFixed(3)}EUR, simulated=${simulatedTotalCost.toFixed(3)}EUR, ` +
-      `SOC adj=${socValueAdj.toFixed(3)}EUR (marginal=${(marginalPrice * 100).toFixed(1)}ct/kWh), ` +
-      `savings=${(adjustedSimCost - adjustedActualCost).toFixed(3)}EUR`,
+      `actual=${actualTotalCost.eur.toFixed(3)}EUR, simulated=${simulatedTotalCost.eur.toFixed(3)}EUR, ` +
+      `SOC adj=${socValueAdj.eur.toFixed(3)}EUR (marginal=${EnergyPrice.fromEurPerKwh(marginalPrice).ctPerKwh.toFixed(1)}ct/kWh), ` +
+      `savings=${adjustedSimCost.subtract(adjustedActualCost).eur.toFixed(3)}EUR`,
     );
 
     return {
       generated_at: new Date().toISOString(),
-      intervals,
-      actual_total_cost_eur: actualTotalCost,
-      simulated_total_cost_eur: simulatedTotalCost,
+      intervals: intervals.map(serializeBacktestInterval),
+      actual_total_cost_eur: actualTotalCost.eur,
+      simulated_total_cost_eur: simulatedTotalCost.eur,
       simulated_start_soc_percent: Number.isFinite(options?.initialSimSocPercent)
         ? Number(options?.initialSimSocPercent)
         : firstSoc,
       actual_final_soc_percent: actualFinalSoc,
       simulated_final_soc_percent: simFinalSoc,
-      soc_value_adjustment_eur: socValueAdj,
-      adjusted_actual_cost_eur: adjustedActualCost,
-      adjusted_simulated_cost_eur: adjustedSimCost,
-      savings_eur: adjustedSimCost - adjustedActualCost,
+      soc_value_adjustment_eur: socValueAdj.eur,
+      adjusted_actual_cost_eur: adjustedActualCost.eur,
+      adjusted_simulated_cost_eur: adjustedSimCost.eur,
+      savings_eur: adjustedSimCost.subtract(adjustedActualCost).eur,
       avg_price_eur_per_kwh: marginalPrice,
       history_points_used: history.length,
       span_hours: spanHours,
@@ -348,20 +352,20 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
   }
 
   protected deriveMarginalDischargePrice(snapshot: SnapshotPayload, config: SimulationConfig): number {
-    const gridFee = Number(config.price.grid_fee_eur_per_kwh ?? 0);
+    const gridFee = resolveGridFee(config);
     const eras = snapshot.forecast_eras;
     const oracle = snapshot.oracle_entries;
 
-    const eraPriceMap = new Map<string, number>();
+    const eraPriceMap = new Map<string, EnergyPrice>();
     for (const era of eras) {
       const costSource = era.sources.find((source) => source.type === "cost");
       if (costSource) {
-        eraPriceMap.set(era.era_id, costSource.payload.price_eur_per_kwh + gridFee);
+        eraPriceMap.set(era.era_id, EnergyPrice.fromEurPerKwh(costSource.payload.price_eur_per_kwh).add(gridFee));
       }
     }
 
-    let totalWeightedPrice = 0;
-    let totalDischargeWh = 0;
+    let totalWeightedValue = Money.zero();
+    let totalDischargeEnergy = Energy.zero();
     for (const entry of oracle) {
       if (entry.strategy !== "auto") {
         continue;
@@ -375,36 +379,37 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       if (price == null) {
         continue;
       }
-      const dischargeWh = Math.abs(entry.grid_energy_wh ?? 0);
-      if (dischargeWh <= 0) {
+      const dischargeEnergy = Energy.fromWattHours(Math.abs(entry.grid_energy_wh ?? 0));
+      if (dischargeEnergy.wattHours <= 0) {
         continue;
       }
-      totalWeightedPrice += price * dischargeWh;
-      totalDischargeWh += dischargeWh;
+      totalWeightedValue = totalWeightedValue.add(price.costFor(dischargeEnergy));
+      totalDischargeEnergy = totalDischargeEnergy.add(dischargeEnergy);
     }
 
-    if (totalDischargeWh > 0) {
-      return totalWeightedPrice / totalDischargeWh;
+    if (totalDischargeEnergy.wattHours > 0) {
+      return totalWeightedValue.eur / totalDischargeEnergy.kilowattHours;
     }
 
-    let totalHourPrice = 0;
-    let totalHours = 0;
+    const durationSamples: { price: EnergyPrice; duration: Duration }[] = [];
     for (const era of eras) {
       const hours = Number(era.duration_hours ?? 0);
       const costSource = era.sources.find((source) => source.type === "cost");
       if (costSource && hours > 0) {
-        totalHourPrice += (costSource.payload.price_eur_per_kwh + gridFee) * hours;
-        totalHours += hours;
+        durationSamples.push({
+          price: EnergyPrice.fromEurPerKwh(costSource.payload.price_eur_per_kwh).add(gridFee),
+          duration: Duration.fromHours(hours),
+        });
       }
     }
-    if (totalHours > 0) {
-      return totalHourPrice / totalHours;
+    if (durationSamples.length > 0) {
+      return EnergyPrice.weightedAverageByDuration(durationSamples).eurPerKwh;
     }
 
     const snapshotPrice = snapshot.price_snapshot_eur_per_kwh;
     return (typeof snapshotPrice === "number" && Number.isFinite(snapshotPrice))
-      ? snapshotPrice + gridFee
-      : gridFee;
+      ? EnergyPrice.fromEurPerKwh(snapshotPrice).add(gridFee).eurPerKwh
+      : gridFee.eurPerKwh;
   }
 
   protected emptyResult(reason: string): BacktestResult {
@@ -447,4 +452,41 @@ function minEnergy(first: Energy, ...rest: Energy[]): Energy {
     }
   }
   return min;
+}
+
+function serializeBacktestInterval(interval: BacktestInterval): BacktestIntervalPayload {
+  return {
+    timestamp: interval.slot.start.toISOString(),
+    end_timestamp: interval.slot.end.toISOString(),
+    duration_hours: interval.slot.duration.hours,
+    price_eur_per_kwh: interval.price.eurPerKwh,
+    home_power_w: interval.homePower.watts,
+    site_demand_power_w: interval.siteDemandPower.watts,
+    synthetic_hidden_load_w: interval.syntheticHiddenLoad.watts,
+    solar_power_w: interval.solarPower.watts,
+    actual_grid_power_w: interval.actualGridPower.watts,
+    actual_soc_percent: interval.actualSoc.percent,
+    simulated_soc_start_percent: interval.simulatedSocStart.percent,
+    simulated_soc_percent: interval.simulatedSoc.percent,
+    simulated_grid_power_w: interval.simulatedGridPower.watts,
+    actual_cost_eur: interval.actualCost.eur,
+    simulated_cost_eur: interval.simulatedCost.eur,
+    cash_savings_eur: interval.cashSavings.eur,
+    cumulative_cash_savings_eur: interval.cumulativeCashSavings.eur,
+    inventory_value_eur: interval.inventoryValue.eur,
+    cumulative_savings_eur: interval.cumulativeSavings.eur,
+    actual_charge_from_solar_w: interval.actualChargeFromSolar.watts,
+    actual_charge_from_grid_w: interval.actualChargeFromGrid.watts,
+    simulated_charge_from_solar_w: interval.simulatedChargeFromSolar.watts,
+  };
+}
+
+function resolveGridFee(config: SimulationConfig): EnergyPrice {
+  const gridFeeEurPerKwh = config.price.grid_fee_eur_per_kwh;
+  return EnergyPrice.fromEurPerKwh(gridFeeEurPerKwh ?? 0);
+}
+
+function resolveFeedInTariff(config: SimulationConfig): EnergyPrice {
+  const feedInTariffEurPerKwh = config.price.feed_in_tariff_eur_per_kwh;
+  return EnergyPrice.fromEurPerKwh(Math.max(0, feedInTariffEurPerKwh ?? 0));
 }

@@ -1,6 +1,30 @@
 import type { BacktestResultSummary, SimulationConfig, SnapshotPayload } from "@chargecaster/domain";
+import { EnergyPrice, Money, Percentage, Power, TimeSlot } from "@chargecaster/domain";
 
 export interface BacktestInterval {
+  slot: TimeSlot;
+  price: EnergyPrice;
+  homePower: Power;
+  siteDemandPower: Power;
+  syntheticHiddenLoad: Power;
+  solarPower: Power;
+  actualGridPower: Power;
+  actualSoc: Percentage;
+  simulatedSocStart: Percentage;
+  simulatedSoc: Percentage;
+  simulatedGridPower: Power;
+  actualCost: Money;
+  simulatedCost: Money;
+  cashSavings: Money;
+  cumulativeCashSavings: Money;
+  inventoryValue: Money;
+  cumulativeSavings: Money;
+  actualChargeFromSolar: Power;
+  actualChargeFromGrid: Power;
+  simulatedChargeFromSolar: Power;
+}
+
+export interface BacktestIntervalPayload {
   timestamp: string;
   end_timestamp: string;
   duration_hours: number;
@@ -26,7 +50,7 @@ export interface BacktestInterval {
 }
 
 export interface BacktestResult extends BacktestResultSummary {
-  intervals: BacktestInterval[];
+  intervals: BacktestIntervalPayload[];
 }
 
 export interface DailyBacktestEntry {

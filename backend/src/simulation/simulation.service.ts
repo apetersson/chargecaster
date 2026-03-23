@@ -344,7 +344,9 @@ export class SimulationService {
     if (observedSiteDemandPower) {
       historyEntry.site_demand_power_w = observedSiteDemandPower.watts;
     } else if (historyEntry.home_power_w != null) {
-      historyEntry.site_demand_power_w = historyEntry.home_power_w + Math.max(0, historyEntry.ev_charge_power_w ?? 0);
+      const homePower = Power.fromWatts(historyEntry.home_power_w);
+      const evChargePower = Power.fromWatts(Math.max(0, historyEntry.ev_charge_power_w ?? 0));
+      historyEntry.site_demand_power_w = homePower.add(evChargePower).watts;
     }
 
     this.storageRef.replaceSnapshot(structuredClone(snapshot));
@@ -461,15 +463,15 @@ function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample 
     return null;
   }
   const end = parseTimestamp(entry.end ?? null);
-  const durationHours = end && end.getTime() > start.getTime()
-    ? (end.getTime() - start.getTime()) / 3_600_000
-    : 1;
-  if (!Number.isFinite(durationHours) || durationHours <= 0) {
+  const duration = end && end.getTime() > start.getTime()
+    ? Duration.fromMilliseconds(end.getTime() - start.getTime())
+    : DEFAULT_SLOT_DURATION;
+  if (!(duration.milliseconds > 0)) {
     return null;
   }
 
   const calibratedPower = resolveFinitePower(entry.calibrated_power_w)
-    ?? inferSolarAveragePower(entry, durationHours);
+    ?? inferSolarAveragePower(entry, duration);
   const proxyPower = resolveFinitePower(entry.proxy_power_w);
   if (calibratedPower === null || proxyPower === null) {
     return null;
@@ -483,15 +485,15 @@ function toSolarDiscrepancySample(entry: RawSolarEntry): SolarDiscrepancySample 
   };
 }
 
-function inferSolarAveragePower(entry: RawSolarEntry, durationHours: number): Power | null {
-  if (durationHours <= 0) {
+function inferSolarAveragePower(entry: RawSolarEntry, duration: Duration): Power | null {
+  if (!(duration.milliseconds > 0)) {
     return null;
   }
-  const energyWh = resolveFiniteEnergy(entry.energy_wh)?.wattHours
+  const energy = resolveFiniteEnergy(entry.energy_wh)
     ?? (typeof entry.energy_kwh === "number" && Number.isFinite(entry.energy_kwh)
-      ? Energy.fromKilowattHours(entry.energy_kwh).wattHours
+      ? Energy.fromKilowattHours(entry.energy_kwh)
       : null);
-  return energyWh == null ? null : Power.fromWatts(energyWh / durationHours);
+  return energy == null ? null : energy.divideByDuration(duration);
 }
 
 function resolveFinitePower(value: number | null | undefined): Power | null {
@@ -535,23 +537,19 @@ function normalizeSolarSlots(raw: RawSolarEntry[]): SolarSlot[] {
     const slotTime = end && end.getTime() > start.getTime()
       ? TimeSlot.fromDates(start, end)
       : TimeSlot.fromStartAndDuration(start, DEFAULT_SLOT_DURATION);
-    const rawEnergyKwh = (() => {
-      if (typeof entry.energy_kwh === "number") {
-        return entry.energy_kwh;
+    const energy = (() => {
+      if (typeof entry.energy_kwh === "number" && Number.isFinite(entry.energy_kwh)) {
+        return Energy.fromKilowattHours(entry.energy_kwh);
       }
-      if (typeof entry.energy_wh === "number") {
-        return entry.energy_wh / 1000;
+      if (typeof entry.energy_wh === "number" && Number.isFinite(entry.energy_wh)) {
+        return Energy.fromWattHours(entry.energy_wh);
       }
       return null;
     })();
-    if (rawEnergyKwh == null) {
+    if (energy == null || energy.wattHours <= 0) {
       continue;
     }
-    const energy = Number(rawEnergyKwh);
-    if (!Number.isFinite(energy) || energy <= 0) {
-      continue;
-    }
-    slots.push({slot: slotTime, energy: Energy.fromKilowattHours(energy)});
+    slots.push({slot: slotTime, energy});
   }
 
   return slots.sort((a, b) => a.slot.start.getTime() - b.slot.start.getTime());

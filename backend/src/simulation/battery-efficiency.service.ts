@@ -5,11 +5,11 @@ import type { HistoryPoint } from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
 
 const LOOKBACK_DAYS = 7;
-const MAX_INTERVAL_HOURS = 1 / 6;
+const MAX_INTERVAL_DURATION = Duration.fromHours(1 / 6);
 const MIN_INTERVAL_STEPS_PER_RUN = 3;
-const MIN_SOC_DELTA_FRACTION_PER_RUN = 0.02;
-const MIN_EXTERNAL_ENERGY_KWH_PER_RUN = 0.2;
-const POWER_THRESHOLD_W = 300;
+const MIN_SOC_DELTA_PER_RUN = Percentage.fromRatio(0.02);
+const MIN_EXTERNAL_ENERGY_PER_RUN = Energy.fromKilowattHours(0.2);
+const POWER_THRESHOLD = Power.fromWatts(300);
 const HALF_LIFE_DAYS = 2;
 const DEFAULT_CHARGE_EFFICIENCY = Percentage.fromRatio(0.95);
 const DEFAULT_DISCHARGE_EFFICIENCY = Percentage.fromRatio(0.95);
@@ -128,7 +128,12 @@ export class BatteryEfficiencyService {
     return {
       timestampMs,
       batterySoc: Percentage.fromPercent(batterySocPercent),
-      batteryPower: Power.fromWatts(siteDemandPowerW - solarPowerW - gridPowerW),
+      batteryPower: Power.fromWatts(
+        Power.fromWatts(siteDemandPowerW)
+          .subtract(Power.fromWatts(solarPowerW))
+          .subtract(Power.fromWatts(gridPowerW))
+          .watts,
+      ),
     };
   }
 
@@ -140,11 +145,12 @@ export class BatteryEfficiencyService {
     for (let index = 1; index < points.length; index += 1) {
       const previous = points[index - 1];
       const current = points[index];
-      const durationHours = (current.timestampMs - previous.timestampMs) / (60 * 60 * 1000);
-      if (!(durationHours > 0) || durationHours > MAX_INTERVAL_HOURS) {
+      const intervalMs = current.timestampMs - previous.timestampMs;
+      if (!(intervalMs > 0) || intervalMs > MAX_INTERVAL_DURATION.milliseconds) {
         currentRun = this.flushRun(currentRun, chargeRuns, dischargeRuns);
         continue;
       }
+      const duration = Duration.fromMilliseconds(intervalMs);
 
       const averageBatteryPower = previous.batteryPower.add(current.batteryPower).scale(0.5);
       const socDeltaPercent = current.batterySoc.percent - previous.batterySoc.percent;
@@ -154,9 +160,7 @@ export class BatteryEfficiencyService {
         continue;
       }
 
-      const externalEnergy = Energy.fromWattHours(
-        Math.abs(averageBatteryPower.forDuration(Duration.fromHours(durationHours)).wattHours),
-      );
+      const externalEnergy = Energy.fromWattHours(Math.abs(averageBatteryPower.forDuration(duration).wattHours));
       if (!currentRun || currentRun.kind !== kind) {
         currentRun = this.flushRun(currentRun, chargeRuns, dischargeRuns);
         currentRun = {
@@ -185,10 +189,10 @@ export class BatteryEfficiencyService {
     averageBatteryPower: Power,
     socDeltaPercent: number,
   ): "charge" | "discharge" | null {
-    if (averageBatteryPower.watts < -POWER_THRESHOLD_W && socDeltaPercent >= 0) {
+    if (averageBatteryPower.watts < -POWER_THRESHOLD.watts && socDeltaPercent >= 0) {
       return "charge";
     }
-    if (averageBatteryPower.watts > POWER_THRESHOLD_W && socDeltaPercent <= 0) {
+    if (averageBatteryPower.watts > POWER_THRESHOLD.watts && socDeltaPercent <= 0) {
       return "discharge";
     }
     return null;
@@ -207,8 +211,8 @@ export class BatteryEfficiencyService {
       : Percentage.fromRatio(currentRun.startSoc.ratio - currentRun.endSoc.ratio);
     if (
       currentRun.steps >= MIN_INTERVAL_STEPS_PER_RUN &&
-      socDelta.ratio >= MIN_SOC_DELTA_FRACTION_PER_RUN &&
-      currentRun.externalEnergy.kilowattHours >= MIN_EXTERNAL_ENERGY_KWH_PER_RUN
+      socDelta.ratio >= MIN_SOC_DELTA_PER_RUN.ratio &&
+      currentRun.externalEnergy.wattHours >= MIN_EXTERNAL_ENERGY_PER_RUN.wattHours
     ) {
       const target = currentRun.kind === "charge" ? chargeRuns : dischargeRuns;
       target.push({
@@ -225,13 +229,15 @@ export class BatteryEfficiencyService {
     let denominator = 0;
     for (const run of runs) {
       const weight = this.recencyWeight(run.endedAtMs, nowMs);
-      numerator += weight * run.externalEnergy.kilowattHours * run.socDelta.ratio;
-      denominator += weight * run.externalEnergy.kilowattHours * run.externalEnergy.kilowattHours;
+      const x = run.externalEnergy.wattHours;
+      const y = capacity.multiply(run.socDelta).wattHours;
+      numerator += weight * x * y;
+      denominator += weight * x * x;
     }
     if (!(denominator > 0)) {
       return DEFAULT_CHARGE_EFFICIENCY;
     }
-    return clampEfficiency((numerator / denominator) * capacity.kilowattHours);
+    return clampEfficiency(numerator / denominator);
   }
 
   private estimateDischargeEfficiency(runs: EfficiencyRun[], capacity: Energy, nowMs: number): Percentage {
@@ -239,13 +245,15 @@ export class BatteryEfficiencyService {
     let denominator = 0;
     for (const run of runs) {
       const weight = this.recencyWeight(run.endedAtMs, nowMs);
-      numerator += weight * run.socDelta.ratio * run.externalEnergy.kilowattHours;
-      denominator += weight * run.socDelta.ratio * run.socDelta.ratio;
+      const x = capacity.multiply(run.socDelta).wattHours;
+      const y = run.externalEnergy.wattHours;
+      numerator += weight * x * y;
+      denominator += weight * x * x;
     }
     if (!(denominator > 0)) {
       return DEFAULT_DISCHARGE_EFFICIENCY;
     }
-    return clampEfficiency((numerator / denominator) / capacity.kilowattHours);
+    return clampEfficiency(numerator / denominator);
   }
 
   private recencyWeight(timestampMs: number, nowMs: number): number {
