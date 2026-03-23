@@ -16,16 +16,20 @@ const DEFAULT_DISCHARGE_EFFICIENCY = Percentage.fromRatio(0.95);
 const MIN_EFFICIENCY = Percentage.fromRatio(0.75);
 const MAX_EFFICIENCY = Percentage.fromRatio(0.995);
 const MIN_RUNS_PER_SIDE = 5;
+const DEFAULT_REFERENCE_C_RATE = 0.25;
 
 interface EfficiencyRun {
   endedAtMs: number;
   externalEnergy: Energy;
   socDelta: Percentage;
+  duration: Duration;
 }
 
 export interface BatteryEfficiencyEstimate {
   chargeEfficiency: Percentage;
   dischargeEfficiency: Percentage;
+  chargeAverageCRate: number;
+  dischargeAverageCRate: number;
   chargeRuns: number;
   dischargeRuns: number;
   source: "estimated" | "fallback";
@@ -75,16 +79,21 @@ export class BatteryEfficiencyService {
 
     const chargeEfficiency = this.estimateChargeEfficiency(chargeRuns, capacity, now.getTime());
     const dischargeEfficiency = this.estimateDischargeEfficiency(dischargeRuns, capacity, now.getTime());
+    const chargeAverageCRate = this.estimateAverageCRate(chargeRuns, now.getTime());
+    const dischargeAverageCRate = this.estimateAverageCRate(dischargeRuns, now.getTime());
 
     this.logger.verbose(
       `Estimated battery efficiencies from recent history: charge=${chargeEfficiency.percent.toFixed(2)}%, ` +
-      `discharge=${dischargeEfficiency.percent.toFixed(2)}%, charge_runs=${chargeRuns.length}, ` +
-      `discharge_runs=${dischargeRuns.length}`,
+      `discharge=${dischargeEfficiency.percent.toFixed(2)}%, ` +
+      `charge_avg_c=${chargeAverageCRate.toFixed(3)}, discharge_avg_c=${dischargeAverageCRate.toFixed(3)}, ` +
+      `charge_runs=${chargeRuns.length}, discharge_runs=${dischargeRuns.length}`,
     );
 
     return {
       chargeEfficiency,
       dischargeEfficiency,
+      chargeAverageCRate,
+      dischargeAverageCRate,
       chargeRuns: chargeRuns.length,
       dischargeRuns: dischargeRuns.length,
       source: "estimated",
@@ -98,6 +107,8 @@ export class BatteryEfficiencyService {
     return {
       chargeEfficiency: DEFAULT_CHARGE_EFFICIENCY,
       dischargeEfficiency: DEFAULT_DISCHARGE_EFFICIENCY,
+      chargeAverageCRate: DEFAULT_REFERENCE_C_RATE,
+      dischargeAverageCRate: DEFAULT_REFERENCE_C_RATE,
       chargeRuns,
       dischargeRuns,
       source: "fallback",
@@ -219,6 +230,7 @@ export class BatteryEfficiencyService {
         endedAtMs: currentRun.endedAtMs,
         externalEnergy: currentRun.externalEnergy,
         socDelta,
+        duration: Duration.fromMilliseconds(currentRun.endedAtMs - currentRun.startedAtMs),
       });
     }
     return null;
@@ -254,6 +266,24 @@ export class BatteryEfficiencyService {
       return DEFAULT_DISCHARGE_EFFICIENCY;
     }
     return clampEfficiency(numerator / denominator);
+  }
+
+  private estimateAverageCRate(runs: EfficiencyRun[], nowMs: number): number {
+    let numerator = 0;
+    let denominator = 0;
+    for (const run of runs) {
+      if (!(run.duration.hours > 0)) {
+        continue;
+      }
+      const weight = this.recencyWeight(run.endedAtMs, nowMs) * run.externalEnergy.kilowattHours;
+      const cRate = run.socDelta.ratio / run.duration.hours;
+      numerator += weight * cRate;
+      denominator += weight;
+    }
+    if (!(denominator > 0)) {
+      return DEFAULT_REFERENCE_C_RATE;
+    }
+    return numerator / denominator;
   }
 
   private recencyWeight(timestampMs: number, nowMs: number): number {

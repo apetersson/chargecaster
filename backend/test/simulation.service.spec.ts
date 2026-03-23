@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { EnergyPrice, normalizePriceSlots, TariffSlot } from "@chargecaster/domain";
+import { EnergyPrice, Percentage, normalizePriceSlots, TariffSlot } from "@chargecaster/domain";
 
 import type { PriceSlot, SimulationConfig } from "@chargecaster/domain";
 import { parseEvccState } from "../src/config/schemas";
@@ -191,6 +191,54 @@ describe("simulateOptimalSchedule oracle output", () => {
     if (lossyResult.next_step_soc_percent != null && efficientResult.next_step_soc_percent != null) {
       expect(lossyResult.next_step_soc_percent).toBeLessThan(efficientResult.next_step_soc_percent);
     }
+  });
+
+  it("tempers aggressive 4 kW grid charging when LiFePO4 efficiency degrades at higher C-rate", () => {
+    const slots: PriceSlot[] = [createSlot(0, 0.08), createSlot(1, 0.14)];
+    const sharedOptions = {
+      solarGenerationKwhPerSlot: [0, 0],
+      houseLoadWattsPerSlot: [1000, 1000],
+      chargeEfficiency: Percentage.fromRatio(0.95),
+      dischargeEfficiency: Percentage.fromRatio(0.95),
+    };
+
+    const withoutChemistry = simulateOptimalSchedule(
+      {
+        ...baseConfig,
+        battery: {
+          capacity_kwh: 10,
+          max_charge_power_w: 4000,
+          auto_mode_floor_soc: 5,
+          max_charge_soc_percent: 100,
+        },
+      },
+      {battery_soc: 20},
+      slots,
+      sharedOptions,
+    );
+
+    const withLifepo4 = simulateOptimalSchedule(
+      {
+        ...baseConfig,
+        battery: {
+          capacity_kwh: 10,
+          chemistry: "lifepo4",
+          max_charge_power_w: 4000,
+          auto_mode_floor_soc: 5,
+          max_charge_soc_percent: 100,
+        },
+      },
+      {battery_soc: 20},
+      slots,
+      sharedOptions,
+    );
+
+    expect(withoutChemistry.oracle_entries[0]?.strategy).toBe("charge");
+    expect(withLifepo4.oracle_entries[0]?.strategy).toBe("charge");
+    expect(withoutChemistry.next_step_soc_percent).toBeGreaterThan(withLifepo4.next_step_soc_percent ?? 0);
+    expect(withoutChemistry.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(
+      withLifepo4.oracle_entries[0]?.end_soc_percent ?? 0,
+    );
   });
 
   it("changes the SoC path when sunny-spot turns a valuable export window into a real limit constraint", () => {

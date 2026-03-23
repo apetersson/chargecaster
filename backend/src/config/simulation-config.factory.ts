@@ -66,6 +66,7 @@ export class SimulationConfigFactory {
     return {
       battery: {
         capacity_kwh: capacity,
+        chemistry: battery.chemistry ?? undefined,
         max_charge_power_w: maxChargePower,
         auto_mode_floor_soc: floorSoc ?? null,
         max_charge_power_solar_w: maxSolarChargePower ?? null,

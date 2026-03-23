@@ -130,6 +130,7 @@ const froniusConfigSchema = configSectionSchema
 const batteryConfigSchema = z
   .object({
     capacity_kwh: optionalNumberSchema.optional(),
+    chemistry: z.enum(["lifepo4"]).optional(),
     max_charge_power_w: optionalNumberSchema.optional(),
     auto_mode_floor_soc: optionalNumberSchema.optional(),
     max_charge_power_solar_w: optionalNumberSchema.optional(),

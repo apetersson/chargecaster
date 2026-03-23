@@ -10,6 +10,7 @@ describe("SimulationConfigFactory", () => {
     const config = {
       battery: {
         capacity_kwh: "12",
+        chemistry: "lifepo4",
         max_charge_power_w: 5000,
         auto_mode_floor_soc: 15,
         max_charge_power_solar_w: 2500,
@@ -38,6 +39,7 @@ describe("SimulationConfigFactory", () => {
     const result = factory.create(config);
 
     expect(result.battery.capacity_kwh).toBe(12);
+    expect(result.battery.chemistry).toBe("lifepo4");
     expect(result.battery.auto_mode_floor_soc).toBe(15);
     expect(result.price.grid_fee_eur_per_kwh).toBe(0.03);
     expect(result.logic.interval_seconds).toBe(600);

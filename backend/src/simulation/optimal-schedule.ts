@@ -1,4 +1,4 @@
-import type { OracleEntry, PriceSlot, SimulationConfig } from "@chargecaster/domain";
+import type { BatteryChemistry, OracleEntry, PriceSlot, SimulationConfig } from "@chargecaster/domain";
 import {
   computeGridEnergyCost,
   Duration,
@@ -10,6 +10,8 @@ import {
   energyFromPower,
   powerFromEnergy,
 } from "@chargecaster/domain";
+import { resolveTransitionEfficiencies } from "./battery-efficiency-curve";
+
 const SOC_STEPS = 100;
 const EPSILON = 1e-9;
 const GRID_CHARGE_STRATEGY_THRESHOLD_KWH = 0.05;
@@ -27,6 +29,8 @@ export interface SimulationOptions {
   allowGridChargeFromGrid?: boolean;
   chargeEfficiency?: Percentage;
   dischargeEfficiency?: Percentage;
+  chargeAverageCRate?: number;
+  dischargeAverageCRate?: number;
 }
 
 export interface SimulationOutput {
@@ -106,10 +110,13 @@ interface SimulationContext {
   maxChargePower: Power;
   maxSolarChargePower: Power | null;
   maxDischargePower: Power | null;
+  chemistry: BatteryChemistry | null;
   allowBatteryExport: boolean;
   allowGridChargeFromGrid: boolean;
   chargeEfficiency: Percentage;
   dischargeEfficiency: Percentage;
+  chargeAverageCRate: number;
+  dischargeAverageCRate: number;
   limitPreferredSlots: boolean[];
 }
 
@@ -177,6 +184,8 @@ function prepareSimulationContext(
       typeof options.allowGridChargeFromGrid === "boolean" ? options.allowGridChargeFromGrid : true,
     chargeEfficiency: normalizeEfficiency(options.chargeEfficiency),
     dischargeEfficiency: normalizeEfficiency(options.dischargeEfficiency),
+    chargeAverageCRate: normalizeAverageCRate(options.chargeAverageCRate),
+    dischargeAverageCRate: normalizeAverageCRate(options.dischargeAverageCRate),
   } as const;
 
   const maxChargePower = Power.fromWatts(Math.max(0, Number(battery.max_charge_power_w ?? 0)));
@@ -279,10 +288,13 @@ function prepareSimulationContext(
     maxChargePower,
     maxSolarChargePower,
     maxDischargePower,
+    chemistry: battery.chemistry ?? null,
     allowBatteryExport: normalizedOptions.allowBatteryExport,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
     chargeEfficiency: normalizedOptions.chargeEfficiency,
     dischargeEfficiency: normalizedOptions.dischargeEfficiency,
+    chargeAverageCRate: normalizedOptions.chargeAverageCRate,
+    dischargeAverageCRate: normalizedOptions.dischargeAverageCRate,
     limitPreferredSlots,
   };
 }
@@ -421,10 +433,20 @@ function evaluateStateTransitions(
 
     const nextSoCStep = currentSoCStep + deltaSoCSteps;
     const storedEnergyChange = energyPerStep.multiply(deltaSoCSteps);
-    const batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+    const transitionEfficiencies = resolveTransitionEfficiencies(
+      context.chemistry,
       storedEnergyChange,
+      profile.duration,
+      context.capacity,
       context.chargeEfficiency,
       context.dischargeEfficiency,
+      context.chargeAverageCRate,
+      context.dischargeAverageCRate,
+    );
+    const batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+      storedEnergyChange,
+      transitionEfficiencies.chargeEfficiency,
+      transitionEfficiencies.dischargeEfficiency,
     );
     const gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
 
@@ -585,10 +607,20 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     let nextSoCStep = transition.nextSoCStep;
     let deltaSoCSteps = transition.deltaSoCSteps;
     let storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-    let batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+    let transitionEfficiencies = resolveTransitionEfficiencies(
+      context.chemistry,
       storedEnergyChange,
+      profile.duration,
+      context.capacity,
       context.chargeEfficiency,
       context.dischargeEfficiency,
+      context.chargeAverageCRate,
+      context.dischargeAverageCRate,
+    );
+    let batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+      storedEnergyChange,
+      transitionEfficiencies.chargeEfficiency,
+      transitionEfficiencies.dischargeEfficiency,
     );
     const importPrice = profile.priceTotal;
     baselineCost = baselineCost.add(computeGridCost(profile.baselineGridEnergy, importPrice, profile.feedInTariff));
@@ -606,10 +638,20 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       nextSoCStep = context.minAllowedSoCStep;
       deltaSoCSteps = nextSoCStep - socStepIter;
       storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-      batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+      transitionEfficiencies = resolveTransitionEfficiencies(
+        context.chemistry,
         storedEnergyChange,
+        profile.duration,
+        context.capacity,
         context.chargeEfficiency,
         context.dischargeEfficiency,
+        context.chargeAverageCRate,
+        context.dischargeAverageCRate,
+      );
+      batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+        storedEnergyChange,
+        transitionEfficiencies.chargeEfficiency,
+        transitionEfficiencies.dischargeEfficiency,
       );
       gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
     }
@@ -747,10 +789,20 @@ function adjustForPvExportDuringRollout(
         nextSoCStep = Math.min(context.numSoCStates - 1, nextSoCStep + extraSteps);
         deltaSoCSteps = nextSoCStep - socStepIter;
         storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-        batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+        const transitionEfficiencies = resolveTransitionEfficiencies(
+          context.chemistry,
           storedEnergyChange,
+          profile.duration,
+          context.capacity,
           context.chargeEfficiency,
           context.dischargeEfficiency,
+          context.chargeAverageCRate,
+          context.dischargeAverageCRate,
+        );
+        batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+          storedEnergyChange,
+          transitionEfficiencies.chargeEfficiency,
+          transitionEfficiencies.dischargeEfficiency,
         );
         gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
       }
@@ -761,10 +813,20 @@ function adjustForPvExportDuringRollout(
           nextSoCStep = Math.min(context.numSoCStates - 1, socStepIter + targetSteps);
           deltaSoCSteps = nextSoCStep - socStepIter;
           storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-          batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+          const transitionEfficiencies = resolveTransitionEfficiencies(
+            context.chemistry,
             storedEnergyChange,
+            profile.duration,
+            context.capacity,
             context.chargeEfficiency,
             context.dischargeEfficiency,
+            context.chargeAverageCRate,
+            context.dischargeAverageCRate,
+          );
+          batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
+            storedEnergyChange,
+            transitionEfficiencies.chargeEfficiency,
+            transitionEfficiencies.dischargeEfficiency,
           );
           gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
         }
@@ -801,4 +863,11 @@ function normalizeEfficiency(value: Percentage | undefined): Percentage {
     return Percentage.full();
   }
   return Percentage.fromRatio(Math.min(0.999, Math.max(0.5, value.ratio)));
+}
+
+function normalizeAverageCRate(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || !(value > 0)) {
+    return 0.25;
+  }
+  return value;
 }

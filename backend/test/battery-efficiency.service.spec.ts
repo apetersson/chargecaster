@@ -65,6 +65,8 @@ describe("BatteryEfficiencyService", () => {
     expect(estimate.source).toBe("fallback");
     expect(estimate.chargeEfficiency.equals(Percentage.fromRatio(0.95))).toBe(true);
     expect(estimate.dischargeEfficiency.equals(Percentage.fromRatio(0.95))).toBe(true);
+    expect(estimate.chargeAverageCRate).toBeCloseTo(0.25, 6);
+    expect(estimate.dischargeAverageCRate).toBeCloseTo(0.25, 6);
     expect(estimate.chargeRuns).toBe(0);
     expect(estimate.dischargeRuns).toBe(0);
   });
@@ -119,5 +121,7 @@ describe("BatteryEfficiencyService", () => {
     expect(estimate.dischargeRuns).toBeGreaterThanOrEqual(5);
     expect(estimate.chargeEfficiency.ratio).toBeCloseTo(chargeEfficiency, 2);
     expect(estimate.dischargeEfficiency.ratio).toBeCloseTo(dischargeEfficiency, 2);
+    expect(estimate.chargeAverageCRate).toBeCloseTo(powerW / 1000 / capacityKwh * chargeEfficiency, 3);
+    expect(estimate.dischargeAverageCRate).toBeCloseTo(powerW / 1000 / capacityKwh / dischargeEfficiency, 3);
   });
 });

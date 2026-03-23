@@ -62,6 +62,7 @@ solar:
 
 battery:
   capacity_kwh: 10
+  chemistry: lifepo4
   max_charge_power_w: 500
   auto_mode_floor_soc: 5
 

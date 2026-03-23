@@ -87,6 +87,9 @@ describe("configuration schema parsers", () => {
       logic: {
         interval_seconds: 300,
       },
+      battery: {
+        chemistry: "lifepo4",
+      },
     });
 
     const fronius = parsed.fronius as Record<string, unknown>;
@@ -100,6 +103,7 @@ describe("configuration schema parsers", () => {
     expect(parsed.price?.grid_fee?.type).toBe("e-control");
     expect(parsed.price?.grid_fee?.type === "e-control" ? parsed.price.grid_fee.netzbereich : null).toBe("Graz");
     expect(parsed.price?.feed_in?.type).toBe("awattar-sunny-spot");
+    expect(parsed.battery?.chemistry).toBe("lifepo4");
     expect(parsed.logic?.interval_seconds).toBe(300);
     const logic = parseConfigDocument({ logic: { house_load_w: 2200 } }).logic as Record<string, unknown>;
     expect("house_load_w" in logic).toBe(false);

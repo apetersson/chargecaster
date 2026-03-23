@@ -267,12 +267,15 @@ export const solarSlotInputSchema = z.object({
 
 export const batteryConfigSchema = z.object({
   capacity_kwh: nullableNumberSchema,
+  chemistry: z.enum(["lifepo4"]).optional(),
   max_charge_power_w: nullableNumberSchema,
   auto_mode_floor_soc: nullableNumberSchema.optional(),
   max_charge_power_solar_w: nullableNumberSchema.optional(),
   max_discharge_power_w: nullableNumberSchema.optional(),
   max_charge_soc_percent: nullableNumberSchema.optional(),
 });
+
+export type BatteryChemistry = z.infer<typeof batteryConfigSchema>["chemistry"];
 
 export const priceConfigSchema = z.object({
   grid_fee_eur_per_kwh: nullableNumberSchema.optional(),

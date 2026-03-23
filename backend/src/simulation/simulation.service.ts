@@ -202,6 +202,8 @@ export class SimulationService {
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
       dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
+      chargeAverageCRate: batteryEfficiency.chargeAverageCRate,
+      dischargeAverageCRate: batteryEfficiency.dischargeAverageCRate,
     });
     const initialSoC = Percentage.fromPercent(result.initial_soc_percent);
     const nextSoC = Percentage.fromPercent(result.next_step_soc_percent ?? result.initial_soc_percent);
@@ -255,6 +257,8 @@ export class SimulationService {
       allowGridChargeFromGrid: false,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
       dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
+      chargeAverageCRate: batteryEfficiency.chargeAverageCRate,
+      dischargeAverageCRate: batteryEfficiency.dischargeAverageCRate,
     });
     // Assemble the API snapshot expected by the frontend and storage layers
     const snapshot: SnapshotPayload = {
