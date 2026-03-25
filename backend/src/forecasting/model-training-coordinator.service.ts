@@ -67,10 +67,10 @@ export class ModelTrainingCoordinator {
     child.on("exit", (code) => {
       this.activeProcess = null;
       if (code !== 0) {
-        this.logger.warn(`Background ${job.label} training exited with code ${code}`);
-      } else {
-        job.promoteIfEligible();
+        this.logger.warn(`Background ${job.label} training exited with code ${code}; will retry on the next scheduler-triggered training check`);
+        return;
       }
+      job.promoteIfEligible();
       const nextConfig = this.pendingConfig;
       if (nextConfig) {
         this.maybeStartTraining(nextConfig);

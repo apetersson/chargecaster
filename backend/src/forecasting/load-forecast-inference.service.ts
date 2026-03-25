@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
 import type { ConfigDocument } from "../config/schemas";
+import { ensureCatBoostRuntimeLibraryPath } from "./catboost-runtime";
 import { LoadForecastArtifactService, type ActiveLoadForecastArtifact } from "./load-forecast-artifact.service";
 
 type CatBoostModelInstance = {
@@ -73,6 +74,7 @@ export class LoadForecastInferenceService {
       return this.catBoostModule;
     }
     try {
+      ensureCatBoostRuntimeLibraryPath();
       const moduleRef = await import("catboost");
       this.catBoostModule = ("default" in moduleRef ? moduleRef.default : moduleRef) as CatBoostModule;
     } catch (error) {

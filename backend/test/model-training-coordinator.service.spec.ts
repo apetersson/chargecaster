@@ -151,6 +151,37 @@ describe("ModelTrainingCoordinator", () => {
     expect(spawnMock.mock.calls[0]?.[1]?.some((arg: unknown) => String(arg).includes("train_load_forecast.py"))).toBe(true);
   });
 
+  it("does not immediately retry a failed background training job", () => {
+    vi.setSystemTime(new Date("2026-03-13T12:15:00.000+01:00"));
+    const storage = {
+      listHistoryDayStatsBefore: () => createDayStats(1),
+    } as unknown as StorageService;
+    const loadArtifactService = {
+      ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-load-models-")),
+      readActiveArtifact: () => null,
+      promoteVersion: () => undefined,
+      writePromotionMarker: () => undefined,
+    } as unknown as LoadForecastArtifactService;
+    const priceArtifactService = {
+      ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-price-models-")),
+      readActiveArtifact: () => null,
+      promoteVersion: () => undefined,
+      writePromotionMarker: () => undefined,
+    } as unknown as PriceForecastArtifactService;
+    const configFileService = {
+      resolvePath: () => "/tmp/test-config.local.yaml",
+    } as unknown as ConfigFileService;
+    const service = new ModelTrainingCoordinator(storage, loadArtifactService, priceArtifactService, configFileService);
+
+    service.maybeStartTraining(createConfig());
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const firstChild = spawnMock.mock.results[0]?.value as ReturnType<typeof createSpawnResult>;
+    firstChild.emit("exit", 1);
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
   it("queues price-forecast training after bootstrapping load-forecast", () => {
     vi.setSystemTime(new Date("2026-03-13T12:15:00.000+01:00"));
     const storage = {
