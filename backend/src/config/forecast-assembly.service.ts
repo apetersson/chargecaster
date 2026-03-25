@@ -34,8 +34,8 @@ export class ForecastAssemblyService {
 
   buildForecastEras(
     canonicalForecast: RawForecastEntry[],
-    evccForecast: RawForecastEntry[],
-    marketForecast: RawForecastEntry[],
+    accurateForecast: RawForecastEntry[],
+    guesstimateForecast: RawForecastEntry[],
     solarForecast: RawSolarEntry[],
     gridFeeEurPerKwh: number,
   ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
@@ -49,7 +49,8 @@ export class ForecastAssemblyService {
         .filter((slot) => slot.startIso !== null),
     );
 
-    const marketIndex = this.buildStartIndex(marketForecast);
+    const accurateIndex = this.buildStartIndex(accurateForecast);
+    const guesstimateIndex = this.buildStartIndex(guesstimateForecast);
 
     const solarSlots = this.dedupeSlots(
       solarForecast
@@ -74,26 +75,45 @@ export class ForecastAssemblyService {
         eraMap.set(slot.startIso, entry);
       }
 
-      const baseCost = this.applySlotPrice(entry, slot.payload.price, slot.payload.unit, gridFeeEurPerKwh);
+      const baseCost = this.applySlotPrice(entry, slot.payload, gridFeeEurPerKwh);
       if (baseCost) {
-        const costSource: CostSource = {
+        const canonicalSource: CostSource = {
           provider: "canonical",
           type: "cost",
           payload: baseCost,
         };
-        this.addSource(entry, costSource);
+        this.addSource(entry, canonicalSource);
       }
 
-      const marketPayload = marketIndex.get(slot.startIso);
-      if (marketPayload) {
-        const marketCost = this.applySlotPrice(entry, marketPayload.price, marketPayload.unit, gridFeeEurPerKwh);
-        if (marketCost) {
-          const awattarSource: CostSource = {
-            provider: "awattar",
+      const accuratePayload = accurateIndex.get(slot.startIso);
+      if (accuratePayload) {
+        const accurateCost = this.buildSourcePayload(accuratePayload, gridFeeEurPerKwh);
+        if (accurateCost) {
+          const provider = typeof accuratePayload.provider === "string" && accuratePayload.provider.length > 0
+            ? accuratePayload.provider
+            : "accurate";
+          const accurateSource: CostSource = {
+            provider,
             type: "cost",
-            payload: marketCost,
+            payload: accurateCost,
           };
-          this.addSource(entry, awattarSource);
+          this.addSource(entry, accurateSource);
+        }
+      }
+
+      const guesstimatePayload = guesstimateIndex.get(slot.startIso);
+      if (guesstimatePayload) {
+        const guesstimateCost = this.buildSourcePayload(guesstimatePayload, gridFeeEurPerKwh);
+        if (guesstimateCost) {
+          const provider = typeof guesstimatePayload.provider === "string" && guesstimatePayload.provider.length > 0
+            ? guesstimatePayload.provider
+            : "synthetic";
+          const guesstimateSource: CostSource = {
+            provider,
+            type: "cost",
+            payload: guesstimateCost,
+          };
+          this.addSource(entry, guesstimateSource);
         }
       }
 
@@ -169,22 +189,13 @@ export class ForecastAssemblyService {
 
   private applySlotPrice(
     entry: EraEntry,
-    priceValue: unknown,
-    unitValue: unknown,
+    sourcePayload: MutableRecord,
     gridFeeEur: number,
   ): CostSource["payload"] | null {
-    const energyPrice = this.parseEnergyPrice(priceValue, unitValue);
-    if (!energyPrice) {
+    const payload = this.buildSourcePayload(sourcePayload, gridFeeEur);
+    if (!payload) {
       return null;
     }
-    const totalPrice = energyPrice.withAdditionalFee(gridFeeEur);
-    const payload: CostSource["payload"] = {
-      price_ct_per_kwh: energyPrice.ctPerKwh,
-      price_eur_per_kwh: energyPrice.eurPerKwh,
-      price_with_fee_ct_per_kwh: totalPrice.ctPerKwh,
-      price_with_fee_eur_per_kwh: totalPrice.eurPerKwh,
-      unit: "ct/kWh",
-    };
 
     entry.slot.payload.price = payload.price_eur_per_kwh;
     entry.slot.payload.unit = "EUR/kWh";
@@ -200,6 +211,25 @@ export class ForecastAssemblyService {
     entry.payload.price_with_fee_eur_per_kwh = payload.price_with_fee_eur_per_kwh;
 
     return payload;
+  }
+
+  private buildSourcePayload(
+    sourcePayload: MutableRecord,
+    gridFeeEur: number,
+  ): CostSource["payload"] | null {
+    const {priceValue, unitValue} = this.resolvePriceFields(sourcePayload);
+    const energyPrice = this.parseEnergyPrice(priceValue, unitValue);
+    if (!energyPrice) {
+      return null;
+    }
+    const totalPrice = energyPrice.withAdditionalFee(gridFeeEur);
+    return {
+      price_ct_per_kwh: energyPrice.ctPerKwh,
+      price_eur_per_kwh: energyPrice.eurPerKwh,
+      price_with_fee_ct_per_kwh: totalPrice.ctPerKwh,
+      price_with_fee_eur_per_kwh: totalPrice.eurPerKwh,
+      unit: "ct/kWh",
+    };
   }
 
   private buildSolarSource(provider: string, eraSlot: NormalizedSlot, solarSlot: NormalizedSlot | undefined): SolarSource | null {
@@ -330,6 +360,37 @@ export class ForecastAssemblyService {
       endIso,
       durationHours,
       timeSlot,
+    };
+  }
+
+  private resolvePriceFields(sourcePayload: MutableRecord): {priceValue: unknown; unitValue: unknown} {
+    if (this.toNumber(sourcePayload.price) !== null) {
+      return {
+        priceValue: sourcePayload.price,
+        unitValue: sourcePayload.unit ?? sourcePayload.price_unit ?? sourcePayload.value_unit,
+      };
+    }
+    if (this.toNumber(sourcePayload.value) !== null) {
+      return {
+        priceValue: sourcePayload.value,
+        unitValue: sourcePayload.value_unit ?? sourcePayload.price_unit ?? sourcePayload.unit,
+      };
+    }
+    if (this.toNumber(sourcePayload.price_eur_per_kwh) !== null) {
+      return {
+        priceValue: sourcePayload.price_eur_per_kwh,
+        unitValue: "EUR/kWh",
+      };
+    }
+    if (this.toNumber(sourcePayload.price_ct_per_kwh) !== null) {
+      return {
+        priceValue: sourcePayload.price_ct_per_kwh,
+        unitValue: "ct/kWh",
+      };
+    }
+    return {
+      priceValue: sourcePayload.price,
+      unitValue: sourcePayload.unit ?? sourcePayload.price_unit ?? sourcePayload.value_unit,
     };
   }
 

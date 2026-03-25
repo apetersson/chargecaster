@@ -151,6 +151,9 @@ export function derivePowerFromEnergy(
 
 export function extractForecastEraPrice(era: ForecastEra): EnergyPrice | null {
   const costSource = era.sources.find(
+    (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> =>
+      source.type === "cost" && source.provider === "canonical",
+  ) ?? era.sources.find(
     (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> => source.type === "cost",
   );
   if (!costSource) {

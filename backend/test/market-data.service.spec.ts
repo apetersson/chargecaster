@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SimulationConfig } from "@chargecaster/domain";
 import { MarketDataService } from "../src/config/market-data.service";
@@ -17,8 +17,43 @@ const createResponse = (body: unknown): FetchResult => ({
   json: () => Promise.resolve(body),
 }) as FetchResult;
 
+const createAwattarEntry = (startIso: string, priceEurPerKwh: number) => {
+  const startMs = new Date(startIso).getTime();
+  return {
+    start_timestamp: startMs,
+    end_timestamp: startMs + 3_600_000,
+    marketprice: priceEurPerKwh,
+    unit: "EUR/kWh",
+  };
+};
+
+const createEntsoeResponse = (startIso: string, pricesEurPerKwh: number[]) => {
+  const start = new Date(startIso);
+  const end = new Date(start.getTime() + pricesEurPerKwh.length * 3_600_000);
+  return {
+    instanceList: [
+      {
+        curveData: {
+          periodList: [
+            {
+              timeInterval: {
+                from: start.toISOString(),
+                to: end.toISOString(),
+              },
+              resolution: "PT1H",
+              pointMap: Object.fromEntries(
+                pricesEurPerKwh.map((price, index) => [String(index), [String(price * 1000)]]),
+              ),
+            },
+          ],
+        },
+      },
+    ],
+  };
+};
+
 describe("MarketDataService", () => {
-  const service = new MarketDataService();
+  const service = new MarketDataService({} as never, {} as never);
   const simulationConfig: SimulationConfig = {
     battery: {
       capacity_kwh: 10,
@@ -34,11 +69,17 @@ describe("MarketDataService", () => {
     },
   };
 
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("collects market entries and derives a snapshot", async () => {
+    vi.setSystemTime(new Date("2026-03-23T09:00:00.000Z"));
     const fixture = loadFixture() as {
       data?: { start_timestamp?: number; end_timestamp?: number; start?: string; end?: string }[];
     };
@@ -62,6 +103,60 @@ describe("MarketDataService", () => {
     expect(result.forecast.length).toBeGreaterThan(0);
     expect(result.priceSnapshot).not.toBeNull();
     expect(warnings).not.toContain("Market data fetch disabled in config.");
+  });
+
+  it("blends providers by overlaying higher-priority windows onto lower-priority coverage", async () => {
+    vi.setSystemTime(new Date("2026-03-23T09:00:00.000Z"));
+
+    vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce(createResponse({
+        data: [
+          createAwattarEntry("2026-03-23T10:00:00.000Z", 0.2),
+          createAwattarEntry("2026-03-23T11:00:00.000Z", 0.21),
+        ],
+      }))
+      .mockResolvedValueOnce(createResponse(
+        createEntsoeResponse("2026-03-23T09:00:00.000Z", [0.1, 0.11, 0.12, 0.13, 0.14]),
+      ))
+      .mockResolvedValueOnce(createResponse(
+        createEntsoeResponse("2026-03-24T00:00:00.000Z", []),
+      ));
+
+    const warnings: string[] = [];
+    const evccFallback = [
+      {
+        start: "2026-03-23T12:00:00.000Z",
+        end: "2026-03-23T13:00:00.000Z",
+        price: 0.3,
+        unit: "EUR/kWh",
+      },
+      {
+        start: "2026-03-23T13:00:00.000Z",
+        end: "2026-03-23T14:00:00.000Z",
+        price: 0.31,
+        unit: "EUR/kWh",
+      },
+    ];
+
+    const result = await service.collect({
+      awattar: {priority: 2, url: "https://api.awattar.de/v1/marketdata", max_hours: 72},
+      from_evcc: {priority: 3},
+      entsoe: {priority: 4, zone: "BZN|10YAT-APG------L", tz: "CET", max_hours: 24, aggregate_hourly: false},
+    }, simulationConfig, warnings, evccFallback);
+
+    expect(result.forecast.map((entry) => ({
+      start: entry.start,
+      price: entry.price,
+      provider: entry.provider,
+    }))).toEqual([
+      {start: "2026-03-23T09:00:00.000Z", price: 0.1, provider: "entsoe"},
+      {start: "2026-03-23T10:00:00.000Z", price: 0.2, provider: "awattar"},
+      {start: "2026-03-23T11:00:00.000Z", price: 0.21, provider: "awattar"},
+      {start: "2026-03-23T12:00:00.000Z", price: 0.3, provider: "from_evcc"},
+      {start: "2026-03-23T13:00:00.000Z", price: 0.31, provider: "from_evcc"},
+    ]);
+    expect(result.priceSnapshot).toBeCloseTo(0.12, 6);
+    expect(warnings).toEqual([]);
   });
 
   it("returns empty set when no providers are configured", async () => {

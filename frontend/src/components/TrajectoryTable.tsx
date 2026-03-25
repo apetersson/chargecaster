@@ -12,12 +12,50 @@ type TrajectoryTableProps = {
 type TrajectoryRow = {
   key: string;
   timeCell: string;
-  marketPriceLabel: string;
+  planningPriceLabel: string;
+  referencePriceLabel: string;
   solarLabel: string;
   demandLabel: string;
   targetLabel: string;
   gridPowerLabel: string;
 };
+
+type CostSource = Extract<ForecastEra["sources"][number], { type: "cost" }>;
+
+function resolvePrimaryCostSource(era: ForecastEra): CostSource | undefined {
+  return era.sources.find((source): source is CostSource => source.type === "cost" && source.provider === "canonical")
+    ?? era.sources.find((source): source is CostSource => source.type === "cost");
+}
+
+function resolveAccurateCostSource(era: ForecastEra): CostSource | undefined {
+  return era.sources.find((source): source is CostSource =>
+    source.type === "cost" && source.provider !== "canonical" && source.provider !== "synthetic",
+  );
+}
+
+function resolveGuesstimateCostSource(era: ForecastEra): CostSource | undefined {
+  return era.sources.find((source): source is CostSource => source.type === "cost" && source.provider === "synthetic");
+}
+
+function formatCostSource(source: CostSource | undefined): string {
+  if (!source) {
+    return "n/a";
+  }
+  return formatNumber(source.payload.price_with_fee_ct_per_kwh, " ct/kWh");
+}
+
+function buildReferencePriceLabel(era: ForecastEra): string {
+  const accurate = resolveAccurateCostSource(era);
+  const guesstimate = resolveGuesstimateCostSource(era);
+  const labels: string[] = [];
+  if (accurate) {
+    labels.push(`accurate ${formatCostSource(accurate)}`);
+  }
+  if (guesstimate) {
+    labels.push(`guess ${formatCostSource(guesstimate)}`);
+  }
+  return labels.length ? labels.join(" · ") : "n/a";
+}
 
 function buildTrajectoryRows(
   forecast: ForecastEra[],
@@ -32,7 +70,7 @@ function buildTrajectoryRows(
     const start = era.start ? new Date(era.start) : null;
     const end = era.end ? new Date(era.end) : null;
     const solarSource = era.sources.find((source) => source.type === "solar");
-    const costSource = era.sources.find((source) => source.type === "cost");
+    const planningCostSource = resolvePrimaryCostSource(era);
     if (!start || !end) {
       return [];
     }
@@ -42,7 +80,8 @@ function buildTrajectoryRows(
     return [{
       key: era.era_id,
       timeCell: `${dateTimeNoSecondsFormatter.format(start)} — ${timeFormatter.format(end)}`,
-      marketPriceLabel: costSource ? formatNumber(costSource.payload.price_with_fee_ct_per_kwh, " ct/kWh") : "n/a",
+      planningPriceLabel: formatCostSource(planningCostSource),
+      referencePriceLabel: buildReferencePriceLabel(era),
       solarLabel: solarSource ? formatNumber(solarSource.payload.average_power_w ?? solarSource.payload.energy_wh, " W") : "n/a",
       demandLabel: demand ? formatNumber(demand.house_power_w, " W") : "n/a",
       targetLabel,
@@ -71,6 +110,7 @@ function TrajectoryTable({forecast, demandForecast, oracleEntries}: TrajectoryTa
           <colgroup>
             <col className="col-time"/>
             <col className="col-price"/>
+            <col className="col-price"/>
             <col className="col-solar"/>
             <col className="col-power"/>
             <col className="col-soc"/>
@@ -79,7 +119,8 @@ function TrajectoryTable({forecast, demandForecast, oracleEntries}: TrajectoryTa
           <thead>
           <tr>
             <th className="timestamp">Time</th>
-            <th className="numeric">Market Price</th>
+            <th className="numeric">Planning Price</th>
+            <th className="numeric">Accurate / Guess</th>
             <th className="numeric">Solar (W)</th>
             <th className="numeric">Demand (W)</th>
             <th className="numeric">End SOC %</th>
@@ -90,7 +131,8 @@ function TrajectoryTable({forecast, demandForecast, oracleEntries}: TrajectoryTa
           {rows.map((row) => (
             <tr key={row.key}>
               <td className="timestamp">{row.timeCell}</td>
-              <td className="numeric">{row.marketPriceLabel}</td>
+              <td className="numeric">{row.planningPriceLabel}</td>
+              <td className="numeric">{row.referencePriceLabel}</td>
               <td className="numeric">{row.solarLabel}</td>
               <td className="numeric">{row.demandLabel}</td>
               <td className="numeric">{row.targetLabel}</td>

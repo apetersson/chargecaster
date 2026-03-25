@@ -10,7 +10,7 @@ import type { EntsoeNewConfig } from "../schemas";
 import { EnergyPriceProvider, EnergyPriceProviderContext, EnergyPriceProviderResult } from "./provider.types";
 import { clampHorizon } from "./provider.utils";
 
-const BASE_URL = "https://newtransparency.entsoe.eu/market/energyPrices/load";
+const BASE_URL = "https://transparency.entsoe.eu/market/energyPrices/load";
 const REQUEST_TIMEOUT_MS = 15000;
 const SLOT_15M_MS = 15 * 60 * 1000;
 
@@ -29,7 +29,7 @@ export class EntsoeNewProvider implements EnergyPriceProvider {
         const entries = this.parseCurve(payload);
         all = all.concat(entries);
       }
-      let forecast = clampHorizon(all, this.cfg?.max_hours ?? 72);
+      let forecast = this.dedupeByStart(clampHorizon(all, this.cfg?.max_hours ?? 72));
       if (this.cfg?.aggregate_hourly) {
         this.logger.verbose("Aggregating ENTSO-E prices to hourly cadence");
         forecast = this.aggregateToHourly(forecast);
@@ -51,18 +51,15 @@ export class EntsoeNewProvider implements EnergyPriceProvider {
     const now = Date.now();
     const end = now + Math.max(1, maxHours) * 3_600_000;
     const result: [string, string][] = [];
-    // Build UTC day windows [00:00Z, 00:00Z+24h]
-    let cursor = new Date(now);
-    cursor.setUTCHours(0, 0, 0, 0);
-    // If now is past midnight, include a window starting today
-    if (cursor.getTime() > now) {
-      cursor = new Date(cursor.getTime() - 24 * 3_600_000);
-    }
+    const timeZone = this.cfg?.tz ?? "CET";
+    // Build day windows using the configured market timezone so local-day
+    // queries match the browser flow used by the ENTSO-E transparency UI.
+    let cursor = this.startOfLocalDayUtc(new Date(now), timeZone);
     while (cursor.getTime() < end) {
       const from = cursor.toISOString();
-      const to = new Date(cursor.getTime() + 24 * 3_600_000).toISOString();
+      const to = this.startOfLocalDayUtc(new Date(cursor.getTime() + 36 * 3_600_000), timeZone).toISOString();
       result.push([from, to]);
-      cursor = new Date(cursor.getTime() + 24 * 3_600_000);
+      cursor = new Date(to);
     }
     return result;
   }
@@ -76,6 +73,7 @@ export class EntsoeNewProvider implements EnergyPriceProvider {
         dateTimeRange: {from: fromIso, to: toIso},
         areaList: [String(this.cfg?.zone ?? "")],
         timeZone: String(this.cfg?.tz ?? "CET"),
+        sorterList: [],
         intervalPageInfo: {itemIndex: 0, pageSize: 10},
         filterMap: {},
       };
@@ -162,6 +160,79 @@ export class EntsoeNewProvider implements EnergyPriceProvider {
       }
     }
     return null;
+  }
+
+  private dedupeByStart(entries: RawForecastEntry[]): RawForecastEntry[] {
+    const byStart = new Map<string, RawForecastEntry>();
+    for (const entry of entries) {
+      const start = String(entry.start ?? entry.from ?? "");
+      if (!start) {
+        continue;
+      }
+      const existing = byStart.get(start);
+      const nextPrice = this.resolveComparablePrice(entry);
+      const existingPrice = existing ? this.resolveComparablePrice(existing) : null;
+      if (!existing || (nextPrice !== null && (existingPrice === null || nextPrice < existingPrice))) {
+        byStart.set(start, entry);
+      }
+    }
+    return [...byStart.values()].sort((left, right) =>
+      Date.parse(String(left.start ?? left.from ?? "")) - Date.parse(String(right.start ?? right.from ?? "")));
+  }
+
+  private resolveComparablePrice(entry: RawForecastEntry): number | null {
+    if (typeof entry.price === "number" && Number.isFinite(entry.price)) {
+      return entry.unit === "EUR/kWh" ? entry.price : entry.price / 1000;
+    }
+    if (typeof entry.price_ct_per_kwh === "number" && Number.isFinite(entry.price_ct_per_kwh)) {
+      return entry.price_ct_per_kwh / 100;
+    }
+    return null;
+  }
+
+  private startOfLocalDayUtc(date: Date, timeZone: string): Date {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const year = Number(parts.find((part) => part.type === "year")?.value ?? Number.NaN);
+    const month = Number(parts.find((part) => part.type === "month")?.value ?? Number.NaN);
+    const day = Number(parts.find((part) => part.type === "day")?.value ?? Number.NaN);
+    const midnightUtcMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+
+    let offsetMs = this.timeZoneOffsetMs(new Date(midnightUtcMs), timeZone);
+    let correctedMs = midnightUtcMs - offsetMs;
+    const correctedOffsetMs = this.timeZoneOffsetMs(new Date(correctedMs), timeZone);
+    if (correctedOffsetMs !== offsetMs) {
+      offsetMs = correctedOffsetMs;
+      correctedMs = midnightUtcMs - offsetMs;
+    }
+    return new Date(correctedMs);
+  }
+
+  private timeZoneOffsetMs(date: Date, timeZone: string): number {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      timeZoneName: "shortOffset",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+    const token = parts.find((part) => part.type === "timeZoneName")?.value ?? "GMT";
+    const match = /^GMT(?:(\+|-)(\d{1,2})(?::?(\d{2}))?)?$/.exec(token);
+    if (!match) {
+      return 0;
+    }
+    const sign = match[1] === "-" ? -1 : 1;
+    const hours = Number(match[2] ?? 0);
+    const minutes = Number(match[3] ?? 0);
+    return sign * (hours * 60 + minutes) * 60_000;
   }
 
   private aggregateToHourly(entries: RawForecastEntry[]): RawForecastEntry[] {

@@ -35,7 +35,12 @@ const eraStartMs = (era: DerivedEra): number => era.slot.start.getTime();
 const eraEndMs = (era: DerivedEra): number => era.slot.end.getTime();
 const eraMidpointMs = (era: DerivedEra): number => era.slot.midpoint().getTime();
 const resolveFeedInTariffCents = (era: ForecastEra): number | null => {
-  const costSource = era.sources.find((source) => source.type === "cost");
+  const costSource = era.sources.find(
+    (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> =>
+      source.type === "cost" && source.provider === "canonical",
+  ) ?? era.sources.find(
+    (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> => source.type === "cost",
+  );
   if (!costSource) {
     return null;
   }
@@ -45,6 +50,42 @@ const resolveFeedInTariffCents = (era: ForecastEra): number | null => {
   }
   const eur = costSource.payload.feed_in_tariff_eur_per_kwh;
   return typeof eur === "number" && Number.isFinite(eur) ? eur * 100 : null;
+};
+
+const resolveCostCents = (era: ForecastEra, provider: string): number | null => {
+  const source = era.sources.find(
+    (entry): entry is Extract<ForecastEra["sources"][number], { type: "cost" }> =>
+      entry.type === "cost" && entry.provider === provider,
+  );
+  if (!source) {
+    return null;
+  }
+  const cents = source.payload.price_with_fee_ct_per_kwh;
+  if (typeof cents === "number" && Number.isFinite(cents)) {
+    return cents;
+  }
+  const eur = source.payload.price_with_fee_eur_per_kwh;
+  return typeof eur === "number" && Number.isFinite(eur) ? eur * 100 : null;
+};
+
+const resolveReferenceCost = (
+  era: ForecastEra,
+  mode: "accurate" | "guesstimate",
+): {provider: string | null; cents: number | null} => {
+  const costSources = era.sources.filter(
+    (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> =>
+      source.type === "cost" && source.provider !== "canonical",
+  );
+  const matching = mode === "guesstimate"
+    ? costSources.find((source) => source.provider === "synthetic")
+    : costSources.find((source) => source.provider !== "synthetic");
+  if (!matching) {
+    return {provider: null, cents: null};
+  }
+  return {
+    provider: matching.provider,
+    cents: resolveCostCents(era, matching.provider),
+  };
 };
 
 const resolveInitialSoCPercent = (
@@ -306,12 +347,18 @@ const buildPriceSeries = (
     if (!isFiniteNumber(price)) {
       continue;
     }
+    const accurate = resolveReferenceCost(era.era, "accurate");
+    const guesstimate = resolveReferenceCost(era.era, "guesstimate");
     const feedInPrice = showFeedInPriceBars ? resolveFeedInTariffCents(era.era) : null;
     futurePoints.push({
       x: eraStartMs(era),
       xEnd: eraEndMs(era),
       y: price,
       feedInY: feedInPrice,
+      accurateY: accurate.cents,
+      guesstimateY: guesstimate.cents,
+      accurateProvider: accurate.provider,
+      guesstimateProvider: guesstimate.provider,
       source: "forecast",
       strategy: era.oracle?.strategy,
     });

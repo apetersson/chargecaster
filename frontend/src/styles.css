@@ -172,6 +172,15 @@ section.card.banner {
     letter-spacing: 0.05em;
 }
 
+.control-select {
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.5);
+    background: rgba(15, 23, 42, 0.65);
+    color: #e2e8f0;
+    font-size: 0.8rem;
+}
+
 .metric-groups-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

@@ -95,6 +95,7 @@ function resolveSolarForecastHours(config: ConfigDocument): number {
   const configured = [
     energyConfig?.awattar?.max_hours,
     energyConfig?.entsoe?.max_hours,
+    energyConfig?.synthetic?.max_hours,
   ]
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
   return configured.length ? Math.max(...configured) : DEFAULT_SOLAR_FORECAST_HOURS;

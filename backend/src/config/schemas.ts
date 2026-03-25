@@ -35,6 +35,12 @@ export const fromEvccConfigSchema = z.object({
 }).strip();
 export type FromEvccConfig = z.infer<typeof fromEvccConfigSchema>;
 
+export const syntheticPriceConfigSchema = z.object({
+  priority: z.number().int().nonnegative(),
+  max_hours: optionalNumberSchema.optional(),
+}).strip();
+export type SyntheticPriceConfig = z.infer<typeof syntheticPriceConfigSchema>;
+
 const priceScalarSchema = z.union([z.number(), z.string()]).optional();
 type PriceScalarConfigValue = z.infer<typeof priceScalarSchema>;
 
@@ -66,6 +72,7 @@ export const energyPriceConfigSchema = z.object({
   awattar: awattarConfigSchema.optional(),
   entsoe: entsoeNewConfigSchema.optional(),
   from_evcc: fromEvccConfigSchema.optional(),
+  synthetic: syntheticPriceConfigSchema.optional(),
 }).strip();
 export type EnergyPriceConfig = z.infer<typeof energyPriceConfigSchema>;
 

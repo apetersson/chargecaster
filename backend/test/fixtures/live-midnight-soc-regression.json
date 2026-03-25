@@ -1,0 +1,708 @@
+{
+  "captured_at": "2026-03-25T16:49:38.985Z",
+  "timezone": "Europe/Vienna",
+  "target_midnight_utc": "2026-03-25T23:00:00.000Z",
+  "config": {
+    "battery": {
+      "capacity_kwh": 10,
+      "chemistry": "lifepo4",
+      "max_charge_power_w": 4000,
+      "max_charge_power_solar_w": 4500,
+      "auto_mode_floor_soc": 5,
+      "max_charge_soc_percent": 96
+    },
+    "price": {
+      "grid_fee_eur_per_kwh": 0.094224,
+      "feed_in_tariff_eur_per_kwh": 0.054150000000000004
+    },
+    "logic": {
+      "interval_seconds": 300,
+      "min_hold_minutes": 0,
+      "allow_battery_export": false
+    }
+  },
+  "live_state": {
+    "battery_soc": 91
+  },
+  "price_snapshot_eur_per_kwh": 0.25711399999999995,
+  "forecast": [
+    {
+      "start": "2026-03-25T16:49:36.878Z",
+      "end": "2026-03-25T17:00:00.000Z",
+      "price": 0.16288999999999998,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T16:49:36.878Z"
+    },
+    {
+      "start": "2026-03-25T17:00:00.000Z",
+      "end": "2026-03-25T18:00:00.000Z",
+      "price": 0.17329,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T17:00:00.000Z"
+    },
+    {
+      "start": "2026-03-25T18:00:00.000Z",
+      "end": "2026-03-25T19:00:00.000Z",
+      "price": 0.17035,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T18:00:00.000Z"
+    },
+    {
+      "start": "2026-03-25T19:00:00.000Z",
+      "end": "2026-03-25T20:00:00.000Z",
+      "price": 0.14792,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T19:00:00.000Z"
+    },
+    {
+      "start": "2026-03-25T20:00:00.000Z",
+      "end": "2026-03-25T21:00:00.000Z",
+      "price": 0.12458,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T20:00:00.000Z"
+    },
+    {
+      "start": "2026-03-25T21:00:00.000Z",
+      "end": "2026-03-25T22:00:00.000Z",
+      "price": 0.11511,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T21:00:00.000Z"
+    },
+    {
+      "start": "2026-03-25T22:00:00.000Z",
+      "end": "2026-03-25T23:00:00.000Z",
+      "price": 0.10509,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T22:00:00.000Z"
+    },
+    {
+      "start": "2026-03-25T23:00:00.000Z",
+      "end": "2026-03-26T00:00:00.000Z",
+      "price": 0.10342,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-25T23:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T00:00:00.000Z",
+      "end": "2026-03-26T01:00:00.000Z",
+      "price": 0.09891,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T00:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T01:00:00.000Z",
+      "end": "2026-03-26T02:00:00.000Z",
+      "price": 0.09586,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T01:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T02:00:00.000Z",
+      "end": "2026-03-26T03:00:00.000Z",
+      "price": 0.10096,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T02:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T03:00:00.000Z",
+      "end": "2026-03-26T04:00:00.000Z",
+      "price": 0.10468000000000001,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T03:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T04:00:00.000Z",
+      "end": "2026-03-26T05:00:00.000Z",
+      "price": 0.1139,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T04:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T05:00:00.000Z",
+      "end": "2026-03-26T06:00:00.000Z",
+      "price": 0.1447,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T05:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T06:00:00.000Z",
+      "end": "2026-03-26T07:00:00.000Z",
+      "price": 0.14132,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T06:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T07:00:00.000Z",
+      "end": "2026-03-26T08:00:00.000Z",
+      "price": 0.12694,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T07:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T08:00:00.000Z",
+      "end": "2026-03-26T09:00:00.000Z",
+      "price": 0.10163,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T08:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T09:00:00.000Z",
+      "end": "2026-03-26T10:00:00.000Z",
+      "price": 0.11606999999999999,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T09:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T10:00:00.000Z",
+      "end": "2026-03-26T11:00:00.000Z",
+      "price": 0.12042,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T10:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T11:00:00.000Z",
+      "end": "2026-03-26T12:00:00.000Z",
+      "price": 0.10609,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T11:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T12:00:00.000Z",
+      "end": "2026-03-26T13:00:00.000Z",
+      "price": 0.11864,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T12:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T13:00:00.000Z",
+      "end": "2026-03-26T14:00:00.000Z",
+      "price": 0.12663,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T13:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T14:00:00.000Z",
+      "end": "2026-03-26T15:00:00.000Z",
+      "price": 0.13883,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T14:00:00.000Z"
+    },
+    {
+      "start": "2026-03-26T15:00:00.000Z",
+      "end": "2026-03-26T16:00:00.000Z",
+      "price": 0.12193999999999999,
+      "unit": "EUR/kWh",
+      "era_id": "2026-03-26T15:00:00.000Z"
+    }
+  ],
+  "feed_in_tariff_eur_per_kwh_by_slot": [
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004,
+    0.054150000000000004
+  ],
+  "solar_forecast": [
+    {
+      "start": "2026-03-25T16:49:36.878Z",
+      "end": "2026-03-25T17:00:00.000Z",
+      "energy_wh": 132.891
+    },
+    {
+      "start": "2026-03-25T17:00:00.000Z",
+      "end": "2026-03-25T18:00:00.000Z",
+      "energy_wh": 181.072
+    },
+    {
+      "start": "2026-03-26T06:00:00.000Z",
+      "end": "2026-03-26T07:00:00.000Z",
+      "energy_wh": 132.638
+    },
+    {
+      "start": "2026-03-26T07:00:00.000Z",
+      "end": "2026-03-26T08:00:00.000Z",
+      "energy_wh": 386.584
+    },
+    {
+      "start": "2026-03-26T08:00:00.000Z",
+      "end": "2026-03-26T09:00:00.000Z",
+      "energy_wh": 567.119
+    },
+    {
+      "start": "2026-03-26T09:00:00.000Z",
+      "end": "2026-03-26T10:00:00.000Z",
+      "energy_wh": 904.631
+    },
+    {
+      "start": "2026-03-26T10:00:00.000Z",
+      "end": "2026-03-26T11:00:00.000Z",
+      "energy_wh": 1141.735
+    },
+    {
+      "start": "2026-03-26T11:00:00.000Z",
+      "end": "2026-03-26T12:00:00.000Z",
+      "energy_wh": 1186.919
+    },
+    {
+      "start": "2026-03-26T12:00:00.000Z",
+      "end": "2026-03-26T13:00:00.000Z",
+      "energy_wh": 1121.345
+    },
+    {
+      "start": "2026-03-26T13:00:00.000Z",
+      "end": "2026-03-26T14:00:00.000Z",
+      "energy_wh": 1114.301
+    },
+    {
+      "start": "2026-03-26T14:00:00.000Z",
+      "end": "2026-03-26T15:00:00.000Z",
+      "energy_wh": 934.262
+    },
+    {
+      "start": "2026-03-26T15:00:00.000Z",
+      "end": "2026-03-26T16:00:00.000Z",
+      "energy_wh": 721.541
+    }
+  ],
+  "demand_forecast": [
+    {
+      "start": "2026-03-25T16:49:36.878Z",
+      "end": "2026-03-25T17:00:00.000Z",
+      "house_power_w": 1300.922,
+      "baseline_house_power_w": 1757.58,
+      "confidence": 0.55,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-25T17:00:00.000Z",
+      "end": "2026-03-25T18:00:00.000Z",
+      "house_power_w": 1861.002,
+      "baseline_house_power_w": 1722.597,
+      "confidence": 0.55,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-25T18:00:00.000Z",
+      "end": "2026-03-25T19:00:00.000Z",
+      "house_power_w": 1791.765,
+      "baseline_house_power_w": 1809.165,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-25T19:00:00.000Z",
+      "end": "2026-03-25T20:00:00.000Z",
+      "house_power_w": 1856.372,
+      "baseline_house_power_w": 2086.314,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-25T20:00:00.000Z",
+      "end": "2026-03-25T21:00:00.000Z",
+      "house_power_w": 2101.516,
+      "baseline_house_power_w": 1987.578,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-25T21:00:00.000Z",
+      "end": "2026-03-25T22:00:00.000Z",
+      "house_power_w": 1746.179,
+      "baseline_house_power_w": 1634.125,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-25T22:00:00.000Z",
+      "end": "2026-03-25T23:00:00.000Z",
+      "house_power_w": 1512.705,
+      "baseline_house_power_w": 1406.052,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-25T23:00:00.000Z",
+      "end": "2026-03-26T00:00:00.000Z",
+      "house_power_w": 1264.594,
+      "baseline_house_power_w": 1366.275,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T00:00:00.000Z",
+      "end": "2026-03-26T01:00:00.000Z",
+      "house_power_w": 1140.935,
+      "baseline_house_power_w": 1443.717,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T01:00:00.000Z",
+      "end": "2026-03-26T02:00:00.000Z",
+      "house_power_w": 1191.796,
+      "baseline_house_power_w": 1438.258,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T02:00:00.000Z",
+      "end": "2026-03-26T03:00:00.000Z",
+      "house_power_w": 1203.924,
+      "baseline_house_power_w": 1396.952,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T03:00:00.000Z",
+      "end": "2026-03-26T04:00:00.000Z",
+      "house_power_w": 1202.065,
+      "baseline_house_power_w": 1350.319,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T04:00:00.000Z",
+      "end": "2026-03-26T05:00:00.000Z",
+      "house_power_w": 1244.574,
+      "baseline_house_power_w": 1297.492,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T05:00:00.000Z",
+      "end": "2026-03-26T06:00:00.000Z",
+      "house_power_w": 1375.316,
+      "baseline_house_power_w": 1605.278,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T06:00:00.000Z",
+      "end": "2026-03-26T07:00:00.000Z",
+      "house_power_w": 2892.255,
+      "baseline_house_power_w": 3087.063,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T07:00:00.000Z",
+      "end": "2026-03-26T08:00:00.000Z",
+      "house_power_w": 2907.878,
+      "baseline_house_power_w": 2291.858,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T08:00:00.000Z",
+      "end": "2026-03-26T09:00:00.000Z",
+      "house_power_w": 2594.276,
+      "baseline_house_power_w": 2452.943,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T09:00:00.000Z",
+      "end": "2026-03-26T10:00:00.000Z",
+      "house_power_w": 2309.723,
+      "baseline_house_power_w": 2277.069,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T10:00:00.000Z",
+      "end": "2026-03-26T11:00:00.000Z",
+      "house_power_w": 2305.469,
+      "baseline_house_power_w": 2217.807,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T11:00:00.000Z",
+      "end": "2026-03-26T12:00:00.000Z",
+      "house_power_w": 2204.692,
+      "baseline_house_power_w": 2076.3,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T12:00:00.000Z",
+      "end": "2026-03-26T13:00:00.000Z",
+      "house_power_w": 2397.298,
+      "baseline_house_power_w": 2408.746,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T13:00:00.000Z",
+      "end": "2026-03-26T14:00:00.000Z",
+      "house_power_w": 2321.581,
+      "baseline_house_power_w": 2248.336,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T14:00:00.000Z",
+      "end": "2026-03-26T15:00:00.000Z",
+      "house_power_w": 2196.214,
+      "baseline_house_power_w": 2197.555,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    },
+    {
+      "start": "2026-03-26T15:00:00.000Z",
+      "end": "2026-03-26T16:00:00.000Z",
+      "house_power_w": 2225.102,
+      "baseline_house_power_w": 2217.478,
+      "confidence": 0.5,
+      "source": "catboost_model",
+      "model_version": "manual-20260313"
+    }
+  ],
+  "reference_oracle": [
+    {
+      "era_id": "2026-03-25T16:49:36.878Z",
+      "start_soc_percent": 91,
+      "end_soc_percent": 91,
+      "target_soc_percent": 91,
+      "grid_energy_wh": 92.28486624555552,
+      "strategy": "hold"
+    },
+    {
+      "era_id": "2026-03-25T17:00:00.000Z",
+      "start_soc_percent": 91,
+      "end_soc_percent": 74,
+      "target_soc_percent": 74,
+      "grid_energy_wh": 61.520708296411385,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-25T18:00:00.000Z",
+      "start_soc_percent": 74,
+      "end_soc_percent": 56,
+      "target_soc_percent": 56,
+      "grid_energy_wh": 79.22413909083502,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-25T19:00:00.000Z",
+      "start_soc_percent": 56,
+      "end_soc_percent": 37,
+      "target_soc_percent": 37,
+      "grid_energy_wh": 0,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-25T20:00:00.000Z",
+      "start_soc_percent": 37,
+      "end_soc_percent": 15,
+      "target_soc_percent": 15,
+      "grid_energy_wh": 0,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-25T21:00:00.000Z",
+      "start_soc_percent": 15,
+      "end_soc_percent": 5,
+      "target_soc_percent": 5,
+      "grid_energy_wh": 789.5212094581991,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-25T22:00:00.000Z",
+      "start_soc_percent": 5,
+      "end_soc_percent": 5,
+      "target_soc_percent": 5,
+      "grid_energy_wh": 1512.705,
+      "strategy": "hold"
+    },
+    {
+      "era_id": "2026-03-25T23:00:00.000Z",
+      "start_soc_percent": 5,
+      "end_soc_percent": 6,
+      "target_soc_percent": 6,
+      "grid_energy_wh": 1364.594,
+      "strategy": "charge"
+    },
+    {
+      "era_id": "2026-03-26T00:00:00.000Z",
+      "start_soc_percent": 6,
+      "end_soc_percent": 32,
+      "target_soc_percent": 32,
+      "grid_energy_wh": 3755.9639250082028,
+      "strategy": "charge"
+    },
+    {
+      "era_id": "2026-03-26T01:00:00.000Z",
+      "start_soc_percent": 32,
+      "end_soc_percent": 71,
+      "target_soc_percent": 71,
+      "grid_energy_wh": 5144.086610225106,
+      "strategy": "charge"
+    },
+    {
+      "era_id": "2026-03-26T02:00:00.000Z",
+      "start_soc_percent": 71,
+      "end_soc_percent": 96,
+      "target_soc_percent": 96,
+      "grid_energy_wh": 3716.682673581737,
+      "strategy": "charge"
+    },
+    {
+      "era_id": "2026-03-26T03:00:00.000Z",
+      "start_soc_percent": 96,
+      "end_soc_percent": 96,
+      "target_soc_percent": 96,
+      "grid_energy_wh": 1202.065,
+      "strategy": "hold"
+    },
+    {
+      "era_id": "2026-03-26T04:00:00.000Z",
+      "start_soc_percent": 96,
+      "end_soc_percent": 96,
+      "target_soc_percent": 96,
+      "grid_energy_wh": 1244.574,
+      "strategy": "hold"
+    },
+    {
+      "era_id": "2026-03-26T05:00:00.000Z",
+      "start_soc_percent": 96,
+      "end_soc_percent": 82,
+      "target_soc_percent": 82,
+      "grid_energy_wh": 0,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-26T06:00:00.000Z",
+      "start_soc_percent": 82,
+      "end_soc_percent": 53,
+      "target_soc_percent": 53,
+      "grid_energy_wh": 0,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-26T07:00:00.000Z",
+      "start_soc_percent": 53,
+      "end_soc_percent": 28,
+      "target_soc_percent": 28,
+      "grid_energy_wh": 149.8272203678839,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-26T08:00:00.000Z",
+      "start_soc_percent": 28,
+      "end_soc_percent": 67,
+      "target_soc_percent": 67,
+      "grid_energy_wh": 5979.447610225106,
+      "strategy": "charge"
+    },
+    {
+      "era_id": "2026-03-26T09:00:00.000Z",
+      "start_soc_percent": 67,
+      "end_soc_percent": 67,
+      "target_soc_percent": 67,
+      "grid_energy_wh": 1405.092,
+      "strategy": "hold"
+    },
+    {
+      "era_id": "2026-03-26T10:00:00.000Z",
+      "start_soc_percent": 67,
+      "end_soc_percent": 64,
+      "target_soc_percent": 64,
+      "grid_energy_wh": 875.4033488339527,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-26T11:00:00.000Z",
+      "start_soc_percent": 64,
+      "end_soc_percent": 96,
+      "target_soc_percent": 96,
+      "grid_energy_wh": 4248.400857550475,
+      "strategy": "charge"
+    },
+    {
+      "era_id": "2026-03-26T12:00:00.000Z",
+      "start_soc_percent": 96,
+      "end_soc_percent": 96,
+      "target_soc_percent": 96,
+      "grid_energy_wh": 1275.9529999999997,
+      "strategy": "hold"
+    },
+    {
+      "era_id": "2026-03-26T13:00:00.000Z",
+      "start_soc_percent": 96,
+      "end_soc_percent": 96,
+      "target_soc_percent": 96,
+      "grid_energy_wh": 1207.2800000000002,
+      "strategy": "hold"
+    },
+    {
+      "era_id": "2026-03-26T14:00:00.000Z",
+      "start_soc_percent": 96,
+      "end_soc_percent": 83,
+      "target_soc_percent": 83,
+      "grid_energy_wh": 0,
+      "strategy": "auto"
+    },
+    {
+      "era_id": "2026-03-26T15:00:00.000Z",
+      "start_soc_percent": 83,
+      "end_soc_percent": 96,
+      "target_soc_percent": 96,
+      "grid_energy_wh": 2803.5609999999997,
+      "strategy": "charge"
+    }
+  ],
+  "expected": {
+    "midnight_soc_less_than_percent": 15,
+    "reference_midnight_soc_percent": 6
+  },
+  "battery_efficiency": {
+    "charge_efficiency_percent": 99.5,
+    "discharge_efficiency_percent": 95.00702223110498,
+    "charge_average_c_rate": 0.25,
+    "discharge_average_c_rate": 0.25
+  }
+}

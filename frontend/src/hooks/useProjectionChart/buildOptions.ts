@@ -120,11 +120,36 @@ export const buildOptions = ({bounds, timeRangeMs, legendGroups, responsive, val
             if (dataset.yAxisID === "power") {
               return `${baseLabel}${numberFormatter.format(value)} W`;
             }
-          if (dataset.yAxisID === "price") {
-            return `${baseLabel}${numberFormatter.format(value)} ${RIGHT_AXIS_UNIT}`;
-          }
-          return `${baseLabel}${numberFormatter.format(value)}`;
-        },
+            if (dataset.yAxisID === "price") {
+              return `${baseLabel}${numberFormatter.format(value)} ${RIGHT_AXIS_UNIT}`;
+            }
+            return `${baseLabel}${numberFormatter.format(value)}`;
+          },
+          afterLabel(item) {
+            if (item.dataset.yAxisID !== "price") {
+              return [];
+            }
+            const raw = item.raw as {
+              accurateY?: number | null;
+              guesstimateY?: number | null;
+              accurateProvider?: string | null;
+              guesstimateProvider?: string | null;
+            } | null;
+            if (!raw) {
+              return [];
+            }
+
+            const extra: string[] = [];
+            if (typeof raw.accurateY === "number" && Number.isFinite(raw.accurateY)) {
+              const providerLabel = raw.accurateProvider ? ` (${raw.accurateProvider})` : "";
+              extra.push(`Accurate${providerLabel}: ${numberFormatter.format(raw.accurateY)} ${RIGHT_AXIS_UNIT}`);
+            }
+            if (typeof raw.guesstimateY === "number" && Number.isFinite(raw.guesstimateY)) {
+              const providerLabel = raw.guesstimateProvider ? ` (${raw.guesstimateProvider})` : "";
+              extra.push(`Guesstimate${providerLabel}: ${numberFormatter.format(raw.guesstimateY)} ${RIGHT_AXIS_UNIT}`);
+            }
+            return extra;
+          },
       },
     },
     },

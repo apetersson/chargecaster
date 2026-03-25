@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 
 import HistoryTable from "./components/HistoryTable";
 import MessageList from "./components/MessageList";
@@ -9,6 +9,8 @@ import { useDashboardData } from "./hooks/useDashboardData";
 import { useBacktestHistory } from "./hooks/useBacktestHistory";
 import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChart";
 import { useIsMobile } from "./hooks/useIsMobile";
+
+const PREVIEW_HOURS_OPTIONS = [24, 48, 72, 96, 120] as const;
 
 function App(): JSX.Element {
   const {
@@ -29,13 +31,31 @@ function App(): JSX.Element {
   const backtestState = useBacktestHistory();
   const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
   const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
+  const [previewHours, setPreviewHours] = useState<number>(120);
 
   useEffect(() => {
     setShowPowerAxisLabels(!isMobile);
     setShowPriceAxisLabels(!isMobile);
   }, [isMobile]);
 
-  const projectionChartRef = useProjectionChart(history, forecast, demandForecast, oracleEntries, summary, {
+  const {filteredForecast, filteredDemandForecast} = useMemo(() => {
+    const nowMs = Date.now();
+    const cutoffMs = nowMs + (previewHours * 3_600_000);
+    const visibleForecast = forecast.filter((era) => {
+      const startMs = era.start ? new Date(era.start).getTime() : Number.NaN;
+      return Number.isFinite(startMs) && startMs < cutoffMs;
+    });
+    const visibleDemand = demandForecast.filter((entry) => {
+      const startMs = new Date(entry.start).getTime();
+      return Number.isFinite(startMs) && startMs < cutoffMs;
+    });
+    return {
+      filteredForecast: visibleForecast,
+      filteredDemandForecast: visibleDemand,
+    };
+  }, [demandForecast, forecast, previewHours]);
+
+  const projectionChartRef = useProjectionChart(history, filteredForecast, filteredDemandForecast, oracleEntries, summary, {
     isMobile,
     showPowerAxisLabels,
     showPriceAxisLabels,
@@ -76,8 +96,20 @@ function App(): JSX.Element {
         <div className="chart-viewport">
           <canvas ref={projectionChartRef} aria-label="SOC projection chart"/>
         </div>
-        {planningVariantDryRunEnabled ? (
-          <div className="chart-footer-controls">
+        <div className="chart-footer-controls">
+          <div className="control-group" aria-label="Forecast preview horizon">
+            <span className="control-label">Preview</span>
+            <select
+              className="control-select"
+              value={previewHours}
+              onChange={(event) => setPreviewHours(Number(event.target.value))}
+            >
+              {PREVIEW_HOURS_OPTIONS.map((hours) => (
+                <option key={hours} value={hours}>{hours}h</option>
+              ))}
+            </select>
+          </div>
+          {planningVariantDryRunEnabled ? (
             <div className="control-group" role="group" aria-label="Charge planning variant">
               <span className="control-label">Variant</span>
               <div className="chart-controls">
@@ -101,15 +133,15 @@ function App(): JSX.Element {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </section>
 
       <SummaryCards data={summary} backtestState={backtestState} />
 
       <DailyHistoryCard backtestState={backtestState} />
 
-      <TrajectoryTable forecast={forecast} demandForecast={demandForecast} oracleEntries={oracleEntries}/>
+      <TrajectoryTable forecast={filteredForecast} demandForecast={filteredDemandForecast} oracleEntries={oracleEntries}/>
 
       <HistoryTable history={history}/>
 
