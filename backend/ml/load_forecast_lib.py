@@ -50,6 +50,7 @@ MODEL_PARAMS = {
     "l2_leaf_reg": 15.0,
     "random_seed": 42,
     "verbose": False,
+    "allow_writing_files": False,
 }
 
 
@@ -446,8 +447,6 @@ def build_walk_forward_folds(rows: list[HistoricalHour]) -> list[tuple[list[Hist
 def train_and_evaluate(db_path: str, config_path: str, output_dir: str, verbose: bool = False) -> dict[str, Any]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    catboost_train_dir = output_path / "catboost_info"
-    catboost_train_dir.mkdir(parents=True, exist_ok=True)
     if verbose:
         log_progress(f"Loading config from {config_path}")
     config = load_config(config_path)
@@ -478,7 +477,7 @@ def train_and_evaluate(db_path: str, config_path: str, output_dir: str, verbose:
                 f"(train_hours={len(train_rows)}, eval_hours={len(eval_rows)}, samples={len(train_x)})",
             )
         model = CatBoostRegressor(**MODEL_PARAMS)
-        model.fit(train_x, train_y, sample_weight=train_weights, train_dir=str(catboost_train_dir / f"fold-{fold_index:03d}"))
+        model.fit(train_x, train_y, sample_weight=train_weights)
         fold_model_predictions = sequential_model_predict(model, train_rows, eval_rows)
         fold_hour_week_predictions = sequential_hour_of_week_predict(train_rows, eval_rows)
         fold_hybrid_predictions = sequential_hybrid_predict(train_rows, eval_rows)
@@ -513,7 +512,7 @@ def train_and_evaluate(db_path: str, config_path: str, output_dir: str, verbose:
     if verbose:
         log_progress(f"Training final model on {len(train_x_all)} samples")
     model = CatBoostRegressor(**MODEL_PARAMS)
-    model.fit(train_x_all, train_y_all, sample_weight=train_weights_all, train_dir=str(catboost_train_dir / "final"))
+    model.fit(train_x_all, train_y_all, sample_weight=train_weights_all)
 
     model_path = output_path / "model.cbm"
     if verbose:

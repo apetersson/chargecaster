@@ -70,7 +70,9 @@ COPY --from=builder /app/frontend/dist /public
 COPY --from=native-deps /app/backend/node_modules /app/backend/node_modules
 COPY config.yaml.sample /app/config.yaml.sample
 
-RUN python3 -m pip install --no-cache-dir --break-system-packages -r /app/backend/ml/requirements.txt
+RUN find /app/backend/node_modules -name libcatboostmodel.so -exec cp {} /usr/local/lib/libcatboostmodel.so \; \
+  && ldconfig \
+  && python3 -m pip install --no-cache-dir --break-system-packages -r /app/backend/ml/requirements.txt
 
 EXPOSE 8080
 
