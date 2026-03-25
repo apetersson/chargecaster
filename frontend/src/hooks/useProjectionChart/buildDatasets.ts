@@ -68,25 +68,20 @@ const resolveCostCents = (era: ForecastEra, provider: string): number | null => 
   return typeof eur === "number" && Number.isFinite(eur) ? eur * 100 : null;
 };
 
-const resolveReferenceCost = (
+const resolveReferenceCosts = (
   era: ForecastEra,
-  mode: "accurate" | "guesstimate",
-): {provider: string | null; cents: number | null} => {
-  const costSources = era.sources.filter(
+): { provider: string; cents: number }[] => era.sources
+  .filter(
     (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> =>
       source.type === "cost" && source.provider !== "canonical",
+  )
+  .map((source) => ({
+    provider: source.provider,
+    cents: resolveCostCents(era, source.provider),
+  }))
+  .filter((source): source is { provider: string; cents: number } =>
+    typeof source.cents === "number" && Number.isFinite(source.cents),
   );
-  const matching = mode === "guesstimate"
-    ? costSources.find((source) => source.provider === "synthetic")
-    : costSources.find((source) => source.provider !== "synthetic");
-  if (!matching) {
-    return {provider: null, cents: null};
-  }
-  return {
-    provider: matching.provider,
-    cents: resolveCostCents(era, matching.provider),
-  };
-};
 
 const resolveInitialSoCPercent = (
   summary: SnapshotSummary | null,
@@ -347,18 +342,14 @@ const buildPriceSeries = (
     if (!isFiniteNumber(price)) {
       continue;
     }
-    const accurate = resolveReferenceCost(era.era, "accurate");
-    const guesstimate = resolveReferenceCost(era.era, "guesstimate");
+    const referencePrices = resolveReferenceCosts(era.era);
     const feedInPrice = showFeedInPriceBars ? resolveFeedInTariffCents(era.era) : null;
     futurePoints.push({
       x: eraStartMs(era),
       xEnd: eraEndMs(era),
       y: price,
       feedInY: feedInPrice,
-      accurateY: accurate.cents,
-      guesstimateY: guesstimate.cents,
-      accurateProvider: accurate.provider,
-      guesstimateProvider: guesstimate.provider,
+      referencePrices,
       source: "forecast",
       strategy: era.oracle?.strategy,
     });

@@ -1,7 +1,9 @@
 import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
+import type { ConfigDocument } from "../schemas";
 
 export interface EnergyPriceProviderContext {
   simulationConfig: SimulationConfig;
+  configDocument: ConfigDocument;
   warnings: string[];
 }
 

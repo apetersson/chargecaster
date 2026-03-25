@@ -66,6 +66,9 @@ describe("configuration schema parsers", () => {
         model_dir: "../data/models/load-forecast",
         self_training_enabled: true,
       },
+      price_forecast: {
+        model_dir: "../data/models/price-forecast",
+      },
       price: {
         energy: {
           awattar: {
@@ -99,6 +102,7 @@ describe("configuration schema parsers", () => {
     expect(parsed.location?.longitude).toBe(16.134);
     expect(parsed.solar?.[0]?.kwp).toBe(5);
     expect(parsed.load_forecast?.self_training_enabled).toBe(true);
+    expect(parsed.price_forecast?.model_dir).toBe("../data/models/price-forecast");
     expect(parsed.price?.energy?.awattar?.priority).toBe(2);
     expect(parsed.price?.grid_fee?.type).toBe("e-control");
     expect(parsed.price?.grid_fee?.type === "e-control" ? parsed.price.grid_fee.netzbereich : null).toBe("Graz");

@@ -8,6 +8,7 @@ dist/
 backend/dist-bundle/
 backend/catboost_info/
 backend/ml/__pycache__/
+backend/.venv-price-forecast/
 .idea/
 .env
 .env.*

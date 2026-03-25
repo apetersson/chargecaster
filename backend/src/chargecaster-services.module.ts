@@ -29,6 +29,8 @@ import { SolarForecastCalibrationService } from "./config/solar-forecast-calibra
 import { DemandForecastService } from "./config/demand-forecast.service";
 import { LoadForecastArtifactService } from "./forecasting/load-forecast-artifact.service";
 import { LoadForecastInferenceService } from "./forecasting/load-forecast-inference.service";
+import { PriceForecastArtifactService } from "./forecasting/price-forecast-artifact.service";
+import { PriceForecastInferenceService } from "./forecasting/price-forecast-inference.service";
 import { ModelTrainingCoordinator } from "./forecasting/model-training-coordinator.service";
 import { FroniusService } from "./fronius/fronius.service";
 import { OptimisationCommandTranslator } from "./hardware/optimisation-command-translator.service";
@@ -69,6 +71,8 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     SolarForecastCalibrationService,
     LoadForecastArtifactService,
     LoadForecastInferenceService,
+    PriceForecastArtifactService,
+    PriceForecastInferenceService,
     ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,
@@ -101,6 +105,8 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     SolarForecastCalibrationService,
     LoadForecastArtifactService,
     LoadForecastInferenceService,
+    PriceForecastArtifactService,
+    PriceForecastInferenceService,
     ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,

@@ -53,7 +53,7 @@ const createEntsoeResponse = (startIso: string, pricesEurPerKwh: number[]) => {
 };
 
 describe("MarketDataService", () => {
-  const service = new MarketDataService({} as never, {} as never);
+  const service = new MarketDataService({} as never, {} as never, { getActiveArtifact: () => null } as never);
   const simulationConfig: SimulationConfig = {
     battery: {
       capacity_kwh: 10,
@@ -98,7 +98,7 @@ describe("MarketDataService", () => {
     vi.spyOn(global, "fetch").mockResolvedValueOnce(createResponse(fixture));
     const warnings: string[] = [];
 
-    const result = await service.collect({awattar: {priority: 1, url: "https://api.awattar.de/v1/marketdata"}}, simulationConfig, warnings);
+    const result = await service.collect({dry_run: false}, {awattar: {priority: 1, url: "https://api.awattar.de/v1/marketdata"}}, simulationConfig, warnings);
 
     expect(result.forecast.length).toBeGreaterThan(0);
     expect(result.priceSnapshot).not.toBeNull();
@@ -138,7 +138,7 @@ describe("MarketDataService", () => {
       },
     ];
 
-    const result = await service.collect({
+    const result = await service.collect({dry_run: false}, {
       awattar: {priority: 2, url: "https://api.awattar.de/v1/marketdata", max_hours: 72},
       from_evcc: {priority: 3},
       entsoe: {priority: 4, zone: "BZN|10YAT-APG------L", tz: "CET", max_hours: 24, aggregate_hourly: false},
@@ -161,7 +161,7 @@ describe("MarketDataService", () => {
 
   it("returns empty set when no providers are configured", async () => {
     const warnings: string[] = [];
-    const result = await service.collect({}, simulationConfig, warnings);
+    const result = await service.collect({dry_run: false}, {}, simulationConfig, warnings);
 
     expect(result.forecast).toHaveLength(0);
     expect(result.priceSnapshot).toBeNull();

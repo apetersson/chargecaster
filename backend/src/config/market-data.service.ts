@@ -7,28 +7,30 @@ import {
   type RawForecastEntry,
   type SimulationConfig,
 } from "@chargecaster/domain";
-import type { EnergyPriceConfig } from "./schemas";
+import type { ConfigDocument, EnergyPriceConfig } from "./schemas";
 import { AwattarProvider } from "./providers/awattar.provider";
 import { EntsoeNewProvider } from "./providers/entsoe_new.provider";
 import { FromEvccProvider } from "./providers/from_evcc.provider";
-import { SyntheticPriceProvider } from "./providers/synthetic.provider";
+import { StatisticalPriceProvider } from "./providers/statistical.provider";
+import { SynteticPriceProvider } from "./providers/synthetic.provider";
 import type { EnergyPriceProvider, EnergyPriceProviderContext } from "./providers/provider.types";
 import { parseTimestamp } from "../simulation/solar";
+import { PriceForecastInferenceService } from "../forecasting/price-forecast-inference.service";
 import { StorageService } from "../storage/storage.service";
 import { WeatherService } from "./weather.service";
 
 const DEFAULT_SLOT_MS = 3_600_000;
 
-type ProviderKey = "entsoe" | "awattar" | "from_evcc" | "synthetic";
+type ProviderKey = "entsoe" | "awattar" | "from_evcc" | "syntetic" | "educatedGuess";
 
 interface ConfiguredProvider {
   key: ProviderKey;
-  prio: number;
+  priority: number;
 }
 
-interface CollectedProviderForecast {
+export interface PriceProviderForecast {
   key: ProviderKey;
-  prio: number;
+  priority: number;
   forecast: RawForecastEntry[];
 }
 
@@ -110,83 +112,85 @@ export class MarketDataService {
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
     @Inject(WeatherService) private readonly weatherService: WeatherService,
+    @Inject(PriceForecastInferenceService) private readonly priceForecastInference: PriceForecastInferenceService,
   ) {}
 
   async collect(
+    configDocument: ConfigDocument,
     config: EnergyPriceConfig | undefined,
     simulationConfig: SimulationConfig,
     warnings: string[],
     evccFallback?: RawForecastEntry[],
-  ): Promise<{ forecast: RawForecastEntry[]; accurateForecast: RawForecastEntry[]; guesstimateForecast: RawForecastEntry[]; priceSnapshot: number | null }> {
+  ): Promise<{ forecast: RawForecastEntry[]; providerForecasts: PriceProviderForecast[]; priceSnapshot: number | null }> {
     const providers: ConfiguredProvider[] = [];
-    if (config?.awattar) providers.push({key: "awattar", prio: config.awattar.priority});
-    if (config?.entsoe) providers.push({key: "entsoe", prio: config.entsoe.priority});
-    if (config?.from_evcc) providers.push({key: "from_evcc", prio: config.from_evcc.priority});
-    if (config?.synthetic) providers.push({key: "synthetic", prio: config.synthetic.priority});
-    providers.sort((a, b) => a.prio - b.prio);
+    if (config?.awattar) providers.push({key: "awattar", priority: config.awattar.priority});
+    if (config?.entsoe) providers.push({key: "entsoe", priority: config.entsoe.priority});
+    if (config?.from_evcc) providers.push({key: "from_evcc", priority: config.from_evcc.priority});
+    const synteticCfg = config?.syntetic ?? config?.synthetic;
+    if (synteticCfg) providers.push({key: "syntetic", priority: synteticCfg.priority});
+    if (config?.educatedGuess) providers.push({key: "educatedGuess", priority: config.educatedGuess.priority});
+    providers.sort((a, b) => a.priority - b.priority);
 
     const awattarCfg = config?.awattar;
     const entsoeCfg = config?.entsoe;
     const fromEvccCfg = config?.from_evcc;
-    const syntheticCfg = config?.synthetic;
-    const collected: CollectedProviderForecast[] = [];
+    const educatedGuessCfg = config?.educatedGuess;
+    const collected: PriceProviderForecast[] = [];
 
-    for (const p of providers) {
-      this.logger.log(`Collecting market data via provider ${p.key}`);
+    for (const provider of providers) {
+      this.logger.log(`Collecting market data via provider ${provider.key}`);
       let impl: EnergyPriceProvider | null = null;
-      if (p.key === "awattar") {
+      if (provider.key === "awattar") {
         if (!awattarCfg) {
           throw new Error("price.energy.awattar is referenced by priority but missing in config");
         }
         impl = new AwattarProvider(awattarCfg);
-      } else if (p.key === "entsoe") {
+      } else if (provider.key === "entsoe") {
         if (!entsoeCfg) {
           throw new Error("price.energy.entsoe is referenced by priority but missing in config");
         }
         impl = new EntsoeNewProvider(entsoeCfg);
-      } else if (p.key === "from_evcc") {
+      } else if (provider.key === "from_evcc") {
         if (!fromEvccCfg) {
           throw new Error("price.energy.from_evcc is referenced by priority but missing in config");
         }
         impl = new FromEvccProvider(Array.isArray(evccFallback) ? evccFallback : [], fromEvccCfg);
-      } else {
-        if (!syntheticCfg) {
-          throw new Error("price.energy.synthetic is referenced by priority but missing in config");
+      } else if (provider.key === "educatedGuess") {
+        if (!educatedGuessCfg) {
+          throw new Error("price.energy.educatedGuess is referenced by priority but missing in config");
         }
-        impl = new SyntheticPriceProvider(this.storage, this.weatherService, syntheticCfg);
+        impl = new StatisticalPriceProvider(this.storage, this.weatherService, this.priceForecastInference, educatedGuessCfg);
+      } else {
+        if (!synteticCfg) {
+          throw new Error("price.energy.syntetic is referenced by priority but missing in config");
+        }
+        impl = new SynteticPriceProvider(this.storage, this.weatherService, synteticCfg);
       }
-      const ctx: EnergyPriceProviderContext = {simulationConfig, warnings};
+
+      const ctx: EnergyPriceProviderContext = {simulationConfig, configDocument, warnings};
       const {forecast, priceSnapshot} = await impl.collect(ctx);
       this.logger.verbose(
-        `Provider ${p.key} returned forecast=${forecast.length}, price_snapshot=${priceSnapshot ?? "n/a"}`,
+        `Provider ${provider.key} returned forecast=${forecast.length}, price_snapshot=${priceSnapshot ?? "n/a"}`,
       );
-      if (forecast.length) {
-        collected.push({
-          key: p.key,
-          prio: p.prio,
-          forecast: withProvider(forecast, p.key),
-        });
+
+      if (!forecast.length) {
+        this.logger.warn(`Provider ${provider.key} returned no usable price slots; trying next provider`);
         continue;
       }
-      this.logger.warn(`Provider ${p.key} returned no usable price slots; trying next provider`);
+
+      collected.push({
+        key: provider.key,
+        priority: provider.priority,
+        forecast: withProvider(forecast, provider.key),
+      });
     }
 
     if (!collected.length) {
-      return {forecast: [], accurateForecast: [], guesstimateForecast: [], priceSnapshot: null};
+      return {forecast: [], providerForecasts: [], priceSnapshot: null};
     }
 
-    const orderedByPrecedence = collected.sort((left, right) => right.prio - left.prio);
-    const mergedForecast = orderedByPrecedence
-      .reduce<RawForecastEntry[]>((forecast, providerForecast) =>
-        overlayForecastEntries(forecast, providerForecast.forecast), []);
-
-    const accurateForecast = orderedByPrecedence
-      .filter((providerForecast) => providerForecast.key !== "synthetic")
-      .reduce<RawForecastEntry[]>((forecast, providerForecast) =>
-        overlayForecastEntries(forecast, providerForecast.forecast), []);
-
-    const guesstimateForecast = orderedByPrecedence
-      .filter((providerForecast) => providerForecast.key === "synthetic")
+    const mergedForecast = [...collected]
+      .sort((left, right) => right.priority - left.priority)
       .reduce<RawForecastEntry[]>((forecast, providerForecast) =>
         overlayForecastEntries(forecast, providerForecast.forecast), []);
 
@@ -196,14 +200,12 @@ export class MarketDataService {
     )?.eurPerKwh ?? null;
 
     this.logger.verbose(
-      `Merged ${collected.length} provider forecast(s) into ${mergedForecast.length} blended slot(s) ` +
-      `(accurate=${accurateForecast.length}, guesstimate=${guesstimateForecast.length})`,
+      `Merged ${collected.length} provider forecast(s) into ${mergedForecast.length} blended slot(s)`,
     );
 
     return {
       forecast: mergedForecast,
-      accurateForecast,
-      guesstimateForecast,
+      providerForecasts: collected,
       priceSnapshot: mergedSnapshot,
     };
   }

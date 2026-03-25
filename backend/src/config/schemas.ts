@@ -35,11 +35,19 @@ export const fromEvccConfigSchema = z.object({
 }).strip();
 export type FromEvccConfig = z.infer<typeof fromEvccConfigSchema>;
 
-export const syntheticPriceConfigSchema = z.object({
+export const synteticPriceConfigSchema = z.object({
   priority: z.number().int().nonnegative(),
   max_hours: optionalNumberSchema.optional(),
 }).strip();
-export type SyntheticPriceConfig = z.infer<typeof syntheticPriceConfigSchema>;
+export type SynteticPriceConfig = z.infer<typeof synteticPriceConfigSchema>;
+
+export const educatedGuessPriceConfigSchema = z.object({
+  priority: z.number().int().nonnegative(),
+  max_hours: optionalNumberSchema.optional(),
+  model_path: optionalStringSchema.optional(),
+  heuristic_blend_ratio: optionalNumberSchema.optional(),
+}).strip();
+export type EducatedGuessPriceConfig = z.infer<typeof educatedGuessPriceConfigSchema>;
 
 const priceScalarSchema = z.union([z.number(), z.string()]).optional();
 type PriceScalarConfigValue = z.infer<typeof priceScalarSchema>;
@@ -72,7 +80,9 @@ export const energyPriceConfigSchema = z.object({
   awattar: awattarConfigSchema.optional(),
   entsoe: entsoeNewConfigSchema.optional(),
   from_evcc: fromEvccConfigSchema.optional(),
-  synthetic: syntheticPriceConfigSchema.optional(),
+  syntetic: synteticPriceConfigSchema.optional(),
+  synthetic: synteticPriceConfigSchema.optional(),
+  educatedGuess: educatedGuessPriceConfigSchema.optional(),
 }).strip();
 export type EnergyPriceConfig = z.infer<typeof energyPriceConfigSchema>;
 
@@ -189,6 +199,14 @@ const loadForecastConfigSchema = z
   })
   .strip();
 
+const priceForecastConfigSchema = z
+  .object({
+    model_dir: optionalStringSchema.optional(),
+    self_training_enabled: optionalBooleanSchema.optional(),
+    python_executable: optionalStringSchema.optional(),
+  })
+  .strip();
+
 const evccConfigSchema = configSectionSchema
   .extend({
     base_url: optionalStringSchema.optional(),
@@ -213,6 +231,7 @@ export const configDocumentSchema = z
     location: locationConfigSchema.optional(),
     solar: z.array(solarArrayConfigSchema).optional(),
     load_forecast: loadForecastConfigSchema.optional(),
+    price_forecast: priceForecastConfigSchema.optional(),
     evcc: evccConfigSchema.optional(),
     market_data: energyPriceConfigSchema.optional(),
     logging: loggingConfigSchema.optional(),

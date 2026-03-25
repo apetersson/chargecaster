@@ -127,8 +127,7 @@ async function main(): Promise<void> {
       const solarForecast = buildRawSolar(actualHours);
       const { eras } = forecastAssembly.buildForecastEras(
         forecast,
-        forecast,
-        forecast,
+        [{key: "awattar", priority: 1, forecast}],
         solarForecast,
         simulationConfig.price.grid_fee_eur_per_kwh ?? 0,
       );

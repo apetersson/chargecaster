@@ -27,14 +27,10 @@ function resolvePrimaryCostSource(era: ForecastEra): CostSource | undefined {
     ?? era.sources.find((source): source is CostSource => source.type === "cost");
 }
 
-function resolveAccurateCostSource(era: ForecastEra): CostSource | undefined {
-  return era.sources.find((source): source is CostSource =>
-    source.type === "cost" && source.provider !== "canonical" && source.provider !== "synthetic",
+function resolveReferenceCostSources(era: ForecastEra): CostSource[] {
+  return era.sources.filter((source): source is CostSource =>
+    source.type === "cost" && source.provider !== "canonical",
   );
-}
-
-function resolveGuesstimateCostSource(era: ForecastEra): CostSource | undefined {
-  return era.sources.find((source): source is CostSource => source.type === "cost" && source.provider === "synthetic");
 }
 
 function formatCostSource(source: CostSource | undefined): string {
@@ -45,16 +41,13 @@ function formatCostSource(source: CostSource | undefined): string {
 }
 
 function buildReferencePriceLabel(era: ForecastEra): string {
-  const accurate = resolveAccurateCostSource(era);
-  const guesstimate = resolveGuesstimateCostSource(era);
-  const labels: string[] = [];
-  if (accurate) {
-    labels.push(`accurate ${formatCostSource(accurate)}`);
+  const references = resolveReferenceCostSources(era);
+  if (!references.length) {
+    return "n/a";
   }
-  if (guesstimate) {
-    labels.push(`guess ${formatCostSource(guesstimate)}`);
-  }
-  return labels.length ? labels.join(" · ") : "n/a";
+  return references
+    .map((source) => `${source.provider} ${formatCostSource(source)}`)
+    .join(" · ");
 }
 
 function buildTrajectoryRows(
@@ -120,7 +113,7 @@ function TrajectoryTable({forecast, demandForecast, oracleEntries}: TrajectoryTa
           <tr>
             <th className="timestamp">Time</th>
             <th className="numeric">Planning Price</th>
-            <th className="numeric">Accurate / Guess</th>
+            <th className="numeric">Alternative Prices</th>
             <th className="numeric">Solar (W)</th>
             <th className="numeric">Demand (W)</th>
             <th className="numeric">End SOC %</th>

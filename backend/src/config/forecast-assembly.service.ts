@@ -4,6 +4,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import type { ForecastEra, RawForecastEntry, RawSolarEntry, SimulationConfig } from "@chargecaster/domain";
 import { derivePriceSnapshot, EnergyPrice, normalizePriceSlots, TimeSlot } from "@chargecaster/domain";
 import { parseTimestamp } from "../simulation/solar";
+import type { PriceProviderForecast } from "./market-data.service";
 
 const SLOT_DURATION_MS = 3_600_000;
 
@@ -28,14 +29,19 @@ interface EraEntry {
   sources: ForecastEra["sources"];
 }
 
+interface ReferenceForecastIndex {
+  provider: string;
+  priority: number;
+  slots: Map<string, MutableRecord>;
+}
+
 @Injectable()
 export class ForecastAssemblyService {
   private readonly logger = new Logger(ForecastAssemblyService.name);
 
   buildForecastEras(
     canonicalForecast: RawForecastEntry[],
-    accurateForecast: RawForecastEntry[],
-    guesstimateForecast: RawForecastEntry[],
+    providerForecasts: PriceProviderForecast[],
     solarForecast: RawSolarEntry[],
     gridFeeEurPerKwh: number,
   ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
@@ -49,8 +55,13 @@ export class ForecastAssemblyService {
         .filter((slot) => slot.startIso !== null),
     );
 
-    const accurateIndex = this.buildStartIndex(accurateForecast);
-    const guesstimateIndex = this.buildStartIndex(guesstimateForecast);
+    const referenceIndices = providerForecasts
+      .map((providerForecast) => ({
+        provider: providerForecast.key,
+        priority: providerForecast.priority,
+        slots: this.buildStartIndex(providerForecast.forecast),
+      }))
+      .sort((left, right) => left.priority - right.priority);
 
     const solarSlots = this.dedupeSlots(
       solarForecast
@@ -85,36 +96,24 @@ export class ForecastAssemblyService {
         this.addSource(entry, canonicalSource);
       }
 
-      const accuratePayload = accurateIndex.get(slot.startIso);
-      if (accuratePayload) {
-        const accurateCost = this.buildSourcePayload(accuratePayload, gridFeeEurPerKwh);
-        if (accurateCost) {
-          const provider = typeof accuratePayload.provider === "string" && accuratePayload.provider.length > 0
-            ? accuratePayload.provider
-            : "accurate";
-          const accurateSource: CostSource = {
-            provider,
-            type: "cost",
-            payload: accurateCost,
-          };
-          this.addSource(entry, accurateSource);
+      for (const reference of referenceIndices) {
+        const referencePayload = reference.slots.get(slot.startIso);
+        if (!referencePayload) {
+          continue;
         }
-      }
-
-      const guesstimatePayload = guesstimateIndex.get(slot.startIso);
-      if (guesstimatePayload) {
-        const guesstimateCost = this.buildSourcePayload(guesstimatePayload, gridFeeEurPerKwh);
-        if (guesstimateCost) {
-          const provider = typeof guesstimatePayload.provider === "string" && guesstimatePayload.provider.length > 0
-            ? guesstimatePayload.provider
-            : "synthetic";
-          const guesstimateSource: CostSource = {
-            provider,
-            type: "cost",
-            payload: guesstimateCost,
-          };
-          this.addSource(entry, guesstimateSource);
+        const referenceCost = this.buildSourcePayload(referencePayload, gridFeeEurPerKwh);
+        if (!referenceCost) {
+          continue;
         }
+        const provider = typeof referencePayload.provider === "string" && referencePayload.provider.length > 0
+          ? referencePayload.provider
+          : reference.provider;
+        const source: CostSource = {
+          provider,
+          type: "cost",
+          payload: referenceCost,
+        };
+        this.addSource(entry, source);
       }
 
       const solarSlot = this.findSolarSlot(slot.startDate, slot.endDate, solarSlots);
@@ -236,7 +235,6 @@ export class ForecastAssemblyService {
     if (!solarSlot) {
       return null;
     }
-    // Extract solar energy from the matched solar slot
     let energyWh = this.toNumber(solarSlot.payload.energy_wh);
     if (energyWh === null) {
       const energyKwh = this.toNumber(solarSlot.payload.energy_kwh);
@@ -247,7 +245,7 @@ export class ForecastAssemblyService {
     if (energyWh === null || energyWh <= 0) {
       return null;
     }
-    // Compute overlap between the era slot (e.g., 15 min ENTSO-E) and the solar slot (often hourly)
+
     const eraStart = eraSlot.startDate?.getTime();
     const eraEnd = eraSlot.endDate?.getTime();
     const solarStart = solarSlot.startDate?.getTime();

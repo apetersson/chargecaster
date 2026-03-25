@@ -1,19 +1,19 @@
 import { Logger } from "@nestjs/common";
 import type { RawForecastEntry } from "@chargecaster/domain";
 
-import type { SyntheticPriceConfig } from "../schemas";
+import type { SynteticPriceConfig } from "../schemas";
 import { WeatherService, type SolarArrayConfig, type WeatherLocation } from "../weather.service";
 import { StorageService, type WeatherHourRecord } from "../../storage/storage.service";
 import { EnergyPriceProvider, EnergyPriceProviderContext, EnergyPriceProviderResult } from "./provider.types";
 
-const DEFAULT_MAX_HOURS = 120;
+export const DEFAULT_PRICE_FORECAST_HOURS = 120;
 const DEFAULT_TOTAL_PRICE_EUR_PER_KWH = 0.22;
 const MIN_TOTAL_PRICE_EUR_PER_KWH = 0.04;
 const MAX_TOTAL_PRICE_EUR_PER_KWH = 0.65;
 const HISTORY_LOOKBACK_DAYS = 180;
 const VIENNA_TIME_ZONE = "Europe/Vienna";
 
-interface HistoricalPriceHour {
+export interface HistoricalPriceHour {
   hourUtc: string;
   dtUtc: Date;
   localHour: number;
@@ -23,7 +23,7 @@ interface HistoricalPriceHour {
   totalPriceEurPerKwh: number;
 }
 
-interface FuturePriceContext {
+export interface FuturePriceContext {
   hourUtc: string;
   dtUtc: Date;
   localHour: number;
@@ -43,12 +43,12 @@ interface PriceBaselines {
 }
 
 const AUSTRIA_WEATHER_POINTS: WeatherLocation[] = [
-  {latitude: 48.2082, longitude: 16.3738, timezone: VIENNA_TIME_ZONE}, // Vienna
-  {latitude: 48.3069, longitude: 14.2858, timezone: VIENNA_TIME_ZONE}, // Linz
-  {latitude: 47.0707, longitude: 15.4395, timezone: VIENNA_TIME_ZONE}, // Graz
-  {latitude: 47.8095, longitude: 13.055, timezone: VIENNA_TIME_ZONE}, // Salzburg
-  {latitude: 47.2692, longitude: 11.4041, timezone: VIENNA_TIME_ZONE}, // Innsbruck
-  {latitude: 46.6247, longitude: 14.3053, timezone: VIENNA_TIME_ZONE}, // Klagenfurt
+  {latitude: 48.2082, longitude: 16.3738, timezone: VIENNA_TIME_ZONE},
+  {latitude: 48.3069, longitude: 14.2858, timezone: VIENNA_TIME_ZONE},
+  {latitude: 47.0707, longitude: 15.4395, timezone: VIENNA_TIME_ZONE},
+  {latitude: 47.8095, longitude: 13.055, timezone: VIENNA_TIME_ZONE},
+  {latitude: 47.2692, longitude: 11.4041, timezone: VIENNA_TIME_ZONE},
+  {latitude: 46.6247, longitude: 14.3053, timezone: VIENNA_TIME_ZONE},
 ];
 
 const AUSTRIA_SOLAR_POINTS: SolarArrayConfig[] = AUSTRIA_WEATHER_POINTS.map((point) => ({
@@ -60,21 +60,21 @@ const AUSTRIA_SOLAR_POINTS: SolarArrayConfig[] = AUSTRIA_WEATHER_POINTS.map((poi
   azimuth: 180,
 }));
 
-export class SyntheticPriceProvider implements EnergyPriceProvider {
-  readonly key = "synthetic";
-  private readonly logger = new Logger(SyntheticPriceProvider.name);
+export class SynteticPriceProvider implements EnergyPriceProvider {
+  readonly key = "syntetic";
+  private readonly logger = new Logger(SynteticPriceProvider.name);
 
   constructor(
     private readonly storage: StorageService,
     private readonly weatherService: WeatherService,
-    private readonly cfg?: SyntheticPriceConfig,
+    private readonly cfg?: SynteticPriceConfig,
   ) {}
 
   async collect(ctx: EnergyPriceProviderContext): Promise<EnergyPriceProviderResult> {
-    const maxHours = normalizeMaxHours(this.cfg?.max_hours);
-    const history = this.buildHistoricalHours();
+    const maxHours = normalizePriceForecastHorizon(this.cfg?.max_hours);
+    const history = buildHistoricalPriceHours(this.storage);
     if (!history.length) {
-      const message = "Synthetic price forecast skipped: no historical price data available.";
+      const message = "Syntetic price forecast skipped: no historical price data available.";
       this.logger.warn(message);
       ctx.warnings.push(message);
       return {forecast: [], priceSnapshot: null};
@@ -83,209 +83,188 @@ export class SyntheticPriceProvider implements EnergyPriceProvider {
     try {
       const start = ceilToUtcHour(new Date());
       const end = new Date(start.getTime() + Math.max(0, maxHours - 1) * 3_600_000);
-      const futureContexts = await this.buildFutureContexts(start, end);
-      if (!futureContexts.length) {
-        const message = "Synthetic price forecast skipped: weather context unavailable.";
+      const contexts = await buildAustriaWideFuturePriceContexts(this.weatherService, start, end);
+      if (!contexts.length) {
+        const message = "Syntetic price forecast skipped: weather context unavailable.";
         this.logger.warn(message);
         ctx.warnings.push(message);
         return {forecast: [], priceSnapshot: null};
       }
 
-      const baselines = buildBaselines(history);
-      const historyByHour = new Map(history.map((row) => [row.hourUtc, row.totalPriceEurPerKwh]));
-      const recentMean = average(history.slice(-24).map((row) => row.totalPriceEurPerKwh)) ?? DEFAULT_TOTAL_PRICE_EUR_PER_KWH;
-      const gridFee = ctx.simulationConfig.price.grid_fee_eur_per_kwh ?? 0;
-      const forecast: RawForecastEntry[] = [];
-      const predictedTotalByHour = new Map<string, number>();
-      let previousTotal: number | null = history[history.length - 1]?.totalPriceEurPerKwh ?? null;
-
-      for (const context of futureContexts) {
-        const baseline = predictBaselineTotalPrice(context, baselines, recentMean);
-        const lag24 = predictedTotalByHour.get(offsetHourIso(context.hourUtc, -24)) ?? historyByHour.get(offsetHourIso(context.hourUtc, -24)) ?? null;
-        const lag168 = historyByHour.get(offsetHourIso(context.hourUtc, -168)) ?? null;
-        const weatherAdjustment = computeWeatherAdjustment(context);
-        const recencyAdjustment = clamp((recentMean - baseline) * 0.18, -0.03, 0.03);
-
-        let totalPrice = baseline * 0.6;
-        totalPrice += (lag24 ?? baseline) * (lag24 == null ? 0.0 : 0.22);
-        totalPrice += (lag168 ?? baseline) * (lag168 == null ? 0.0 : 0.1);
-        totalPrice += (previousTotal ?? baseline) * (previousTotal == null ? 0.0 : 0.08);
-        totalPrice += weatherAdjustment + recencyAdjustment;
-        if (previousTotal != null) {
-          totalPrice = totalPrice * 0.84 + previousTotal * 0.16;
-        }
-        totalPrice = clamp(totalPrice, MIN_TOTAL_PRICE_EUR_PER_KWH, MAX_TOTAL_PRICE_EUR_PER_KWH);
-
-        const rawMarketPrice = totalPrice - gridFee;
-        const endUtc = new Date(context.dtUtc.getTime() + 3_600_000);
-        forecast.push({
-          start: context.dtUtc.toISOString(),
-          end: endUtc.toISOString(),
-          duration_hours: 1,
-          price: roundNumber(rawMarketPrice, 6),
-          unit: "EUR/kWh",
-          provider: this.key,
-        });
-
-        predictedTotalByHour.set(context.hourUtc, totalPrice);
-        previousTotal = totalPrice;
-      }
-
+      const totalPrices = buildHeuristicTotalPriceSeries(history, contexts);
+      const forecast = buildRawMarketForecast(this.key, contexts, totalPrices, ctx.simulationConfig.price.grid_fee_eur_per_kwh ?? 0);
       const firstRawPrice = forecast[0]?.price;
       const priceSnapshot = typeof firstRawPrice === "number" && Number.isFinite(firstRawPrice)
-        ? roundNumber(firstRawPrice + gridFee, 6)
+        ? roundNumber(firstRawPrice + (ctx.simulationConfig.price.grid_fee_eur_per_kwh ?? 0), 6)
         : null;
-      this.logger.log(`Built ${forecast.length} synthetic price slot(s)`);
+      this.logger.log(`Built ${forecast.length} syntetic price slot(s)`);
       return {forecast, priceSnapshot};
     } catch (error) {
-      const message = `Synthetic price forecast failed: ${String(error)}`;
+      const message = `Syntetic price forecast failed: ${String(error)}`;
       this.logger.warn(message);
       ctx.warnings.push(message);
       return {forecast: [], priceSnapshot: null};
     }
   }
+}
 
-  private buildHistoricalHours(): HistoricalPriceHour[] {
-    const cutoffMs = Date.now() - (HISTORY_LOOKBACK_DAYS * 86_400_000);
-    const buckets = new Map<string, {sum: number; count: number}>();
+export function normalizePriceForecastHorizon(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : DEFAULT_PRICE_FORECAST_HOURS;
+}
 
-    for (const record of this.storage.listAllHistoryAsc()) {
-      const price = record.payload.price_eur_per_kwh;
-      if (typeof price !== "number" || !Number.isFinite(price)) {
-        continue;
-      }
-      const dtUtc = parseIso(record.payload.timestamp);
-      if (!dtUtc || dtUtc.getTime() < cutoffMs) {
-        continue;
-      }
-      const hourUtc = floorToUtcHour(dtUtc).toISOString();
-      const bucket = buckets.get(hourUtc) ?? {sum: 0, count: 0};
-      bucket.sum += price;
-      bucket.count += 1;
-      buckets.set(hourUtc, bucket);
+export function buildHistoricalPriceHours(storage: StorageService): HistoricalPriceHour[] {
+  const cutoffMs = Date.now() - (HISTORY_LOOKBACK_DAYS * 86_400_000);
+  const buckets = new Map<string, {sum: number; count: number}>();
+
+  for (const record of storage.listAllHistoryAsc()) {
+    const price = record.payload.price_eur_per_kwh;
+    if (typeof price !== "number" || !Number.isFinite(price)) {
+      continue;
     }
-
-    return [...buckets.entries()]
-      .sort((left, right) => left[0].localeCompare(right[0]))
-      .map(([hourUtc, bucket]) => {
-        const dtUtc = new Date(hourUtc);
-        const local = toLocalParts(dtUtc);
-        return {
-          hourUtc,
-          dtUtc,
-          localHour: local.hour,
-          weekday: local.weekday,
-          month: local.month,
-          season: seasonFromMonth(local.month),
-          totalPriceEurPerKwh: bucket.count > 0 ? bucket.sum / bucket.count : DEFAULT_TOTAL_PRICE_EUR_PER_KWH,
-        } satisfies HistoricalPriceHour;
-      });
+    const dtUtc = parseIso(record.payload.timestamp);
+    if (!dtUtc || dtUtc.getTime() < cutoffMs) {
+      continue;
+    }
+    const hourUtc = floorToUtcHour(dtUtc).toISOString();
+    const bucket = buckets.get(hourUtc) ?? {sum: 0, count: 0};
+    bucket.sum += price;
+    bucket.count += 1;
+    buckets.set(hourUtc, bucket);
   }
 
-  private async buildFutureContexts(start: Date, end: Date): Promise<FuturePriceContext[]> {
-    const weatherResponses = await Promise.all(
-      AUSTRIA_WEATHER_POINTS.map((location) => this.weatherService.getWeatherHours(location, start, end)),
-    );
-    const solarRows = await this.weatherService.getSolarProxyHours(AUSTRIA_SOLAR_POINTS, start, end);
-
-    const aggregate = new Map<string, {
-      dtUtc: Date;
-      cloudSum: number;
-      cloudCount: number;
-      windSum: number;
-      windCount: number;
-      precipitationSum: number;
-      precipitationCount: number;
-      solarSum: number;
-      solarCount: number;
-    }>();
-
-    for (const weatherRows of weatherResponses) {
-      for (const row of weatherRows) {
-        this.accumulateWeatherRow(aggregate, row);
-      }
-    }
-
-    for (const row of solarRows) {
-      const bucket = aggregate.get(row.hourUtc) ?? {
-        dtUtc: new Date(row.hourUtc),
-        cloudSum: 0,
-        cloudCount: 0,
-        windSum: 0,
-        windCount: 0,
-        precipitationSum: 0,
-        precipitationCount: 0,
-        solarSum: 0,
-        solarCount: 0,
-      };
-      if (typeof row.expectedPowerW === "number" && Number.isFinite(row.expectedPowerW)) {
-        bucket.solarSum += row.expectedPowerW;
-        bucket.solarCount += 1;
-      }
-      aggregate.set(row.hourUtc, bucket);
-    }
-
-    const contexts: FuturePriceContext[] = [];
-    for (let current = start.getTime(); current <= end.getTime(); current += 3_600_000) {
-      const dtUtc = new Date(current);
-      const hourUtc = dtUtc.toISOString();
-      const bucket = aggregate.get(hourUtc);
+  return [...buckets.entries()]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([hourUtc, bucket]) => {
+      const dtUtc = new Date(hourUtc);
       const local = toLocalParts(dtUtc);
-      contexts.push({
+      return {
         hourUtc,
         dtUtc,
         localHour: local.hour,
         weekday: local.weekday,
         month: local.month,
         season: seasonFromMonth(local.month),
-        solarProxyW: bucket && bucket.solarCount > 0 ? bucket.solarSum / bucket.solarCount : 0,
-        cloudCover: bucket && bucket.cloudCount > 0 ? bucket.cloudSum / bucket.cloudCount : null,
-        windSpeed10m: bucket && bucket.windCount > 0 ? bucket.windSum / bucket.windCount : null,
-        precipitationMm: bucket && bucket.precipitationCount > 0 ? bucket.precipitationSum / bucket.precipitationCount : null,
-      });
+        totalPriceEurPerKwh: bucket.count > 0 ? bucket.sum / bucket.count : DEFAULT_TOTAL_PRICE_EUR_PER_KWH,
+      } satisfies HistoricalPriceHour;
+    });
+}
+
+export async function buildAustriaWideFuturePriceContexts(
+  weatherService: WeatherService,
+  start: Date,
+  end: Date,
+): Promise<FuturePriceContext[]> {
+  const weatherResponses = await Promise.all(
+    AUSTRIA_WEATHER_POINTS.map((location) => weatherService.getWeatherHours(location, start, end)),
+  );
+  const solarRows = await weatherService.getSolarProxyHours(AUSTRIA_SOLAR_POINTS, start, end);
+
+  const aggregate = new Map<string, {
+    dtUtc: Date;
+    cloudSum: number;
+    cloudCount: number;
+    windSum: number;
+    windCount: number;
+    precipitationSum: number;
+    precipitationCount: number;
+    solarSum: number;
+    solarCount: number;
+  }>();
+
+  for (const weatherRows of weatherResponses) {
+    for (const row of weatherRows) {
+      accumulateWeatherRow(aggregate, row);
     }
-    return contexts;
   }
 
-  private accumulateWeatherRow(
-    aggregate: Map<string, {
-      dtUtc: Date;
-      cloudSum: number;
-      cloudCount: number;
-      windSum: number;
-      windCount: number;
-      precipitationSum: number;
-      precipitationCount: number;
-      solarSum: number;
-      solarCount: number;
-    }>,
-    row: WeatherHourRecord,
-  ): void {
-    const bucket = aggregate.get(row.hourUtc) ?? {
-      dtUtc: new Date(row.hourUtc),
-      cloudSum: 0,
-      cloudCount: 0,
-      windSum: 0,
-      windCount: 0,
-      precipitationSum: 0,
-      precipitationCount: 0,
-      solarSum: 0,
-      solarCount: 0,
-    };
-    if (typeof row.cloudCover === "number" && Number.isFinite(row.cloudCover)) {
-      bucket.cloudSum += row.cloudCover;
-      bucket.cloudCount += 1;
-    }
-    if (typeof row.windSpeed10m === "number" && Number.isFinite(row.windSpeed10m)) {
-      bucket.windSum += row.windSpeed10m;
-      bucket.windCount += 1;
-    }
-    if (typeof row.precipitationMm === "number" && Number.isFinite(row.precipitationMm)) {
-      bucket.precipitationSum += row.precipitationMm;
-      bucket.precipitationCount += 1;
+  for (const row of solarRows) {
+    const bucket = aggregate.get(row.hourUtc) ?? emptyAggregateBucket(row.hourUtc);
+    if (typeof row.expectedPowerW === "number" && Number.isFinite(row.expectedPowerW)) {
+      bucket.solarSum += row.expectedPowerW;
+      bucket.solarCount += 1;
     }
     aggregate.set(row.hourUtc, bucket);
   }
+
+  const contexts: FuturePriceContext[] = [];
+  for (let current = start.getTime(); current <= end.getTime(); current += 3_600_000) {
+    const dtUtc = new Date(current);
+    const hourUtc = dtUtc.toISOString();
+    const bucket = aggregate.get(hourUtc);
+    const local = toLocalParts(dtUtc);
+    contexts.push({
+      hourUtc,
+      dtUtc,
+      localHour: local.hour,
+      weekday: local.weekday,
+      month: local.month,
+      season: seasonFromMonth(local.month),
+      solarProxyW: bucket && bucket.solarCount > 0 ? bucket.solarSum / bucket.solarCount : 0,
+      cloudCover: bucket && bucket.cloudCount > 0 ? bucket.cloudSum / bucket.cloudCount : null,
+      windSpeed10m: bucket && bucket.windCount > 0 ? bucket.windSum / bucket.windCount : null,
+      precipitationMm: bucket && bucket.precipitationCount > 0 ? bucket.precipitationSum / bucket.precipitationCount : null,
+    });
+  }
+
+  return contexts;
+}
+
+export function buildHeuristicTotalPriceSeries(
+  history: HistoricalPriceHour[],
+  contexts: FuturePriceContext[],
+): number[] {
+  const baselines = buildBaselines(history);
+  const historyByHour = new Map(history.map((row) => [row.hourUtc, row.totalPriceEurPerKwh]));
+  const recentMean = average(history.slice(-24).map((row) => row.totalPriceEurPerKwh)) ?? DEFAULT_TOTAL_PRICE_EUR_PER_KWH;
+  const predictedTotalByHour = new Map<string, number>();
+  let previousTotal: number | null = history[history.length - 1]?.totalPriceEurPerKwh ?? null;
+  const totals: number[] = [];
+
+  for (const context of contexts) {
+    const baseline = predictBaselineTotalPrice(context, baselines, recentMean);
+    const lag24 = predictedTotalByHour.get(offsetHourIso(context.hourUtc, -24)) ?? historyByHour.get(offsetHourIso(context.hourUtc, -24)) ?? null;
+    const lag168 = historyByHour.get(offsetHourIso(context.hourUtc, -168)) ?? null;
+    const weatherAdjustment = computeWeatherAdjustment(context);
+    const recencyAdjustment = clamp((recentMean - baseline) * 0.18, -0.03, 0.03);
+
+    let totalPrice = baseline * 0.6;
+    totalPrice += (lag24 ?? baseline) * (lag24 == null ? 0.0 : 0.22);
+    totalPrice += (lag168 ?? baseline) * (lag168 == null ? 0.0 : 0.1);
+    totalPrice += (previousTotal ?? baseline) * (previousTotal == null ? 0.0 : 0.08);
+    totalPrice += weatherAdjustment + recencyAdjustment;
+    if (previousTotal != null) {
+      totalPrice = totalPrice * 0.84 + previousTotal * 0.16;
+    }
+    totalPrice = clamp(totalPrice, MIN_TOTAL_PRICE_EUR_PER_KWH, MAX_TOTAL_PRICE_EUR_PER_KWH);
+
+    totals.push(totalPrice);
+    predictedTotalByHour.set(context.hourUtc, totalPrice);
+    previousTotal = totalPrice;
+  }
+
+  return totals;
+}
+
+export function buildRawMarketForecast(
+  providerKey: string,
+  contexts: FuturePriceContext[],
+  totalPrices: number[],
+  gridFee: number,
+): RawForecastEntry[] {
+  return contexts.map((context, index) => {
+    const totalPrice = totalPrices[index] ?? DEFAULT_TOTAL_PRICE_EUR_PER_KWH;
+    const rawMarketPrice = totalPrice - gridFee;
+    return {
+      start: context.dtUtc.toISOString(),
+      end: new Date(context.dtUtc.getTime() + 3_600_000).toISOString(),
+      duration_hours: 1,
+      price: roundNumber(rawMarketPrice, 6),
+      unit: "EUR/kWh",
+      provider: providerKey,
+    } satisfies RawForecastEntry;
+  });
 }
 
 function buildBaselines(rows: HistoricalPriceHour[]): PriceBaselines {
@@ -373,10 +352,38 @@ function computeWeatherAdjustment(context: FuturePriceContext): number {
   return solarAdjustment + windAdjustment + cloudAdjustment + precipitationAdjustment + morningPeak + eveningPeak + middayDip + weekendAdjustment;
 }
 
-function normalizeMaxHours(value: number | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? Math.round(value)
-    : DEFAULT_MAX_HOURS;
+function emptyAggregateBucket(hourUtc: string) {
+  return {
+    dtUtc: new Date(hourUtc),
+    cloudSum: 0,
+    cloudCount: 0,
+    windSum: 0,
+    windCount: 0,
+    precipitationSum: 0,
+    precipitationCount: 0,
+    solarSum: 0,
+    solarCount: 0,
+  };
+}
+
+function accumulateWeatherRow(
+  aggregate: Map<string, ReturnType<typeof emptyAggregateBucket>>,
+  row: WeatherHourRecord,
+): void {
+  const bucket = aggregate.get(row.hourUtc) ?? emptyAggregateBucket(row.hourUtc);
+  if (typeof row.cloudCover === "number" && Number.isFinite(row.cloudCover)) {
+    bucket.cloudSum += row.cloudCover;
+    bucket.cloudCount += 1;
+  }
+  if (typeof row.windSpeed10m === "number" && Number.isFinite(row.windSpeed10m)) {
+    bucket.windSum += row.windSpeed10m;
+    bucket.windCount += 1;
+  }
+  if (typeof row.precipitationMm === "number" && Number.isFinite(row.precipitationMm)) {
+    bucket.precipitationSum += row.precipitationMm;
+    bucket.precipitationCount += 1;
+  }
+  aggregate.set(row.hourUtc, bucket);
 }
 
 function parseIso(value: string | null | undefined): Date | null {
@@ -407,8 +414,8 @@ function toLocalParts(value: Date): {hour: number; weekday: number; month: numbe
     hour12: false,
   });
   const parts = formatter.formatToParts(value);
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? NaN);
-  const month = Number(parts.find((part) => part.type === "month")?.value ?? NaN);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? Number.NaN);
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? Number.NaN);
   const weekdayLabel = parts.find((part) => part.type === "weekday")?.value ?? "Mon";
   return {
     hour: Number.isFinite(hour) ? hour : value.getUTCHours(),
@@ -450,14 +457,14 @@ function average(values: number[]): number | null {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function offsetHourIso(hourUtc: string, offsetHours: number): string {
+export function offsetHourIso(hourUtc: string, offsetHours: number): string {
   return new Date(new Date(hourUtc).getTime() + offsetHours * 3_600_000).toISOString();
 }
 
-function roundNumber(value: number, digits: number): number {
+export function roundNumber(value: number, digits: number): number {
   return Number(value.toFixed(digits));
 }
 
-function clamp(value: number, minimum: number, maximum: number): number {
+export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }

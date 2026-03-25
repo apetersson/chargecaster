@@ -209,7 +209,8 @@ function validateConfigDocument(document: ConfigDocument): void {
     register("awattar", market.awattar?.priority);
     register("entsoe", market.entsoe?.priority);
     register("from_evcc", market.from_evcc?.priority);
-    register("synthetic", market.synthetic?.priority);
+    register("syntetic", (market.syntetic ?? market.synthetic)?.priority);
+    register("educatedGuess", market.educatedGuess?.priority);
 
     for (const [priority, providers] of priorities.entries()) {
       if (providers.length > 1) {

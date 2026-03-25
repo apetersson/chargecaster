@@ -8,10 +8,7 @@ export interface ProjectionPoint extends ScatterDataPoint {
   source: SeriesSource;
   xEnd?: number | null;
   feedInY?: number | null;
-  accurateY?: number | null;
-  guesstimateY?: number | null;
-  accurateProvider?: string | null;
-  guesstimateProvider?: string | null;
+  referencePrices?: { provider: string; cents: number }[];
   isCurrentMarker?: boolean;
   // Optional strategy annotation for forecast price bars.
   // copied from OracleEntry["strategy"].

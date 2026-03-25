@@ -27,7 +27,12 @@ describe("ForecastAssemblyService price normalization", () => {
       },
     ];
 
-    const {forecastEntries} = service.buildForecastEras(canonicalForecast, marketForecast, [], [], 0);
+    const {forecastEntries} = service.buildForecastEras(
+      canonicalForecast,
+      [{key: "awattar", priority: 1, forecast: marketForecast}],
+      [],
+      0,
+    );
 
     expect(forecastEntries).toHaveLength(1);
     const [entry] = forecastEntries;
@@ -39,7 +44,7 @@ describe("ForecastAssemblyService price normalization", () => {
     expect(slots[0].price).toBeCloseTo(0.18786, 6);
   });
 
-  it("adds accurate and guesstimate price sources beside the canonical planning price", () => {
+  it("adds provider price sources beside the canonical planning price", () => {
     const start = new Date(Date.UTC(2025, 0, 1, 12, 0, 0)).toISOString();
     const end = new Date(Date.UTC(2025, 0, 1, 13, 0, 0)).toISOString();
 
@@ -55,20 +60,30 @@ describe("ForecastAssemblyService price normalization", () => {
       ],
       [
         {
-          start,
-          end,
-          price: 0.18,
-          unit: "EUR/kWh",
-          provider: "awattar",
+          key: "awattar",
+          priority: 2,
+          forecast: [
+            {
+              start,
+              end,
+              price: 0.18,
+              unit: "EUR/kWh",
+              provider: "awattar",
+            },
+          ],
         },
-      ],
-      [
         {
-          start,
-          end,
-          price: 0.205,
-          unit: "EUR/kWh",
-          provider: "synthetic",
+          key: "syntetic",
+          priority: 9,
+          forecast: [
+            {
+              start,
+              end,
+              price: 0.205,
+              unit: "EUR/kWh",
+              provider: "syntetic",
+            },
+          ],
         },
       ],
       [],
@@ -77,7 +92,7 @@ describe("ForecastAssemblyService price normalization", () => {
 
     expect(eras).toHaveLength(1);
     const costProviders = eras[0]?.sources.filter((source) => source.type === "cost").map((source) => source.provider);
-    expect(costProviders).toEqual(["canonical", "awattar", "synthetic"]);
+    expect(costProviders).toEqual(["canonical", "awattar", "syntetic"]);
   });
 
   it("preserves the solar forecast provider on era sources", () => {
@@ -95,7 +110,6 @@ describe("ForecastAssemblyService price normalization", () => {
 
     const { eras } = service.buildForecastEras(
       canonicalForecast,
-      [],
       [],
       [
         {

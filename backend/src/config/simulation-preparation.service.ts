@@ -194,19 +194,24 @@ export class SimulationPreparationService {
 
     const evccResult = await this.evccDataService.collect(configFile.evcc, warnings);
     const marketResult = await this.marketDataService.collect(
+      configFile,
       resolveEnergyPriceConfig(configFile),
       simulationConfig,
       warnings,
       evccResult.forecast,
     );
     this.logger.verbose(
-      `Market data fetch summary: raw_slots=${marketResult.forecast.length}, accurate_slots=${marketResult.accurateForecast.length}, ` +
-      `guesstimate_slots=${marketResult.guesstimateForecast.length}, price_snapshot=${marketResult.priceSnapshot ?? "n/a"}`,
+      `Market data fetch summary: raw_slots=${marketResult.forecast.length}, provider_count=${marketResult.providerForecasts.length}, ` +
+      `price_snapshot=${marketResult.priceSnapshot ?? "n/a"}`,
     );
     const referenceTimeMs = Date.now();
     const futureMarketForecast = trimForecastEntriesToFuture(marketResult.forecast, referenceTimeMs);
-    const futureAccurateMarketForecast = trimForecastEntriesToFuture(marketResult.accurateForecast, referenceTimeMs);
-    const futureGuesstimateMarketForecast = trimForecastEntriesToFuture(marketResult.guesstimateForecast, referenceTimeMs);
+    const futureProviderForecasts = marketResult.providerForecasts
+      .map((providerForecast) => ({
+        ...providerForecast,
+        forecast: trimForecastEntriesToFuture(providerForecast.forecast, referenceTimeMs),
+      }))
+      .filter((providerForecast) => providerForecast.forecast.length > 0);
     this.logger.verbose(
       `EVCC fetch summary: raw_slots=${evccResult.forecast.length}, solar_slots=${evccResult.solarForecast.length}, battery_soc=${evccResult.batterySoc ?? "n/a"}`,
     );
@@ -220,7 +225,7 @@ export class SimulationPreparationService {
     const futureSolarForecast = trimSolarEntriesToFuture(openMeteoSolarForecast, referenceTimeMs);
     this.logger.verbose(
       `Future entry counts (ref=${nowIso}): evcc=${futureEvccForecast.length}, market=${futureMarketForecast.length}, ` +
-      `accurate_market=${futureAccurateMarketForecast.length}, guesstimate_market=${futureGuesstimateMarketForecast.length}, solar=${futureSolarForecast.length}`,
+      `market_providers=${futureProviderForecasts.length}, solar=${futureSolarForecast.length}`,
     );
 
     // Provider order determines preference. If marketResult has data, use it; otherwise fall back to EVCC forecast later.
@@ -255,8 +260,7 @@ export class SimulationPreparationService {
 
     const forecastErasResult = this.forecastAssembly.buildForecastEras(
       forecast,
-      futureAccurateMarketForecast,
-      futureGuesstimateMarketForecast,
+      futureProviderForecasts,
       solarForecast,
       simulationConfig.price.grid_fee_eur_per_kwh ?? 0,
     );

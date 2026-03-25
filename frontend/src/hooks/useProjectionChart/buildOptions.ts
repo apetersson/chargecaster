@@ -130,25 +130,15 @@ export const buildOptions = ({bounds, timeRangeMs, legendGroups, responsive, val
               return [];
             }
             const raw = item.raw as {
-              accurateY?: number | null;
-              guesstimateY?: number | null;
-              accurateProvider?: string | null;
-              guesstimateProvider?: string | null;
+              referencePrices?: { provider: string; cents: number }[];
             } | null;
-            if (!raw) {
+            if (!raw?.referencePrices?.length) {
               return [];
             }
 
-            const extra: string[] = [];
-            if (typeof raw.accurateY === "number" && Number.isFinite(raw.accurateY)) {
-              const providerLabel = raw.accurateProvider ? ` (${raw.accurateProvider})` : "";
-              extra.push(`Accurate${providerLabel}: ${numberFormatter.format(raw.accurateY)} ${RIGHT_AXIS_UNIT}`);
-            }
-            if (typeof raw.guesstimateY === "number" && Number.isFinite(raw.guesstimateY)) {
-              const providerLabel = raw.guesstimateProvider ? ` (${raw.guesstimateProvider})` : "";
-              extra.push(`Guesstimate${providerLabel}: ${numberFormatter.format(raw.guesstimateY)} ${RIGHT_AXIS_UNIT}`);
-            }
-            return extra;
+            return raw.referencePrices.map(({provider, cents}) =>
+              `${provider}: ${numberFormatter.format(cents)} ${RIGHT_AXIS_UNIT}`,
+            );
           },
       },
     },
