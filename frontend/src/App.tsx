@@ -31,7 +31,7 @@ function App(): JSX.Element {
   const backtestState = useBacktestHistory();
   const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
   const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
-  const [previewHours, setPreviewHours] = useState<number>(120);
+  const [previewHours, setPreviewHours] = useState<number>(48);
 
   useEffect(() => {
     setShowPowerAxisLabels(!isMobile);

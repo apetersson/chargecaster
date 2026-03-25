@@ -5,79 +5,54 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 
 import type { ConfigDocument } from "../config/schemas";
 import { ConfigFileService } from "../config/config-file.service";
+import { isLoadForecastTrainingEnabled, isPriceForecastTrainingEnabled } from "../config/schemas";
 import { StorageService } from "../storage/storage.service";
 import { LoadForecastArtifactService, loadForecastManifestSchema } from "./load-forecast-artifact.service";
+import { PriceForecastArtifactService, priceForecastManifestSchema } from "./price-forecast-artifact.service";
+import { resolveBackendDbPath } from "./model-paths";
 
 const MIN_HISTORY_DAYS = 56;
 const MIN_NEW_DAYS_SINCE_LAST_TRAINING = 14;
 const TRAINING_WINDOW_START_HOUR = 1;
 const TRAINING_WINDOW_END_HOUR = 5;
+const PYTHON_EXECUTABLE = "python3";
+
+type TrainingJobKey = "load-forecast" | "price-forecast";
+
+interface TrainingJob {
+  key: TrainingJobKey;
+  label: string;
+  versionDir: string;
+  args: string[];
+  promoteIfEligible: () => void;
+}
 
 @Injectable()
 export class ModelTrainingCoordinator {
   private readonly logger = new Logger(ModelTrainingCoordinator.name);
   private activeProcess: ChildProcessWithoutNullStreams | null = null;
+  private pendingConfig: ConfigDocument | null = null;
 
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
-    @Inject(LoadForecastArtifactService) private readonly artifactService: LoadForecastArtifactService,
+    @Inject(LoadForecastArtifactService) private readonly loadArtifactService: LoadForecastArtifactService,
+    @Inject(PriceForecastArtifactService) private readonly priceArtifactService: PriceForecastArtifactService,
     @Inject(ConfigFileService) private readonly configFileService: ConfigFileService,
   ) {}
 
   maybeStartTraining(config: ConfigDocument): void {
-    if (!config.load_forecast?.self_training_enabled) {
-      return;
-    }
+    this.pendingConfig = config;
     if (this.activeProcess) {
       return;
     }
-    const configuredPythonExecutable = config.load_forecast.python_executable?.trim();
-    const pythonExecutable =
-      configuredPythonExecutable && configuredPythonExecutable.length > 0
-        ? configuredPythonExecutable
-        : "python3";
-    if (!isTrainingTimeWindow(new Date())) {
+
+    const job = this.resolveNextJob(config, new Date());
+    if (!job) {
       return;
     }
 
-    const totalHistoryDays = this.storage.listHistoryDayStatsBefore("9999-12-31").length;
-    if (totalHistoryDays < MIN_HISTORY_DAYS) {
-      return;
-    }
-
-    const artifact = this.artifactService.readActiveArtifact(config);
-    if (artifact) {
-      const lastTrainingEnd = artifact.manifest.training_window.end.slice(0, 10);
-      const newHistoryDays = this.storage.listHistoryDayStatsBefore("9999-12-31")
-        .filter((entry) => entry.date > lastTrainingEnd)
-        .length;
-      if (newHistoryDays < MIN_NEW_DAYS_SINCE_LAST_TRAINING) {
-        return;
-      }
-    }
-
-    const baseDir = this.artifactService.ensureBaseDir(config);
-    const version = new Date().toISOString().replaceAll(":", "").replaceAll(".", "").replaceAll("-", "");
-    const versionDir = join(baseDir, version);
-    mkdirSync(versionDir, { recursive: true });
-
-    const scriptPath = join(process.cwd(), "ml", "train_load_forecast.py");
-    if (!existsSync(scriptPath)) {
-      this.logger.warn(`Skipping self-training because ${scriptPath} is missing`);
-      return;
-    }
-
-    const args = [
-      scriptPath,
-      "--config",
-      this.configFileService.resolvePath(),
-      "--db",
-      join(process.cwd(), "..", "data", "db", "backend.sqlite"),
-      "--output-dir",
-      versionDir,
-    ];
-    this.logger.log(`Starting background load-forecast training in ${versionDir}`);
-    const child = spawn(pythonExecutable, args, {
+    this.logger.log(`Starting background ${job.label} training in ${job.versionDir}`);
+    const child = spawn(PYTHON_EXECUTABLE, job.args, {
       cwd: process.cwd(),
       stdio: "pipe",
       env: {
@@ -86,15 +61,19 @@ export class ModelTrainingCoordinator {
       },
     });
     this.activeProcess = child;
-    child.stdout.on("data", (chunk) => this.logger.log(`[train] ${String(chunk).trimEnd()}`));
-    child.stderr.on("data", (chunk) => this.logger.warn(`[train] ${String(chunk).trimEnd()}`));
+    child.stdout.on("data", (chunk) => this.logger.log(`[train:${job.key}] ${String(chunk).trimEnd()}`));
+    child.stderr.on("data", (chunk) => this.logger.warn(`[train:${job.key}] ${String(chunk).trimEnd()}`));
     child.on("exit", (code) => {
       this.activeProcess = null;
       if (code !== 0) {
-        this.logger.warn(`Background load-forecast training exited with code ${code}`);
-        return;
+        this.logger.warn(`Background ${job.label} training exited with code ${code}`);
+      } else {
+        job.promoteIfEligible();
       }
-      this.promoteIfEligible(config, versionDir);
+      const nextConfig = this.pendingConfig;
+      if (nextConfig) {
+        this.maybeStartTraining(nextConfig);
+      }
     });
   }
 
@@ -102,7 +81,149 @@ export class ModelTrainingCoordinator {
     return this.activeProcess !== null;
   }
 
-  private promoteIfEligible(config: ConfigDocument, versionDir: string): void {
+  listVersionDirs(config: ConfigDocument): string[] {
+    const baseDirs = [
+      this.loadArtifactService.ensureBaseDir(config),
+      this.priceArtifactService.ensureBaseDir(config),
+    ];
+    return baseDirs.flatMap((baseDir) => readdirSync(baseDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== "current" && entry.name !== "current.next")
+      .map((entry) => join(baseDir, entry.name)))
+      .sort();
+  }
+
+  private resolveNextJob(config: ConfigDocument, now: Date): TrainingJob | null {
+    const totalHistoryDays = this.storage.listHistoryDayStatsBefore("9999-12-31").length;
+    if (totalHistoryDays <= 0) {
+      return null;
+    }
+
+    const loadMissing = isLoadForecastTrainingEnabled(config) && !this.loadArtifactService.readActiveArtifact(config);
+    const priceMissing = isPriceForecastTrainingEnabled(config) && !this.priceArtifactService.readActiveArtifact(config);
+    const startupBootstrapMode = Boolean(loadMissing || priceMissing);
+
+    const loadJob = this.buildLoadForecastJob(config, now, totalHistoryDays, startupBootstrapMode);
+    if (loadJob) {
+      return loadJob;
+    }
+
+    const priceJob = this.buildPriceForecastJob(config, now, totalHistoryDays, startupBootstrapMode);
+    if (priceJob) {
+      return priceJob;
+    }
+
+    return null;
+  }
+
+  private buildLoadForecastJob(
+    config: ConfigDocument,
+    now: Date,
+    totalHistoryDays: number,
+    startupBootstrapMode: boolean,
+  ): TrainingJob | null {
+    if (!isLoadForecastTrainingEnabled(config)) {
+      return null;
+    }
+    const artifact = this.loadArtifactService.readActiveArtifact(config);
+    if (!this.shouldTrainArtifact(artifact?.manifest.training_window.end ?? null, totalHistoryDays, now, startupBootstrapMode)) {
+      return null;
+    }
+
+    const scriptPath = join(process.cwd(), "ml", "train_load_forecast.py");
+    if (!existsSync(scriptPath)) {
+      this.logger.warn(`Skipping self-training because ${scriptPath} is missing`);
+      return null;
+    }
+
+    const versionDir = this.createVersionDir(this.loadArtifactService.ensureBaseDir(config));
+    return {
+      key: "load-forecast",
+      label: "load-forecast",
+      versionDir,
+      args: [
+        scriptPath,
+        "--config",
+        this.configFileService.resolvePath(),
+        "--db",
+        resolveBackendDbPath(),
+        "--output-dir",
+        versionDir,
+      ],
+      promoteIfEligible: () => this.promoteLoadForecastIfEligible(config, versionDir),
+    };
+  }
+
+  private buildPriceForecastJob(
+    config: ConfigDocument,
+    now: Date,
+    totalHistoryDays: number,
+    startupBootstrapMode: boolean,
+  ): TrainingJob | null {
+    if (!isPriceForecastTrainingEnabled(config)) {
+      return null;
+    }
+    const artifact = this.priceArtifactService.readActiveArtifact(config);
+    if (!this.shouldTrainArtifact(artifact?.manifest.training_window.end ?? null, totalHistoryDays, now, startupBootstrapMode)) {
+      return null;
+    }
+
+    const scriptPath = join(process.cwd(), "ml", "train_price_forecast.py");
+    if (!existsSync(scriptPath)) {
+      this.logger.warn(`Skipping self-training because ${scriptPath} is missing`);
+      return null;
+    }
+
+    const versionDir = this.createVersionDir(this.priceArtifactService.ensureBaseDir(config));
+    return {
+      key: "price-forecast",
+      label: "price-forecast",
+      versionDir,
+      args: [
+        scriptPath,
+        "--config",
+        this.configFileService.resolvePath(),
+        "--db",
+        resolveBackendDbPath(),
+        "--output-dir",
+        versionDir,
+      ],
+      promoteIfEligible: () => this.promotePriceForecastIfEligible(config, versionDir),
+    };
+  }
+
+  private shouldTrainArtifact(
+    lastTrainingEnd: string | null,
+    totalHistoryDays: number,
+    now: Date,
+    startupBootstrapMode: boolean,
+  ): boolean {
+    if (startupBootstrapMode && !lastTrainingEnd) {
+      return totalHistoryDays > 0;
+    }
+    if (!isTrainingTimeWindow(now)) {
+      return false;
+    }
+    if (totalHistoryDays < MIN_HISTORY_DAYS) {
+      return false;
+    }
+    if (!lastTrainingEnd) {
+      return true;
+    }
+    const lastTrainingDate = lastTrainingEnd.slice(0, 10);
+    const newHistoryDays = this.storage.listHistoryDayStatsBefore("9999-12-31")
+      .filter((entry) => entry.date > lastTrainingDate)
+      .length;
+    return newHistoryDays >= MIN_NEW_DAYS_SINCE_LAST_TRAINING;
+  }
+
+  private createVersionDir(baseDir: string): string {
+    const version = new Date().toISOString().replaceAll(":", "").replaceAll(".", "").replaceAll("-", "");
+    const versionDir = join(baseDir, version);
+    mkdirSync(versionDir, { recursive: true });
+    return versionDir;
+  }
+
+  private promoteLoadForecastIfEligible(config: ConfigDocument, versionDir: string): void {
     const manifestPath = join(versionDir, "manifest.json");
     const metricsPath = join(versionDir, "metrics.json");
     if (!existsSync(manifestPath) || !existsSync(metricsPath)) {
@@ -125,8 +246,8 @@ export class ModelTrainingCoordinator {
         : Number.POSITIVE_INFINITY;
       const p90Pass = !Number.isFinite(activeEconomicP90) || !Number.isFinite(modelEconomicP90) || modelEconomicP90 <= activeEconomicP90;
       if (improvementRatio >= 0.03 && p90Pass) {
-        this.artifactService.promoteVersion(config, versionDir);
-        this.artifactService.writePromotionMarker(versionDir);
+        this.loadArtifactService.promoteVersion(config, versionDir);
+        this.loadArtifactService.writePromotionMarker(versionDir);
         this.logger.log(`Promoted load-forecast model ${manifest.model_version}`);
         return;
       }
@@ -136,12 +257,35 @@ export class ModelTrainingCoordinator {
     }
   }
 
-  listVersionDirs(config: ConfigDocument): string[] {
-    const baseDir = this.artifactService.ensureBaseDir(config);
-    return readdirSync(baseDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== "current" && entry.name !== "current.next")
-      .map((entry) => join(baseDir, entry.name))
-      .sort();
+  private promotePriceForecastIfEligible(config: ConfigDocument, versionDir: string): void {
+    const manifestPath = join(versionDir, "manifest.json");
+    const metricsPath = join(versionDir, "metrics.json");
+    if (!existsSync(manifestPath) || !existsSync(metricsPath)) {
+      this.logger.warn(`Skipping promotion for ${versionDir}: manifest or metrics missing`);
+      return;
+    }
+
+    try {
+      const manifest = priceForecastManifestSchema.parse(JSON.parse(readFileSync(manifestPath, "utf-8")));
+      const metrics = JSON.parse(readFileSync(metricsPath, "utf-8")) as {
+        model?: { mae?: number };
+        active_model?: { mae?: number };
+      };
+      const modelMae = Number(metrics.model?.mae ?? Number.NaN);
+      const activeMae = Number(metrics.active_model?.mae ?? Number.NaN);
+      const improvementRatio = Number.isFinite(activeMae) && activeMae > 0
+        ? (activeMae - modelMae) / activeMae
+        : Number.POSITIVE_INFINITY;
+      if (improvementRatio >= 0.03) {
+        this.priceArtifactService.promoteVersion(config, versionDir);
+        this.priceArtifactService.writePromotionMarker(versionDir);
+        this.logger.log(`Promoted price-forecast model ${manifest.model_version}`);
+        return;
+      }
+      this.logger.log(`Keeping existing price-forecast model; ${manifest.model_version} did not clear promotion gates`);
+    } catch (error) {
+      this.logger.warn(`Skipping model promotion for ${versionDir}: ${String(error)}`);
+    }
   }
 }
 

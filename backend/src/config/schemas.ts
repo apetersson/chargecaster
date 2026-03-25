@@ -193,19 +193,17 @@ const solarArrayConfigSchema = z
 
 const loadForecastConfigSchema = z
   .object({
-    model_dir: optionalStringSchema.optional(),
     self_training_enabled: optionalBooleanSchema.optional(),
-    python_executable: optionalStringSchema.optional(),
   })
   .strip();
 
 const priceForecastConfigSchema = z
   .object({
-    model_dir: optionalStringSchema.optional(),
     self_training_enabled: optionalBooleanSchema.optional(),
-    python_executable: optionalStringSchema.optional(),
   })
   .strip();
+
+const forecastConfigSchema = z.array(z.enum(["load", "price"]));
 
 const evccConfigSchema = configSectionSchema
   .extend({
@@ -230,6 +228,7 @@ export const configDocumentSchema = z
     logic: logicConfigSchema.optional(),
     location: locationConfigSchema.optional(),
     solar: z.array(solarArrayConfigSchema).optional(),
+    forecast: forecastConfigSchema.optional(),
     load_forecast: loadForecastConfigSchema.optional(),
     price_forecast: priceForecastConfigSchema.optional(),
     evcc: evccConfigSchema.optional(),
@@ -239,6 +238,20 @@ export const configDocumentSchema = z
   .strict();
 
 export type ConfigDocument = z.infer<typeof configDocumentSchema>;
+
+export function isLoadForecastTrainingEnabled(config: ConfigDocument): boolean {
+  if (Array.isArray(config.forecast)) {
+    return config.forecast.includes("load");
+  }
+  return config.load_forecast?.self_training_enabled ?? false;
+}
+
+export function isPriceForecastTrainingEnabled(config: ConfigDocument): boolean {
+  if (Array.isArray(config.forecast)) {
+    return config.forecast.includes("price");
+  }
+  return config.price_forecast?.self_training_enabled ?? false;
+}
 
 function parseScalarPriceValue(value: PriceScalarConfigValue): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {

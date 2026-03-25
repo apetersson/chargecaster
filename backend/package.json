@@ -14,7 +14,7 @@
     "load-forecast:evaluate": "tsx scripts/evaluate-load-forecast.ts",
     "load-forecast:replay-evaluate": "tsx scripts/replay-load-forecast.ts",
     "load-forecast:promote": "tsx scripts/promote-load-forecast.ts",
-    "price-forecast:train": "python3 ml/train_price_forecast.py --config ../config.local.yaml --db ../data/db/backend.sqlite --output-dir ../data/models/price-forecast/manual-$(date +%Y%m%d-%H%M%S)",
+    "price-forecast:train": "tsx scripts/train-price-forecast.ts",
     "bundle": "esbuild src/main.ts --platform=node --target=node20 --format=cjs --bundle --alias:@chargecaster/domain=../packages/domain/src/index.ts --external:better-sqlite3 --external:catboost --external:@nestjs/websockets/socket-module --external:@nestjs/microservices/microservices-module --external:@nestjs/microservices --external:@nestjs/platform-express --external:@fastify/view --external:class-validator --external:class-transformer --outfile=dist-bundle/index.js",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",

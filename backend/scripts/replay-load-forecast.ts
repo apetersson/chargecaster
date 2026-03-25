@@ -94,14 +94,12 @@ async function main(): Promise<void> {
       ...baseConfig,
       load_forecast: {
         ...(baseConfig.load_forecast ?? {}),
-        model_dir: options.modelDir,
       },
     };
     const hybridConfig: ConfigDocument = {
       ...baseConfig,
       load_forecast: {
         ...(baseConfig.load_forecast ?? {}),
-        model_dir: `${options.modelDir}/__missing_hybrid_baseline__`,
       },
     };
 
@@ -132,16 +130,19 @@ async function main(): Promise<void> {
         simulationConfig.price.grid_fee_eur_per_kwh ?? 0,
       );
 
+      process.env.CHARGECASTER_LOAD_FORECAST_MODEL_DIR = options.modelDir;
       const candidateDemandForecast = await demandForecastService.buildForecast({
         config: candidateConfig,
         forecastEras: eras,
         liveHomePowerW: window.history[0]?.home_power_w ?? null,
       });
+      process.env.CHARGECASTER_LOAD_FORECAST_MODEL_DIR = `${options.modelDir}/__missing_hybrid_baseline__`;
       const hybridDemandForecast = await demandForecastService.buildForecast({
         config: hybridConfig,
         forecastEras: eras,
         liveHomePowerW: window.history[0]?.home_power_w ?? null,
       });
+      delete process.env.CHARGECASTER_LOAD_FORECAST_MODEL_DIR;
 
       const candidateSnapshot = simulationService.runSimulation({
         config: simulationConfig,

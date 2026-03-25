@@ -1,9 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 
 import type { ConfigDocument } from "../config/schemas";
+import { resolveLoadForecastBaseDir } from "./model-paths";
 
 export const LOAD_FORECAST_FEATURE_SCHEMA_VERSION = "v2_house_load_1";
 
@@ -50,10 +51,8 @@ export class LoadForecastArtifactService {
   private readonly logger = new Logger(LoadForecastArtifactService.name);
 
   resolveBaseDir(config: ConfigDocument): string {
-    const configured = config.load_forecast?.model_dir?.trim();
-    return configured && configured.length > 0
-      ? resolve(process.cwd(), configured)
-      : join(process.cwd(), "..", "data", "models", "load-forecast");
+    void config;
+    return resolveLoadForecastBaseDir();
   }
 
   resolveCurrentDir(config: ConfigDocument): string {
