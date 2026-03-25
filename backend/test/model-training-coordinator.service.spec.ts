@@ -11,12 +11,14 @@ import type { LoadForecastArtifactService } from "../src/forecasting/load-foreca
 import type { PriceForecastArtifactService } from "../src/forecasting/price-forecast-artifact.service";
 import type { StorageService } from "../src/storage/storage.service";
 
-const { spawnMock } = vi.hoisted(() => ({
+const { spawnMock, spawnSyncMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
+  spawnSyncMock: vi.fn(),
 }));
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
+  spawnSync: spawnSyncMock,
 }));
 
 function createConfig(): ConfigDocument {
@@ -54,6 +56,8 @@ describe("ModelTrainingCoordinator", () => {
     vi.useFakeTimers();
     spawnMock.mockReset();
     spawnMock.mockReturnValue(createSpawnResult());
+    spawnSyncMock.mockReset();
+    spawnSyncMock.mockReturnValue({ status: 0 });
   });
 
   afterEach(() => {

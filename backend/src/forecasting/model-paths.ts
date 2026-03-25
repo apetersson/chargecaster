@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 function resolveStoragePath(): string {
@@ -30,4 +31,35 @@ export function resolvePriceForecastBaseDir(): string {
 
 export function resolveBackendDbPath(): string {
   return resolveStoragePath();
+}
+
+export function resolveMlScriptPath(scriptName: string): string {
+  const override = process.env.CHARGECASTER_ML_DIR?.trim();
+  if (override && override.length > 0) {
+    return join(resolve(process.cwd(), override), scriptName);
+  }
+
+  const candidates = [
+    join(process.cwd(), "ml", scriptName),
+    join(process.cwd(), "backend", "ml", scriptName),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
+export function resolveBundledLoadForecastCurrentDir(): string | null {
+  const override = process.env.CHARGECASTER_BUNDLED_LOAD_FORECAST_DIR?.trim();
+  if (override && override.length > 0) {
+    const resolved = resolve(process.cwd(), override);
+    if (existsSync(join(resolved, "manifest.json"))) {
+      return resolved;
+    }
+    const nestedCurrent = join(resolved, "current");
+    return existsSync(join(nestedCurrent, "manifest.json")) ? nestedCurrent : null;
+  }
+
+  const candidates = [
+    join(process.cwd(), "assets", "load-forecast", "current"),
+    join(process.cwd(), "backend", "assets", "load-forecast", "current"),
+  ];
+  return candidates.find((candidate) => existsSync(join(candidate, "manifest.json"))) ?? null;
 }

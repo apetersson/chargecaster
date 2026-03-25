@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveBackendDbPath, resolveLoadForecastBaseDir } from "../src/forecasting/model-paths";
+import { resolveBackendDbPath, resolveLoadForecastBaseDir, resolveMlScriptPath } from "../src/forecasting/model-paths";
 
 function resolveConfigPath(): string {
   return process.env.CHARGECASTER_CONFIG?.trim() || join(process.cwd(), "..", "config.local.yaml");
@@ -13,7 +13,7 @@ function main(): void {
   const outputDir = join(resolveLoadForecastBaseDir(), version);
   mkdirSync(outputDir, { recursive: true });
   const args = [
-    join(process.cwd(), "ml", "train_load_forecast.py"),
+    resolveMlScriptPath("train_load_forecast.py"),
     "--config",
     resolveConfigPath(),
     "--db",

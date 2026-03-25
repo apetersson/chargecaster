@@ -4,7 +4,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 
 import type { ConfigDocument } from "../config/schemas";
-import { resolveLoadForecastBaseDir } from "./model-paths";
+import { resolveBundledLoadForecastCurrentDir, resolveLoadForecastBaseDir } from "./model-paths";
 
 export const LOAD_FORECAST_FEATURE_SCHEMA_VERSION = "v2_house_load_1";
 
@@ -66,6 +66,8 @@ export class LoadForecastArtifactService {
   }
 
   readActiveArtifact(config: ConfigDocument): ActiveLoadForecastArtifact | null {
+    this.seedBundledStarterArtifact(config);
+
     const currentDir = this.resolveCurrentDir(config);
     const manifestPath = join(currentDir, "manifest.json");
     const modelPath = join(currentDir, "model.cbm");
@@ -117,5 +119,42 @@ export class LoadForecastArtifactService {
 
   writePromotionMarker(versionDir: string): void {
     writeFileSync(join(versionDir, ".promoted"), new Date().toISOString(), "utf-8");
+  }
+
+  private seedBundledStarterArtifact(config: ConfigDocument): void {
+    const currentDir = this.resolveCurrentDir(config);
+    if (existsSync(join(currentDir, "manifest.json")) && existsSync(join(currentDir, "model.cbm"))) {
+      return;
+    }
+
+    const bundledCurrentDir = resolveBundledLoadForecastCurrentDir();
+    if (!bundledCurrentDir) {
+      return;
+    }
+
+    const bundledManifestPath = join(bundledCurrentDir, "manifest.json");
+    const bundledModelPath = join(bundledCurrentDir, "model.cbm");
+    if (!existsSync(bundledManifestPath) || !existsSync(bundledModelPath)) {
+      return;
+    }
+
+    try {
+      const manifest = loadForecastManifestSchema.parse(JSON.parse(readFileSync(bundledManifestPath, "utf-8")));
+      if (manifest.feature_schema_version !== LOAD_FORECAST_FEATURE_SCHEMA_VERSION) {
+        this.logger.warn(
+          `Ignoring bundled load-forecast artifact ${manifest.model_version}: schema ${manifest.feature_schema_version} != ${LOAD_FORECAST_FEATURE_SCHEMA_VERSION}`,
+        );
+        return;
+      }
+      const baseDir = this.ensureBaseDir(config);
+      const nextDir = join(baseDir, "current.next");
+      rmSync(nextDir, { recursive: true, force: true });
+      cpSync(bundledCurrentDir, nextDir, { recursive: true });
+      rmSync(currentDir, { recursive: true, force: true });
+      renameSync(nextDir, currentDir);
+      this.logger.log(`Seeded bundled load-forecast starter model ${manifest.model_version} into ${currentDir}`);
+    } catch (error) {
+      this.logger.warn(`Failed to seed bundled load-forecast starter artifact from ${bundledCurrentDir}: ${String(error)}`);
+    }
   }
 }

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 
 import type { ConfigDocument } from "../config/schemas";
@@ -9,7 +9,7 @@ import { isLoadForecastTrainingEnabled, isPriceForecastTrainingEnabled } from ".
 import { StorageService } from "../storage/storage.service";
 import { LoadForecastArtifactService, loadForecastManifestSchema } from "./load-forecast-artifact.service";
 import { PriceForecastArtifactService, priceForecastManifestSchema } from "./price-forecast-artifact.service";
-import { resolveBackendDbPath } from "./model-paths";
+import { resolveBackendDbPath, resolveMlScriptPath } from "./model-paths";
 
 const MIN_HISTORY_DAYS = 56;
 const MIN_NEW_DAYS_SINCE_LAST_TRAINING = 14;
@@ -32,6 +32,7 @@ export class ModelTrainingCoordinator {
   private readonly logger = new Logger(ModelTrainingCoordinator.name);
   private activeProcess: ChildProcessWithoutNullStreams | null = null;
   private pendingConfig: ConfigDocument | null = null;
+  private readonly reportedBlockingJobs = new Set<TrainingJobKey>();
 
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
@@ -129,11 +130,13 @@ export class ModelTrainingCoordinator {
       return null;
     }
 
-    const scriptPath = join(process.cwd(), "ml", "train_load_forecast.py");
-    if (!existsSync(scriptPath)) {
-      this.logger.warn(`Skipping self-training because ${scriptPath} is missing`);
+    const scriptPath = resolveMlScriptPath("train_load_forecast.py");
+    const prerequisiteError = this.resolveTrainingPrerequisiteError(scriptPath);
+    if (prerequisiteError) {
+      this.reportBlockedTrainingJob("load-forecast", prerequisiteError, scriptPath, !artifact);
       return null;
     }
+    this.reportedBlockingJobs.delete("load-forecast");
 
     const versionDir = this.createVersionDir(this.loadArtifactService.ensureBaseDir(config));
     return {
@@ -167,11 +170,13 @@ export class ModelTrainingCoordinator {
       return null;
     }
 
-    const scriptPath = join(process.cwd(), "ml", "train_price_forecast.py");
-    if (!existsSync(scriptPath)) {
-      this.logger.warn(`Skipping self-training because ${scriptPath} is missing`);
+    const scriptPath = resolveMlScriptPath("train_price_forecast.py");
+    const prerequisiteError = this.resolveTrainingPrerequisiteError(scriptPath);
+    if (prerequisiteError) {
+      this.reportBlockedTrainingJob("price-forecast", prerequisiteError, scriptPath, !artifact);
       return null;
     }
+    this.reportedBlockingJobs.delete("price-forecast");
 
     const versionDir = this.createVersionDir(this.priceArtifactService.ensureBaseDir(config));
     return {
@@ -286,6 +291,38 @@ export class ModelTrainingCoordinator {
     } catch (error) {
       this.logger.warn(`Skipping model promotion for ${versionDir}: ${String(error)}`);
     }
+  }
+
+  private resolveTrainingPrerequisiteError(scriptPath: string): string | null {
+    if (!existsSync(scriptPath)) {
+      return `training script missing at ${scriptPath}`;
+    }
+    const probe = spawnSync(PYTHON_EXECUTABLE, ["--version"], { stdio: "ignore" });
+    if (probe.error) {
+      return `${PYTHON_EXECUTABLE} is not available (${probe.error.message})`;
+    }
+    if ((probe.status ?? 1) !== 0) {
+      return `${PYTHON_EXECUTABLE} exited with status ${probe.status ?? "unknown"} during startup probe`;
+    }
+    return null;
+  }
+
+  private reportBlockedTrainingJob(
+    key: TrainingJobKey,
+    prerequisiteError: string,
+    scriptPath: string,
+    artifactMissing: boolean,
+  ): void {
+    if (this.reportedBlockingJobs.has(key)) {
+      return;
+    }
+    this.reportedBlockingJobs.add(key);
+    const phase = artifactMissing ? "bootstrap" : "retraining";
+    this.logger.error(
+      `Cannot start ${phase} for ${key}: ${prerequisiteError}. `
+      + `This runtime needs ${PYTHON_EXECUTABLE} and the training scripts mounted into the image. `
+      + `Expected script path: ${scriptPath}`,
+    );
   }
 }
 

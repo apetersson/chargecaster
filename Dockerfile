@@ -48,7 +48,11 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --prod --shamefully-hoist
 
 
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runtime
+FROM node:20-bookworm-slim AS runtime
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-pip \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -60,14 +64,14 @@ ENV NODE_ENV=production \
     SERVE_STATIC=true
 
 COPY --from=builder /app/backend/dist-bundle/index.js /app/backend/dist-bundle/index.js
-COPY --from=builder /app/backend/assets/load-forecast /data/models/load-forecast
+COPY --from=builder /app/backend/assets/load-forecast /app/backend/assets/load-forecast
+COPY --from=builder /app/backend/ml /app/backend/ml
 COPY --from=builder /app/frontend/dist /public
 COPY --from=native-deps /app/backend/node_modules /app/backend/node_modules
 COPY config.yaml.sample /app/config.yaml.sample
 
+RUN python3 -m pip install --no-cache-dir --break-system-packages -r /app/backend/ml/requirements.txt
+
 EXPOSE 8080
 
-# Use absolute path to node in distroless
-ENTRYPOINT ["/nodejs/bin/node"]
-
-CMD ["/app/backend/dist-bundle/index.js"]
+CMD ["node", "/app/backend/dist-bundle/index.js"]
