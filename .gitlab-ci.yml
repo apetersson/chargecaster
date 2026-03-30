@@ -7,6 +7,7 @@ workflow:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 variables:
+  CAPACITY_PUBLIC_IP: 65.108.68.105
   KANIKO_IMAGE: gcr.io/kaniko-project/executor:v1.23.2-debug
 
 .kaniko:
@@ -18,6 +19,7 @@ variables:
   tags:
     - docker
   before_script:
+    - printf '%s gitlab.capacity.at registry.capacity.at\n' "$CAPACITY_PUBLIC_IP" >> /etc/hosts
     - mkdir -p /kaniko/.docker
     - |
       cat > /kaniko/.docker/config.json <<EOF
