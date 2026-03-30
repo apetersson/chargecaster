@@ -201,6 +201,21 @@ CHARGECASTER_CONFIG_FILE=./config.local.yaml \
 
 ---
 
+## GitLab CI / Registry
+
+The repository is also connected to GitLab at `gitlab.capacity.at` as `capacity-projects/chargecaster`.
+
+- Remote: `gitlab` -> `ssh://git@gitlab.capacity.at:2222/capacity-projects/chargecaster.git`
+- Registry: `registry.capacity.at/capacity-projects/chargecaster`
+- Pipeline: `.gitlab-ci.yml` builds the existing `Dockerfile` with GitLab Runner via Kaniko
+- Published tags:
+  - pushes to `main` publish `:main`, `:latest`, and `:${CI_COMMIT_SHORT_SHA}`
+  - git tags publish `:${CI_COMMIT_TAG}` and `:${CI_COMMIT_SHORT_SHA}`
+
+This is the preferred container build path for Capacity-hosted releases.
+
+---
+
 ## Release: Tag & Push
 
 Use `./tag_and_push.sh` to bump the git tag, build multi‑arch Docker images, push to Docker Hub, and push git refs (including the new tag).
