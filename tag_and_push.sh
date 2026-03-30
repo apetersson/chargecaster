@@ -3,19 +3,17 @@ set -euo pipefail
 
 # tag_and_push.sh
 # - Calculates a new semver tag (default: patch bump), tags the repo,
-#   builds multi-arch images, pushes to Docker Hub, and pushes git + tags.
+#   pushes git refs to GitLab, and lets GitLab CI publish the registry images.
 #
 # Usage:
 #   tag_and_push.sh [patch|minor|major|vX.Y.Z]
 #
 # Env overrides:
-#   DOCKER_REPO   Docker Hub repo (default: apetersson/chargecaster)
-#   PLATFORMS     Target platforms (default: linux/amd64,linux/arm64)
-#   GIT_REMOTE    Git remote to push (default: origin)
+#   REGISTRY_REPO Registry repo (default: registry.capacity.at/capacity-projects/chargecaster)
+#   GIT_REMOTE    Git remote to push (default: gitlab)
 
-DOCKER_REPO=${DOCKER_REPO:-apetersson/chargecaster}
-PLATFORMS=${PLATFORMS:-linux/amd64,linux/arm64}
-GIT_REMOTE=${GIT_REMOTE:-origin}
+REGISTRY_REPO=${REGISTRY_REPO:-registry.capacity.at/capacity-projects/chargecaster}
+GIT_REMOTE=${GIT_REMOTE:-gitlab}
 
 get_latest_tag() {
   git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0"
@@ -52,32 +50,25 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 3
 fi
 
-echo "Releasing $NEW_TAG (from $CURRENT_BRANCH) to $DOCKER_REPO"
+echo "Releasing $NEW_TAG (from $CURRENT_BRANCH)"
+echo "Git remote: $GIT_REMOTE"
+echo "Registry repo: $REGISTRY_REPO"
 
 # Create annotated tag
 git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
-
-# Ensure buildx is available and a builder is selected
-if ! docker buildx version >/dev/null 2>&1; then
-  echo "docker buildx not available. Please install Docker Buildx." >&2
-  exit 4
-fi
-
-# Try to bootstrap an existing builder; if none, create one
-if ! docker buildx inspect >/dev/null 2>&1; then
-  docker buildx create --use --name chargecaster-builder >/dev/null
-fi
-docker buildx inspect --bootstrap >/dev/null
-
-echo "Building and pushing multi-arch images..."
-docker buildx build \
-  --platform "$PLATFORMS" \
-  -t "$DOCKER_REPO:$NEW_TAG" \
-  -t "$DOCKER_REPO:latest" \
-  . --push
 
 echo "Pushing git branch and tags to ${GIT_REMOTE}..."
 git push "${GIT_REMOTE}" "${CURRENT_BRANCH}"
 git push "${GIT_REMOTE}" "${NEW_TAG}"
 
-echo "Done. Released $NEW_TAG"
+cat <<EOF
+Done. Pushed release $NEW_TAG to ${GIT_REMOTE}.
+
+GitLab CI will publish:
+  - ${REGISTRY_REPO}:${NEW_TAG}
+  - ${REGISTRY_REPO}:$(git rev-parse --short HEAD)
+
+The main-branch pipeline also keeps these moving tags updated:
+  - ${REGISTRY_REPO}:main
+  - ${REGISTRY_REPO}:latest
+EOF

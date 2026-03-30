@@ -218,7 +218,7 @@ This is the preferred container build path for Capacity-hosted releases.
 
 ## Release: Tag & Push
 
-Use `./tag_and_push.sh` to bump the git tag, build multi‑arch Docker images, push to Docker Hub, and push git refs (including the new tag).
+Use `./tag_and_push.sh` to bump the git tag, push the branch and tag to GitLab, and let GitLab CI publish the container image to the Capacity registry.
 
 Usage:
 
@@ -227,9 +227,8 @@ Usage:
 ```
 
 Defaults:
-- Repo: `apetersson/chargecaster` (override with `DOCKER_REPO`)
-- Platforms: `linux/amd64,linux/arm64` (override with `PLATFORMS`)
-- Remote: `origin` (override with `GIT_REMOTE`)
+- Registry repo: `registry.capacity.at/capacity-projects/chargecaster` (override with `REGISTRY_REPO`)
+- Remote: `gitlab` (override with `GIT_REMOTE`)
 
 Examples:
 
@@ -241,7 +240,13 @@ Examples:
 ./tag_and_push.sh v0.1.5
 ```
 
-Prereqs: logged in to Docker (`docker login`) and Docker Buildx available.
+Resulting image tags:
+
+- Tag push `vX.Y.Z` publishes `registry.capacity.at/capacity-projects/chargecaster:vX.Y.Z`
+- The same tag pipeline also publishes `registry.capacity.at/capacity-projects/chargecaster:<short-sha>`
+- Pushes to `main` publish `:main` and `:latest`
+
+This is the intended path for staging: point the server at `registry.capacity.at/capacity-projects/chargecaster:vX.Y.Z` for pinned releases, or `:main` / `:latest` if you want a moving tag.
 
 ---
 
