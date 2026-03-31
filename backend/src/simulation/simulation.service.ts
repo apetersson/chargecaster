@@ -23,6 +23,7 @@ import {
 } from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
 import { parseEvccState } from "../config/schemas";
+import { deriveOperationalMode } from "../hardware/optimisation-mode";
 import { normalizeHistoryList } from "./history.serializer";
 import { BatteryEfficiencyService } from "./battery-efficiency.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
@@ -205,34 +206,6 @@ export class SimulationService {
       chargeAverageCRate: batteryEfficiency.chargeAverageCRate,
       dischargeAverageCRate: batteryEfficiency.dischargeAverageCRate,
     });
-    const initialSoC = Percentage.fromPercent(result.initial_soc_percent);
-    const nextSoC = Percentage.fromPercent(result.next_step_soc_percent ?? result.initial_soc_percent);
-    const firstEntry = result.oracle_entries.length > 0 ? result.oracle_entries[0] : null;
-    const firstStrategy = firstEntry?.strategy ?? null;
-    let currentMode: "charge" | "auto" | "hold" | "limit";
-    if (firstStrategy) {
-      currentMode = firstStrategy;
-    } else if (nextSoC.percent > initialSoC.percent + 0.5) {
-      currentMode = "charge";
-    } else if (Math.abs(nextSoC.percent - initialSoC.percent) <= 0.5) {
-      currentMode = "hold";
-    } else {
-      currentMode = "auto";
-    }
-    this.logger.log(`Simulation result: ${currentMode.toUpperCase()}`);
-    if (result.oracle_entries.length) {
-      const strategyLog = result.oracle_entries
-        .map((entry) => {
-          const strategyLabel = entry.strategy.toUpperCase();
-          if (entry.strategy !== "hold" && entry.strategy !== "limit") {
-            return `${strategyLabel}@${entry.era_id}`;
-          }
-          const holdLevel = normalizeSocLabel(entry.target_soc_percent ?? entry.start_soc_percent ?? entry.end_soc_percent);
-          return holdLevel ? `${strategyLabel}@${entry.era_id} (SoC ${holdLevel})` : `${strategyLabel}@${entry.era_id}`;
-        })
-        .join("\n");
-      this.logger.verbose(`Era strategies:\n${strategyLog}`);
-    }
     const fallbackPrice = slots.length
       ? EnergyPrice.fromEurPerKwh(slots[0].price).withAdditionalFee(gridFee(input.config))
       : null;
@@ -247,6 +220,30 @@ export class SimulationService {
       input.feedInTariffEurPerKwhBySlot,
       feedInTariff.eurPerKwh,
     );
+    const firstEntry = result.oracle_entries.length > 0 ? result.oracle_entries[0] : null;
+    const firstStrategy = firstEntry?.strategy ?? null;
+    const currentMode = deriveOperationalMode({
+      current_mode: firstStrategy,
+      current_soc_percent: Percentage.fromPercent(result.initial_soc_percent),
+      next_step_soc_percent:
+        result.next_step_soc_percent != null ? Percentage.fromPercent(result.next_step_soc_percent) : null,
+      oracle_entries: result.oracle_entries,
+      forecast_eras: forecastEras,
+    });
+    this.logger.log(`Simulation result: ${currentMode.toUpperCase()}`);
+    if (result.oracle_entries.length) {
+      const strategyLog = result.oracle_entries
+        .map((entry) => {
+          const strategyLabel = entry.strategy.toUpperCase();
+          if (entry.strategy !== "hold" && entry.strategy !== "limit") {
+            return `${strategyLabel}@${entry.era_id}`;
+          }
+          const holdLevel = normalizeSocLabel(entry.target_soc_percent ?? entry.start_soc_percent ?? entry.end_soc_percent);
+          return holdLevel ? `${strategyLabel}@${entry.era_id} (SoC ${holdLevel})` : `${strategyLabel}@${entry.era_id}`;
+        })
+        .join("\n");
+      this.logger.verbose(`Era strategies:\n${strategyLog}`);
+    }
     // Run a second pass that mimics "auto" mode (no active grid charging) for comparison
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,

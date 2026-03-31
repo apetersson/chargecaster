@@ -1,7 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { Percentage } from "@chargecaster/domain";
 
 import type { OptimisationCommand } from "../fronius/fronius.service";
 import type { SimulationService } from "../simulation/simulation.service";
+import { deriveOperationalMode } from "./optimisation-mode";
 
 type SimulationSnapshot = Awaited<ReturnType<SimulationService["runSimulation"]>>;
 
@@ -10,7 +12,11 @@ export class OptimisationCommandTranslator {
   private readonly logger = new Logger(OptimisationCommandTranslator.name);
 
   fromSimulationSnapshot(snapshot: SimulationSnapshot): OptimisationCommand {
-    const mode = snapshot.current_mode;
+    const mode = deriveOperationalMode({
+      ...snapshot,
+      current_soc_percent: this.toPercentage(snapshot.current_soc_percent),
+      next_step_soc_percent: this.toPercentage(snapshot.next_step_soc_percent),
+    });
     if (mode === "charge") {
       const untilTimestamp = this.extractChargeUntil(snapshot);
       if (untilTimestamp) {
@@ -34,24 +40,21 @@ export class OptimisationCommandTranslator {
         },
       };
     }
-    if (mode === "hold") {
-      const observedSoc = this.normalisePercent(snapshot.current_soc_percent);
-      const holdTarget = this.extractHoldTarget(snapshot);
-      const floor = this.normalisePercent(snapshot.next_step_soc_percent) ?? holdTarget ?? observedSoc;
-      const minSoc = holdTarget ?? observedSoc ?? floor;
-      if (minSoc == null) {
-        this.logger.warn("Hold strategy missing usable SoC reference; defaulting to AUTO command.");
-        return "auto";
-      }
-      return {
-        hold: {
-          minSocPercent: minSoc,
-          observedSocPercent: observedSoc,
-          floorSocPercent: floor,
-        },
-      };
+    const observedSoc = this.normalisePercent(snapshot.current_soc_percent);
+    const holdTarget = this.extractHoldTarget(snapshot);
+    const floor = this.normalisePercent(snapshot.next_step_soc_percent) ?? holdTarget ?? observedSoc;
+    const minSoc = holdTarget ?? observedSoc ?? floor;
+    if (minSoc == null) {
+      this.logger.warn("Hold strategy missing usable SoC reference; defaulting to AUTO command.");
+      return "auto";
     }
-    return "auto";
+    return {
+      hold: {
+        minSocPercent: minSoc,
+        observedSocPercent: observedSoc,
+        floorSocPercent: floor,
+      },
+    };
   }
 
   private extractChargeUntil(snapshot: SimulationSnapshot): string | null {
@@ -102,6 +105,9 @@ export class OptimisationCommandTranslator {
   }
 
   private normalisePercent(value: unknown): number | null {
+    if (value instanceof Percentage) {
+      return value.percent;
+    }
     if (typeof value !== "number" || !Number.isFinite(value)) {
       return null;
     }
@@ -112,5 +118,10 @@ export class OptimisationCommandTranslator {
       return 100;
     }
     return value;
+  }
+
+  private toPercentage(value: unknown): Percentage | null {
+    const normalised = this.normalisePercent(value);
+    return normalised == null ? null : Percentage.fromPercent(normalised);
   }
 }
