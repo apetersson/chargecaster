@@ -29,6 +29,9 @@ const isAddressInfo = (value: AddressInfo | string | null): value is AddressInfo
   typeof value === "object" && value !== null && "port" in value;
 
 async function bootstrap(): Promise<NestFastifyApplication> {
+  const buildVersion = getBuildVersion();
+  console.info(`[bootstrap] Starting chargecaster build ${buildVersion}`);
+
   const initialConfig = await configureGlobalLogging();
   validateConfigDocument(initialConfig);
   setRuntimeConfig(initialConfig);
@@ -117,8 +120,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
       baseUrl = address;
     }
 
-    logger.log(`API ready at ${baseUrl}`);
-    logger.log(`Build version ${getBuildVersion()}`);
+    logger.log(`Backend listening at ${baseUrl} (build ${buildVersion})`);
 
     const routesTree = fastify.printRoutes({includeHooks: false, includeMeta: false, commonPrefix: false});
     if (routesTree.trim().length > 0) {
