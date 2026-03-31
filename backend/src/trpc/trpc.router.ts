@@ -95,6 +95,8 @@ export class TrpcRouter {
     this.router = t.router({
       health: t.procedure.query(() => {
         this.logger.verbose("tRPC.health heartbeat");
+        // Keep the backend build visible to the frontend so the UI can spot
+        // mismatched frontend/backend deployments.
         return {status: "ok", version: getBuildVersion()};
       }),
       dashboard: t.router({

@@ -64,6 +64,8 @@ function App(): JSX.Element {
   });
 
   const normalisedBackendBuildVersion = backendBuildVersion?.trim() || null;
+  // Treat matching FE/BE builds as one release number, but surface a warning
+  // immediately if static assets and API ever come from different deployments.
   const hasBuildMismatch = normalisedBackendBuildVersion !== null && normalisedBackendBuildVersion !== FRONTEND_BUILD_VERSION;
   const buildBadgeLabel = hasBuildMismatch
     ? `FE ${FRONTEND_BUILD_VERSION} / BE ${normalisedBackendBuildVersion}`

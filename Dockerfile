@@ -23,6 +23,8 @@ COPY packages/domain/ packages/domain/
 COPY frontend/ frontend/
 ARG FRONTEND_BUILD_VERSION=dev
 ARG VITE_TRPC_URL=/trpc
+# The frontend bakes its own version string into the static bundle so the UI
+# can show exactly which browser assets are being served.
 ENV VITE_BUILD_VERSION=${FRONTEND_BUILD_VERSION}
 ENV VITE_TRPC_URL=${VITE_TRPC_URL}
 RUN pnpm --filter chargecaster-frontend build
@@ -59,6 +61,8 @@ RUN apt-get update \
 WORKDIR /app
 
 ARG BACKEND_BUILD_VERSION=dev
+# The backend carries its own version at runtime so we can detect mismatches
+# between the served API and the static frontend bundle.
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080 \

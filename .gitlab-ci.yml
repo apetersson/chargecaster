@@ -3,6 +3,8 @@ stages:
 
 workflow:
   rules:
+    # Only release tags publish images; this avoids rebuilding the same commit
+    # on both `main` and `vX.Y.Z`.
     - if: $CI_COMMIT_TAG
 
 variables:
@@ -31,6 +33,8 @@ publish:tag:
       /kaniko/executor
       --context "${CI_PROJECT_DIR}"
       --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      # Frontend and backend are versioned separately so the UI can warn if they
+      # ever diverge, even though release CI normally stamps them with one tag.
       --build-arg "FRONTEND_BUILD_VERSION=${CI_COMMIT_TAG}"
       --build-arg "BACKEND_BUILD_VERSION=${CI_COMMIT_TAG}"
       --build-arg "VITE_TRPC_URL=/trpc"
