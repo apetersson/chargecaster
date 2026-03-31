@@ -11,10 +11,10 @@ import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChar
 import { useIsMobile } from "./hooks/useIsMobile";
 
 const PREVIEW_HOURS_OPTIONS = [24, 48, 72, 96, 120] as const;
-const FRONTEND_BUILD_VERSION = (import.meta.env.VITE_BUILD_VERSION ?? "dev").trim() || "dev";
 
 function App(): JSX.Element {
   const {
+    frontendBuildVersion,
     backendBuildVersion,
     summary,
     history,
@@ -63,16 +63,17 @@ function App(): JSX.Element {
     showPriceAxisLabels,
   });
 
+  const normalisedFrontendBuildVersion = frontendBuildVersion?.trim() || "dev";
   const normalisedBackendBuildVersion = backendBuildVersion?.trim() || null;
   // Treat matching FE/BE builds as one release number, but surface a warning
   // immediately if static assets and API ever come from different deployments.
-  const hasBuildMismatch = normalisedBackendBuildVersion !== null && normalisedBackendBuildVersion !== FRONTEND_BUILD_VERSION;
+  const hasBuildMismatch = normalisedBackendBuildVersion !== null && normalisedBackendBuildVersion !== normalisedFrontendBuildVersion;
   const buildBadgeLabel = hasBuildMismatch
-    ? `FE ${FRONTEND_BUILD_VERSION} / BE ${normalisedBackendBuildVersion}`
-    : FRONTEND_BUILD_VERSION;
+    ? `FE ${normalisedFrontendBuildVersion} / BE ${normalisedBackendBuildVersion}`
+    : normalisedFrontendBuildVersion;
   const buildBadgeTitle = hasBuildMismatch
-    ? `Frontend build ${FRONTEND_BUILD_VERSION} differs from backend build ${normalisedBackendBuildVersion}.`
-    : `Build ${FRONTEND_BUILD_VERSION}`;
+    ? `Frontend build ${normalisedFrontendBuildVersion} differs from backend build ${normalisedBackendBuildVersion}.`
+    : `Build ${normalisedFrontendBuildVersion}`;
 
   return (
     <>

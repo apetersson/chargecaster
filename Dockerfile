@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS builder
+FROM node:20-bookworm-slim AS workspace-deps
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends build-essential python3 \
@@ -19,17 +19,19 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 # Copy shared domain sources before building dependents
 COPY packages/domain/ packages/domain/
 
-# Build frontend
+FROM workspace-deps AS frontend-builder
+
+# Build the static frontend independently so backend-only changes do not rerun
+# the browser bundle, and release tags can be stamped later as tiny metadata.
 COPY frontend/ frontend/
-ARG FRONTEND_BUILD_VERSION=dev
 ARG VITE_TRPC_URL=/trpc
-# The frontend bakes its own version string into the static bundle so the UI
-# can show exactly which browser assets are being served.
-ENV VITE_BUILD_VERSION=${FRONTEND_BUILD_VERSION}
 ENV VITE_TRPC_URL=${VITE_TRPC_URL}
 RUN pnpm --filter chargecaster-frontend build
 
-# Bundle backend with esbuild against workspace sources (externalize native better-sqlite3)
+FROM workspace-deps AS backend-builder
+
+# Bundle backend independently so frontend-only churn does not invalidate the
+# server artifact cache.
 COPY backend/ backend/
 RUN pnpm --filter chargecaster-backend bundle \
   && pnpm store prune || true
@@ -60,19 +62,17 @@ RUN apt-get update \
 
 WORKDIR /app
 
-ARG BACKEND_BUILD_VERSION=dev
-# The backend carries its own version at runtime so we can detect mismatches
-# between the served API and the static frontend bundle.
+# Keep the base runtime env stable so release-tag changes do not invalidate the
+# heavy dependency setup below.
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080 \
     CHARGECASTER_CONFIG=/app/config.yaml \
-    CHARGECASTER_BUILD_VERSION=${BACKEND_BUILD_VERSION} \
     VITE_TRPC_URL=/trpc \
     SERVE_STATIC=true
 
 COPY --from=native-deps /app/backend/node_modules /app/backend/node_modules
-COPY --from=builder /app/backend/ml/requirements.txt /tmp/chargecaster-ml-requirements.txt
+COPY --from=backend-builder /app/backend/ml/requirements.txt /tmp/chargecaster-ml-requirements.txt
 COPY config.yaml.sample /app/config.yaml.sample
 
 # Keep the heavy native and Python dependency layer stable so small app
@@ -81,10 +81,19 @@ RUN find /app/backend/node_modules -name libcatboostmodel.so -exec cp {} /usr/lo
   && ldconfig \
   && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/chargecaster-ml-requirements.txt
 
-COPY --from=builder /app/backend/dist-bundle/index.js /app/backend/dist-bundle/index.js
-COPY --from=builder /app/backend/assets/load-forecast /app/backend/assets/load-forecast
-COPY --from=builder /app/backend/ml /app/backend/ml
-COPY --from=builder /app/frontend/dist /public
+COPY --from=backend-builder /app/backend/dist-bundle/index.js /app/backend/dist-bundle/index.js
+COPY --from=backend-builder /app/backend/assets/load-forecast /app/backend/assets/load-forecast
+COPY --from=backend-builder /app/backend/ml /app/backend/ml
+COPY --from=frontend-builder /app/frontend/dist /public
+
+ARG FRONTEND_BUILD_VERSION=dev
+ARG BACKEND_BUILD_VERSION=dev
+# Stamp FE/BE release identifiers after the heavy copies so a new release tag
+# only changes tiny metadata instead of re-uploading large runtime layers.
+RUN printf '{\n  "version": "%s"\n}\n' "${FRONTEND_BUILD_VERSION}" > /public/build-info.json
+# The backend still carries its own runtime version so the UI can warn if the
+# served API and the static frontend bundle ever come from different releases.
+ENV CHARGECASTER_BUILD_VERSION=${BACKEND_BUILD_VERSION}
 
 EXPOSE 8080
 

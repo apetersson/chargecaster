@@ -37,6 +37,7 @@ function readOptionalHistoryNumber(
 }
 
 type DashboardDataState = {
+  frontendBuildVersion: string | null;
   backendBuildVersion: string | null;
   summary: DashboardOutputs["summary"] | null;
   history: HistoryPoint[];
@@ -53,6 +54,7 @@ type DashboardDataState = {
 };
 
 export function useDashboardData(): DashboardDataState {
+  const [frontendBuildVersion, setFrontendBuildVersion] = useState<string | null>(null);
   const [backendBuildVersion, setBackendBuildVersion] = useState<string | null>(null);
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
@@ -69,7 +71,17 @@ export function useDashboardData(): DashboardDataState {
     const execute = async () => {
       try {
         setLoading(true);
-        const [healthData, summaryData, historyData, forecastData, demandForecastData, oracleData, planningVariantData] = await Promise.all([
+        const [frontendBuildInfo, healthData, summaryData, historyData, forecastData, demandForecastData, oracleData, planningVariantData] = await Promise.all([
+          // Read the frontend version from a tiny runtime-sidecar file so a new
+          // release tag does not force a full Vite rebuild just to change text.
+          fetch("/build-info.json", {cache: "no-store"})
+            .then(async (response) => {
+              if (!response.ok) {
+                throw new Error(`Failed to load frontend build info (${response.status})`);
+              }
+              return response.json() as Promise<{ version?: unknown }>;
+            })
+            .catch(() => ({version: null})),
           trpcClient.health.query(),
           trpcClient.dashboard.summary.query(),
           trpcClient.dashboard.history.query(),
@@ -79,6 +91,7 @@ export function useDashboardData(): DashboardDataState {
           trpcClient.dashboard.planningVariant.query(),
         ]);
 
+        setFrontendBuildVersion(typeof frontendBuildInfo.version === "string" ? frontendBuildInfo.version : null);
         setBackendBuildVersion(healthData.version);
         setSummary(summaryData);
         setHistory(
@@ -137,6 +150,7 @@ export function useDashboardData(): DashboardDataState {
   }, [refresh]);
 
   return {
+    frontendBuildVersion,
     backendBuildVersion,
     summary,
     history,
