@@ -209,8 +209,7 @@ The repository is also connected to GitLab at `gitlab.capacity.at` as `capacity-
 - Registry: `registry.capacity.at/capacity-projects/chargecaster`
 - Pipeline: `.gitlab-ci.yml` builds the existing `Dockerfile` with GitLab Runner via Kaniko
 - Published tags:
-  - pushes to `main` publish `:main`, `:latest`, and `:${CI_COMMIT_SHORT_SHA}`
-  - git tags publish `:${CI_COMMIT_TAG}` and `:${CI_COMMIT_SHORT_SHA}`
+  - git tags publish `:${CI_COMMIT_TAG}`, `:latest`, and `:${CI_COMMIT_SHORT_SHA}`
 
 This is the preferred container build path for Capacity-hosted releases.
 
@@ -243,10 +242,10 @@ Examples:
 Resulting image tags:
 
 - Tag push `vX.Y.Z` publishes `registry.capacity.at/capacity-projects/chargecaster:vX.Y.Z`
+- The same tag pipeline also updates `registry.capacity.at/capacity-projects/chargecaster:latest`
 - The same tag pipeline also publishes `registry.capacity.at/capacity-projects/chargecaster:<short-sha>`
-- Pushes to `main` publish `:main` and `:latest`
 
-This is the intended path for staging: point the server at `registry.capacity.at/capacity-projects/chargecaster:vX.Y.Z` for pinned releases, or `:main` / `:latest` if you want a moving tag.
+This is the intended path for staging: point the server at `registry.capacity.at/capacity-projects/chargecaster:vX.Y.Z` for pinned releases, or `:latest` for the most recent tagged release.
 
 ---
 

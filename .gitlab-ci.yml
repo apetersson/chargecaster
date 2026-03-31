@@ -4,7 +4,6 @@ stages:
 workflow:
   rules:
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 variables:
   KANIKO_IMAGE: gcr.io/kaniko-project/executor:v1.23.2-debug
@@ -24,23 +23,6 @@ variables:
       {"auths":{"${CI_REGISTRY}":{"username":"${CI_REGISTRY_USER}","password":"${CI_REGISTRY_PASSWORD}"}}}
       EOF
 
-publish:main:
-  stage: publish
-  extends: .kaniko
-  script:
-    - >
-      /kaniko/executor
-      --context "${CI_PROJECT_DIR}"
-      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
-      --build-arg "VITE_TRPC_URL=/trpc"
-      --cache=true
-      --cache-repo "${CI_REGISTRY_IMAGE}/cache"
-      --destination "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
-      --destination "${CI_REGISTRY_IMAGE}:${CI_DEFAULT_BRANCH}"
-      --destination "${CI_REGISTRY_IMAGE}:latest"
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
 publish:tag:
   stage: publish
   extends: .kaniko
@@ -53,6 +35,7 @@ publish:tag:
       --cache=true
       --cache-repo "${CI_REGISTRY_IMAGE}/cache"
       --destination "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      --destination "${CI_REGISTRY_IMAGE}:latest"
       --destination "${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}"
   rules:
     - if: $CI_COMMIT_TAG

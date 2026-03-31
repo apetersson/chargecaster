@@ -66,9 +66,6 @@ Done. Pushed release $NEW_TAG to ${GIT_REMOTE}.
 
 GitLab CI will publish:
   - ${REGISTRY_REPO}:${NEW_TAG}
-  - ${REGISTRY_REPO}:$(git rev-parse --short HEAD)
-
-The main-branch pipeline also keeps these moving tags updated:
-  - ${REGISTRY_REPO}:main
   - ${REGISTRY_REPO}:latest
+  - ${REGISTRY_REPO}:$(git rev-parse --short HEAD)
 EOF
