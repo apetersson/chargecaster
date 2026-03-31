@@ -183,7 +183,7 @@ function App(): JSX.Element {
           }}
           disabled={loading || switchingPlanningVariant}
         >
-          {switchingPlanningVariant ? "Switching variant..." : loading ? "Refreshing..." : "Refresh now"}
+          {switchingPlanningVariant ? "Switching variant..." : loading ? "Refreshing..." : "Refresh"}
         </button>
       </section>
     </>
