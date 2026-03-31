@@ -120,7 +120,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
       baseUrl = address;
     }
 
-    logger.log(`Backend listening: ${baseUrl} (build ${buildVersion})`);
+    logger.log(`Backend listening at ${baseUrl} (build ${buildVersion})`);
 
     const routesTree = fastify.printRoutes({includeHooks: false, includeMeta: false, commonPrefix: false});
     if (routesTree.trim().length > 0) {
