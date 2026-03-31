@@ -241,7 +241,7 @@ describe("simulateOptimalSchedule oracle output", () => {
     );
   });
 
-  it("changes the SoC path when sunny-spot turns a valuable export window into a real limit constraint", () => {
+  it("keeps PV-led charging in auto while sunny-spot still changes the economics", () => {
     const slots: PriceSlot[] = [createSlot(0, 0.18), createSlot(1, 0.18), createSlot(2, 0.30)];
     const config: SimulationConfig = {
       battery: {
@@ -287,12 +287,18 @@ describe("simulateOptimalSchedule oracle output", () => {
       },
     );
 
+    expect(sunny.oracle_entries[0]?.strategy).toBe("auto");
+    expect(sunnySpot.oracle_entries[0]?.strategy).toBe("auto");
+    expect(sunny.oracle_entries[0]?.grid_energy_wh).toBe(0);
+    expect(sunnySpot.oracle_entries[0]?.grid_energy_wh).toBe(0);
     expect(sunny.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(sunny.oracle_entries[0]?.start_soc_percent ?? 0);
-    expect(sunnySpot.oracle_entries[0]?.strategy).toBe("limit");
-    expect(sunnySpot.oracle_entries[0]?.end_soc_percent).toBeLessThanOrEqual(
-      sunnySpot.oracle_entries[0]?.start_soc_percent ?? 100,
+    expect(sunnySpot.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(
+      sunnySpot.oracle_entries[0]?.start_soc_percent ?? 0,
     );
-    expect(sunny.next_step_soc_percent).toBeGreaterThan(sunnySpot.next_step_soc_percent ?? 0);
+    expect(sunnySpot.next_step_soc_percent).toBe(sunny.next_step_soc_percent);
+    expect(sunnySpot.projected_cost_eur).toBeCloseTo(sunny.projected_cost_eur, 6);
+    expect(sunnySpot.projected_savings_eur).toBeLessThan(sunny.projected_savings_eur);
+    expect(sunnySpot.baseline_cost_eur).toBeLessThan(sunny.baseline_cost_eur);
   });
 
   it("prefers grid charging for the its_cheap_charge_ffs snapshot", () => {
@@ -369,7 +375,7 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(firstEntry.strategy).toBe("charge");
   });
 
-  it("uses limit before low-value sunny-spot hours and refills once feed-in collapses", () => {
+  it("creates midday headroom once sunny-spot value collapses and refills from later solar", () => {
     const fixture = loadSunnySpotLimitFixture();
     const config: SimulationConfig = {
       battery: {
@@ -412,12 +418,18 @@ describe("simulateOptimalSchedule oracle output", () => {
     );
 
     expect(result.oracle_entries).toHaveLength(fixture.slots.length);
-    expect(result.oracle_entries[0]?.strategy).toBe("limit");
-    expect(result.oracle_entries[1]?.strategy).toBe("limit");
-    expect(result.oracle_entries[2]?.strategy).toBe("limit");
-    expect(result.oracle_entries[0]?.end_soc_percent).toBeLessThanOrEqual(result.oracle_entries[0]?.start_soc_percent ?? 100);
-    expect(result.oracle_entries[3]?.strategy).toBe("auto");
-    expect(result.oracle_entries[3]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[2]?.end_soc_percent ?? 0);
-    expect(result.oracle_entries[5]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[3]?.end_soc_percent ?? 0);
+    expect(result.expected_feed_in_kwh).toBeGreaterThan(0);
+    expect(result.projected_grid_power_w).toBeLessThan(0);
+    expect(result.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[0]?.start_soc_percent ?? 0);
+    expect(result.oracle_entries[1]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[0]?.end_soc_percent ?? 0);
+    expect(result.oracle_entries[2]?.end_soc_percent).toBeGreaterThanOrEqual(
+      result.oracle_entries[1]?.end_soc_percent ?? 0,
+    );
+    expect(result.oracle_entries[3]?.end_soc_percent).toBeLessThan(result.oracle_entries[2]?.end_soc_percent ?? 100);
+    expect(result.oracle_entries[4]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[3]?.end_soc_percent ?? 0);
+    expect(result.oracle_entries.slice(0, 5).every((entry) => (entry.grid_energy_wh ?? 0) <= 0)).toBe(true);
+    expect(result.oracle_entries[5]?.end_soc_percent).toBeGreaterThanOrEqual(
+      result.oracle_entries[4]?.end_soc_percent ?? 0,
+    );
   });
 });
