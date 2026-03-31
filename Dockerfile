@@ -67,16 +67,20 @@ ENV NODE_ENV=production \
     VITE_TRPC_URL=/trpc \
     SERVE_STATIC=true
 
+COPY --from=native-deps /app/backend/node_modules /app/backend/node_modules
+COPY --from=builder /app/backend/ml/requirements.txt /tmp/chargecaster-ml-requirements.txt
+COPY config.yaml.sample /app/config.yaml.sample
+
+# Keep the heavy native and Python dependency layer stable so small app
+# changes only affect the lightweight runtime artifact copies below.
+RUN find /app/backend/node_modules -name libcatboostmodel.so -exec cp {} /usr/local/lib/libcatboostmodel.so \; \
+  && ldconfig \
+  && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/chargecaster-ml-requirements.txt
+
 COPY --from=builder /app/backend/dist-bundle/index.js /app/backend/dist-bundle/index.js
 COPY --from=builder /app/backend/assets/load-forecast /app/backend/assets/load-forecast
 COPY --from=builder /app/backend/ml /app/backend/ml
 COPY --from=builder /app/frontend/dist /public
-COPY --from=native-deps /app/backend/node_modules /app/backend/node_modules
-COPY config.yaml.sample /app/config.yaml.sample
-
-RUN find /app/backend/node_modules -name libcatboostmodel.so -exec cp {} /usr/local/lib/libcatboostmodel.so \; \
-  && ldconfig \
-  && python3 -m pip install --no-cache-dir --break-system-packages -r /app/backend/ml/requirements.txt
 
 EXPOSE 8080
 
