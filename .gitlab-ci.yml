@@ -31,6 +31,8 @@ publish:tag:
       /kaniko/executor
       --context "${CI_PROJECT_DIR}"
       --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --build-arg "FRONTEND_BUILD_VERSION=${CI_COMMIT_TAG}"
+      --build-arg "BACKEND_BUILD_VERSION=${CI_COMMIT_TAG}"
       --build-arg "VITE_TRPC_URL=/trpc"
       --cache=true
       --cache-repo "${CI_REGISTRY_IMAGE}/cache"

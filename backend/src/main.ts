@@ -23,6 +23,7 @@ import { SimulationSeedService } from "./config/simulation-seed.service";
 import { BacktestMaterializationService } from "./simulation/backtest-materialization.service";
 import { TrpcRouter } from "./trpc/trpc.router";
 import { requireFroniusConnectionConfig } from "./fronius/fronius.service";
+import { getBuildVersion } from "./build-info";
 
 const isAddressInfo = (value: AddressInfo | string | null): value is AddressInfo =>
   typeof value === "object" && value !== null && "port" in value;
@@ -117,6 +118,7 @@ async function bootstrap(): Promise<NestFastifyApplication> {
     }
 
     logger.log(`API ready at ${baseUrl}`);
+    logger.log(`Build version ${getBuildVersion()}`);
 
     const routesTree = fastify.printRoutes({includeHooks: false, includeMeta: false, commonPrefix: false});
     if (routesTree.trim().length > 0) {

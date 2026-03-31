@@ -13,6 +13,7 @@ import { RuntimeConfigService } from "../config/runtime-config.service";
 import { PLANNING_VARIANTS } from "../config/runtime-config.service";
 import { SimulationConfigFactory } from "../config/simulation-config.factory";
 import { SimulationSeedService } from "../config/simulation-seed.service";
+import { getBuildVersion } from "../build-info";
 
 interface TrpcContext {
   simulationService?: SimulationService;
@@ -94,7 +95,7 @@ export class TrpcRouter {
     this.router = t.router({
       health: t.procedure.query(() => {
         this.logger.verbose("tRPC.health heartbeat");
-        return {status: "ok"};
+        return {status: "ok", version: getBuildVersion()};
       }),
       dashboard: t.router({
         summary: t.procedure.query(() => {

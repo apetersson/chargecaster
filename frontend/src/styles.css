@@ -26,11 +26,36 @@ body {
     margin: 0 auto;
     padding: 2rem clamp(1rem, 3vw, 2rem);
     flex: 1;
+    position: relative;
 }
 
 h1 {
     margin: 0;
     font-size: 1.75rem;
+}
+
+.app-build-version {
+    position: absolute;
+    top: 0.75rem;
+    right: clamp(1rem, 3vw, 2rem);
+    z-index: 2;
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(15, 23, 42, 0.82);
+    color: rgba(191, 219, 254, 0.92);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.28);
+    backdrop-filter: blur(10px);
+}
+
+.app-build-version.warning {
+    border-color: rgba(251, 191, 36, 0.45);
+    background: rgba(120, 53, 15, 0.82);
+    color: rgba(254, 240, 138, 0.96);
 }
 
 /* .subtitle unused */

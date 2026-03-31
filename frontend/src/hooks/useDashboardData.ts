@@ -37,6 +37,7 @@ function readOptionalHistoryNumber(
 }
 
 type DashboardDataState = {
+  backendBuildVersion: string | null;
   summary: DashboardOutputs["summary"] | null;
   history: HistoryPoint[];
   forecast: ForecastEra[];
@@ -52,6 +53,7 @@ type DashboardDataState = {
 };
 
 export function useDashboardData(): DashboardDataState {
+  const [backendBuildVersion, setBackendBuildVersion] = useState<string | null>(null);
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastEra[]>([]);
@@ -67,7 +69,8 @@ export function useDashboardData(): DashboardDataState {
     const execute = async () => {
       try {
         setLoading(true);
-        const [summaryData, historyData, forecastData, demandForecastData, oracleData, planningVariantData] = await Promise.all([
+        const [healthData, summaryData, historyData, forecastData, demandForecastData, oracleData, planningVariantData] = await Promise.all([
+          trpcClient.health.query(),
           trpcClient.dashboard.summary.query(),
           trpcClient.dashboard.history.query(),
           trpcClient.dashboard.forecast.query(),
@@ -76,6 +79,7 @@ export function useDashboardData(): DashboardDataState {
           trpcClient.dashboard.planningVariant.query(),
         ]);
 
+        setBackendBuildVersion(healthData.version);
         setSummary(summaryData);
         setHistory(
           historyData.entries.map((entry) => ({
@@ -133,6 +137,7 @@ export function useDashboardData(): DashboardDataState {
   }, [refresh]);
 
   return {
+    backendBuildVersion,
     summary,
     history,
     forecast,

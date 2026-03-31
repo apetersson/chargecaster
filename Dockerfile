@@ -21,7 +21,9 @@ COPY packages/domain/ packages/domain/
 
 # Build frontend
 COPY frontend/ frontend/
+ARG FRONTEND_BUILD_VERSION=dev
 ARG VITE_TRPC_URL=/trpc
+ENV VITE_BUILD_VERSION=${FRONTEND_BUILD_VERSION}
 ENV VITE_TRPC_URL=${VITE_TRPC_URL}
 RUN pnpm --filter chargecaster-frontend build
 
@@ -56,10 +58,12 @@ RUN apt-get update \
 
 WORKDIR /app
 
+ARG BACKEND_BUILD_VERSION=dev
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080 \
     CHARGECASTER_CONFIG=/app/config.yaml \
+    CHARGECASTER_BUILD_VERSION=${BACKEND_BUILD_VERSION} \
     VITE_TRPC_URL=/trpc \
     SERVE_STATIC=true
 

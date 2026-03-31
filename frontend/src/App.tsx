@@ -11,9 +11,11 @@ import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChar
 import { useIsMobile } from "./hooks/useIsMobile";
 
 const PREVIEW_HOURS_OPTIONS = [24, 48, 72, 96, 120] as const;
+const FRONTEND_BUILD_VERSION = (import.meta.env.VITE_BUILD_VERSION ?? "dev").trim() || "dev";
 
 function App(): JSX.Element {
   const {
+    backendBuildVersion,
     summary,
     history,
     forecast,
@@ -61,8 +63,25 @@ function App(): JSX.Element {
     showPriceAxisLabels,
   });
 
+  const normalisedBackendBuildVersion = backendBuildVersion?.trim() || null;
+  const hasBuildMismatch = normalisedBackendBuildVersion !== null && normalisedBackendBuildVersion !== FRONTEND_BUILD_VERSION;
+  const buildBadgeLabel = hasBuildMismatch
+    ? `FE ${FRONTEND_BUILD_VERSION} / BE ${normalisedBackendBuildVersion}`
+    : FRONTEND_BUILD_VERSION;
+  const buildBadgeTitle = hasBuildMismatch
+    ? `Frontend build ${FRONTEND_BUILD_VERSION} differs from backend build ${normalisedBackendBuildVersion}.`
+    : `Build ${FRONTEND_BUILD_VERSION}`;
+
   return (
     <>
+      <div
+        className={`app-build-version ${hasBuildMismatch ? "warning" : ""}`}
+        aria-label={hasBuildMismatch ? "Frontend and backend build versions differ" : `Build ${buildBadgeLabel}`}
+        title={buildBadgeTitle}
+      >
+        {buildBadgeLabel}
+      </div>
+
       {error ? (
         <section className="card">
           <p className="status err">{error}</p>
