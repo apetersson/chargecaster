@@ -87,12 +87,13 @@ export function normalizePriceSlots(raw: RawForecastEntry[]): PriceSlot[] {
 export function derivePriceSnapshot(
   slots: PriceSlot[],
   gridFee: EnergyPrice = EnergyPrice.fromEurPerKwh(0),
+  referenceTimeMs = Date.now(),
 ): EnergyPrice | null {
-  const firstSlot = slots.at(0);
-  if (!firstSlot) {
+  const activeOrUpcomingSlot = slots.find((slot) => slot.end.getTime() > referenceTimeMs) ?? null;
+  if (!activeOrUpcomingSlot) {
     return null;
   }
-  return firstSlot.energyPrice.withAdditionalFee(gridFee.eurPerKwh);
+  return activeOrUpcomingSlot.energyPrice.withAdditionalFee(gridFee.eurPerKwh);
 }
 
 export function buildOracleLookup(entries: OracleEntry[]): Map<string, OracleEntry> {
