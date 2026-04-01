@@ -16,6 +16,7 @@ const MIN_NEW_DAYS_SINCE_LAST_TRAINING = 14;
 const TRAINING_WINDOW_START_HOUR = 1;
 const TRAINING_WINDOW_END_HOUR = 5;
 const PYTHON_EXECUTABLE = "python3";
+const REQUIRED_PYTHON_MODULES = ["catboost"] as const;
 
 type TrainingJobKey = "load-forecast" | "price-forecast";
 
@@ -303,6 +304,15 @@ export class ModelTrainingCoordinator {
     }
     if ((probe.status ?? 1) !== 0) {
       return `${PYTHON_EXECUTABLE} exited with status ${probe.status ?? "unknown"} during startup probe`;
+    }
+    for (const moduleName of REQUIRED_PYTHON_MODULES) {
+      const importProbe = spawnSync(PYTHON_EXECUTABLE, ["-c", `import ${moduleName}`], { stdio: "ignore" });
+      if (importProbe.error) {
+        return `unable to verify Python module '${moduleName}' (${importProbe.error.message})`;
+      }
+      if ((importProbe.status ?? 1) !== 0) {
+        return `Python module '${moduleName}' is missing; install backend/ml/requirements.txt into ${PYTHON_EXECUTABLE}`;
+      }
     }
     return null;
   }

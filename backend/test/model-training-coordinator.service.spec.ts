@@ -182,6 +182,42 @@ describe("ModelTrainingCoordinator", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not start training when the local python is missing catboost", () => {
+    vi.setSystemTime(new Date("2026-03-13T02:15:00.000+01:00"));
+    spawnSyncMock.mockImplementation((command: unknown, args: unknown) => {
+      if (command === "python3" && Array.isArray(args) && args[0] === "--version") {
+        return { status: 0 };
+      }
+      if (command === "python3" && Array.isArray(args) && args[0] === "-c" && String(args[1]).includes("import catboost")) {
+        return { status: 1 };
+      }
+      return { status: 0 };
+    });
+    const storage = {
+      listHistoryDayStatsBefore: () => createDayStats(70),
+    } as unknown as StorageService;
+    const loadArtifactService = {
+      ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-load-models-")),
+      readActiveArtifact: () => null,
+      promoteVersion: () => undefined,
+      writePromotionMarker: () => undefined,
+    } as unknown as LoadForecastArtifactService;
+    const priceArtifactService = {
+      ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-price-models-")),
+      readActiveArtifact: () => null,
+      promoteVersion: () => undefined,
+      writePromotionMarker: () => undefined,
+    } as unknown as PriceForecastArtifactService;
+    const configFileService = {
+      resolvePath: () => "/tmp/test-config.local.yaml",
+    } as unknown as ConfigFileService;
+    const service = new ModelTrainingCoordinator(storage, loadArtifactService, priceArtifactService, configFileService);
+
+    service.maybeStartTraining(createConfig());
+
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it("queues price-forecast training after bootstrapping load-forecast", () => {
     vi.setSystemTime(new Date("2026-03-13T12:15:00.000+01:00"));
     const storage = {
