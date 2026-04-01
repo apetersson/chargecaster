@@ -1,14 +1,67 @@
 stages:
+  - verify
   - publish
 
 workflow:
   rules:
-    # Only release tags publish images; this avoids rebuilding the same commit
-    # on both `main` and `vX.Y.Z`.
+    # Release tags always get a pipeline so we can verify and then publish.
     - if: $CI_COMMIT_TAG
+    # Merge requests get their own verification pipeline.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # When a branch already has an open MR, skip the duplicate push pipeline.
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    # Plain branch pushes still get verification even without an MR yet.
+    - if: $CI_COMMIT_BRANCH
 
 variables:
   KANIKO_IMAGE: gcr.io/kaniko-project/executor:v1.23.2-debug
+  PNPM_STORE_DIR: .pnpm-store
+
+default:
+  interruptible: true
+
+.node:
+  image: node:22-bookworm
+  tags:
+    - docker
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store/
+  before_script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+
+verify:typecheck:
+  stage: verify
+  extends: .node
+  script:
+    - pnpm run typecheck:all
+
+verify:build:
+  stage: verify
+  extends: .node
+  script:
+    - pnpm run build:all
+
+verify:backend-unit:
+  stage: verify
+  extends: .node
+  script:
+    - pnpm --filter chargecaster-backend test
+
+verify:backend-e2e:
+  stage: verify
+  extends: .node
+  script:
+    - pnpm --filter chargecaster-backend test:e2e
+  rules:
+    # Keep the slower integration-style check on the protected branch and tags.
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 .kaniko:
   image:
