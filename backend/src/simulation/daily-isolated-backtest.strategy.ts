@@ -150,6 +150,9 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       ? Power.fromWatts(Math.max(0, Number(config.battery.max_charge_power_solar_w)))
       : null;
     const gridFee = resolveGridFee(config);
+    const gridFeeByInterval = options?.configDocument
+      ? this.dynamicPriceConfigService.buildGridFeeScheduleFromHistory(options.configDocument, config, history)
+      : null;
     const feedInTariffByInterval = options?.configDocument
       ? this.dynamicPriceConfigService.buildFeedInTariffScheduleFromHistory(options.configDocument, config, history)
       : null;
@@ -187,7 +190,8 @@ export class DailyIsolatedBacktestStrategy implements DailyBacktestStrategy {
       const duration = Duration.fromMilliseconds(intervalMs);
 
       const priceEur = Number(current.price_eur_per_kwh ?? 0);
-      const importPrice = EnergyPrice.fromEurPerKwh(priceEur).withAdditionalFee(gridFee.eurPerKwh);
+      const currentGridFeeEurPerKwh = gridFeeByInterval?.[i] ?? gridFee.eurPerKwh;
+      const importPrice = EnergyPrice.fromEurPerKwh(priceEur).withAdditionalFee(currentGridFeeEurPerKwh);
       const feedInTariff = EnergyPrice.fromEurPerKwh(
         Number(feedInTariffByInterval?.[i] ?? config.price.feed_in_tariff_eur_per_kwh ?? 0),
       );

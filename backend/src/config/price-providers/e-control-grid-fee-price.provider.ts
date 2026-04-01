@@ -1,6 +1,13 @@
 import { Injectable, Logger } from "@nestjs/common";
 
-import type { GridFeePriceProvider, PriceProviderRefreshContext } from "./price-provider.types";
+import type {
+  GridFeeTariffScheduleContext,
+  GridFeeTariffScheduleProvider,
+  PriceProviderRefreshContext,
+} from "./price-provider.types";
+import type { HistoryPoint, RawForecastEntry } from "@chargecaster/domain";
+import { parseTimestamp } from "../../simulation/solar";
+import type { DynamicPriceRecord } from "../../storage/storage.service";
 import type { EControlNetzbereich } from "../schemas";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -32,8 +39,26 @@ const SUPPORTED_NETZEBENE = 7;
 const SUPPORTED_CUSTOMER_PROFILE = "residential_non_demand_metered";
 const RESIDENTIAL_ELECTRICITY_TAX_PROFILE = "natural_person_skzg";
 
+interface SnapWindow {
+  startDay: number;
+  startMonth: number;
+  endDay: number;
+  endMonth: number;
+  startHour: number;
+  endHour: number;
+}
+
+interface EControlGridFeeComponents {
+  normalApCentPerKwh: number;
+  snapApCentPerKwh: number;
+  netzverlustCentPerKwh: number;
+  renewableWorkCentPerKwh: number;
+  renewableLossCentPerKwh: number;
+  electricityTaxCentPerKwh: number;
+}
+
 @Injectable()
-export class EControlGridFeePriceProvider implements GridFeePriceProvider {
+export class EControlGridFeePriceProvider implements GridFeeTariffScheduleProvider {
   readonly type = "e-control" as const;
   private readonly logger = new Logger(EControlGridFeePriceProvider.name);
 
@@ -49,7 +74,11 @@ export class EControlGridFeePriceProvider implements GridFeePriceProvider {
       this.type,
       effectiveAt,
     );
-    if (existingRecord && this.resolveMonthKey(existingRecord.observedAt, context.timeZone) === this.resolveMonthKey(context.referenceDate, context.timeZone)) {
+    if (
+      existingRecord &&
+      this.resolveMonthKey(existingRecord.observedAt, context.timeZone) === this.resolveMonthKey(context.referenceDate, context.timeZone) &&
+      this.hasCompleteSnapMetadata(existingRecord)
+    ) {
       this.logger.verbose(
         `Skipping E-Control grid fee refresh for ${effectiveAt}; latest observation ${existingRecord.observedAt} is already from the current month`,
       );
@@ -72,19 +101,11 @@ export class EControlGridFeePriceProvider implements GridFeePriceProvider {
         paragraph: "7",
       }),
     ]);
-    const apCentPerKwh = this.extractNetznutzungsentgeltApCentPerKwh(sneBody, netzbereich);
-    const netzverlustCentPerKwh = this.extractPatternValue(sneBody, this.buildNetzverlustPattern(netzbereich), 1);
-    const renewableWorkCentPerKwh = this.extractRenewableWorkCentPerKwh(renewablesDoc.body);
-    const renewableLossCentPerKwh = this.extractRenewableLossCentPerKwh(renewablesDoc.body);
-    const electricityTaxCentPerKwh = this.extractResidentialElectricityTaxCentPerKwh(electricityTaxDoc.body);
-    const netTotalCentPerKwh =
-      apCentPerKwh +
-      netzverlustCentPerKwh +
-      renewableWorkCentPerKwh +
-      renewableLossCentPerKwh +
-      electricityTaxCentPerKwh;
-    const grossTotalCentPerKwh = netTotalCentPerKwh * VAT_MULTIPLIER;
-    const valueEurPerKwh = grossTotalCentPerKwh / 100;
+    const components = this.extractComponents(sneBody, renewablesDoc.body, electricityTaxDoc.body, netzbereich);
+    const snapWindow = this.extractSnapWindow(sneBody);
+    const normalGrossTotalCentPerKwh = this.computeGrossTotalCentPerKwh(components, false);
+    const snapGrossTotalCentPerKwh = this.computeGrossTotalCentPerKwh(components, true);
+    const valueEurPerKwh = normalGrossTotalCentPerKwh / 100;
 
     context.storage.upsertDynamicPriceRecord({
       priceKey: "grid_fee_eur_per_kwh",
@@ -104,21 +125,67 @@ export class EControlGridFeePriceProvider implements GridFeePriceProvider {
           elektrizitaetsabgabe_url: electricityTaxDoc.url,
         },
         vat_multiplier: VAT_MULTIPLIER,
+        snap: {
+          enabled: this.resolveSnapEnabled(context.config),
+          start_day: snapWindow.startDay,
+          start_month: snapWindow.startMonth,
+          end_day: snapWindow.endDay,
+          end_month: snapWindow.endMonth,
+          start_hour: snapWindow.startHour,
+          end_hour: snapWindow.endHour,
+        },
         components: {
-          netznutzungsentgelt_ap_cent_per_kwh: apCentPerKwh,
-          netzverlustentgelt_cent_per_kwh: netzverlustCentPerKwh,
-          erneuerbaren_foerderbeitrag_arbeit_cent_per_kwh: renewableWorkCentPerKwh,
-          erneuerbaren_foerderbeitrag_verlust_cent_per_kwh: renewableLossCentPerKwh,
-          elektrizitaetsabgabe_cent_per_kwh: electricityTaxCentPerKwh,
-          total_net_cent_per_kwh: netTotalCentPerKwh,
-          total_gross_cent_per_kwh: grossTotalCentPerKwh,
+          netznutzungsentgelt_ap_cent_per_kwh: components.normalApCentPerKwh,
+          netznutzungsentgelt_snap_ap_cent_per_kwh: components.snapApCentPerKwh,
+          netzverlustentgelt_cent_per_kwh: components.netzverlustCentPerKwh,
+          erneuerbaren_foerderbeitrag_arbeit_cent_per_kwh: components.renewableWorkCentPerKwh,
+          erneuerbaren_foerderbeitrag_verlust_cent_per_kwh: components.renewableLossCentPerKwh,
+          elektrizitaetsabgabe_cent_per_kwh: components.electricityTaxCentPerKwh,
+          total_net_cent_per_kwh: this.computeNetTotalCentPerKwh(components, false),
+          total_gross_cent_per_kwh: normalGrossTotalCentPerKwh,
+          total_net_snap_cent_per_kwh: this.computeNetTotalCentPerKwh(components, true),
+          total_gross_snap_cent_per_kwh: snapGrossTotalCentPerKwh,
         },
       },
     });
   }
 
+  buildTariffSchedule(context: GridFeeTariffScheduleContext): (number | undefined)[] | null {
+    if (context.forecast?.length) {
+      return context.forecast.map((entry) => {
+        const timestamp = entry.start ?? entry.from ?? null;
+        return timestamp ? this.resolvePriceAt(context, timestamp) ?? undefined : undefined;
+      });
+    }
+
+    if (context.history?.length) {
+      return context.history.map((entry) => this.resolvePriceAt(context, entry.timestamp) ?? undefined);
+    }
+
+    return null;
+  }
+
+  resolvePriceAt(context: GridFeeTariffScheduleContext, timestamp: string): number | null {
+    const record = this.lookupDynamicPriceRecordAt(context, timestamp);
+    if (!record) {
+      return context.simulationConfig.price.grid_fee_eur_per_kwh ?? null;
+    }
+    return this.resolveGridFeeValueFromRecord(record, timestamp, this.resolveTimeZone(context.config));
+  }
+
   private resolveNetzbereich(config: PriceProviderRefreshContext["config"]): EControlNetzbereich {
     return config.price?.grid_fee?.type === "e-control" ? (config.price.grid_fee.netzbereich ?? SUPPORTED_NETZBEREICH) : "Wien";
+  }
+
+  private resolveSnapEnabled(config: PriceProviderRefreshContext["config"]): boolean {
+    if (config.price?.grid_fee?.type !== "e-control") {
+      return true;
+    }
+    return config.price.grid_fee.snap ?? true;
+  }
+
+  private resolveTimeZone(config: PriceProviderRefreshContext["config"]): string {
+    return config.location?.timezone?.trim() || "Europe/Vienna";
   }
 
   private resolveSourceUrl(referenceDate: Date, timeZone: string, config: PriceProviderRefreshContext["config"]): string {
@@ -175,15 +242,236 @@ export class EControlGridFeePriceProvider implements GridFeePriceProvider {
     return `${year}-${month}`;
   }
 
-  private extractNetznutzungsentgeltApCentPerKwh(body: string, netzbereich: EControlNetzbereich): number {
+  private extractComponents(
+    sneBody: string,
+    renewablesBody: string,
+    electricityTaxBody: string,
+    netzbereich: EControlNetzbereich,
+  ): EControlGridFeeComponents {
+    const {normalApCentPerKwh, snapApCentPerKwh} = this.extractNetznutzungsentgeltApCentPerKwh(sneBody, netzbereich);
+    return {
+      normalApCentPerKwh,
+      snapApCentPerKwh,
+      netzverlustCentPerKwh: this.extractPatternValue(sneBody, this.buildNetzverlustPattern(netzbereich), 1),
+      renewableWorkCentPerKwh: this.extractRenewableWorkCentPerKwh(renewablesBody),
+      renewableLossCentPerKwh: this.extractRenewableLossCentPerKwh(renewablesBody),
+      electricityTaxCentPerKwh: this.extractResidentialElectricityTaxCentPerKwh(electricityTaxBody),
+    };
+  }
+
+  private extractNetznutzungsentgeltApCentPerKwh(body: string, netzbereich: EControlNetzbereich): {
+    normalApCentPerKwh: number;
+    snapApCentPerKwh: number;
+  } {
     const section = this.extractSection(body, `Netznutzungsentgelt für die Netzebene ${SUPPORTED_NETZEBENE}:`, "Netzbereitstellungsentgelt");
     const regionBlock = this.extractRegionBlock(section, netzbereich);
     const rowMatch = /bb\)\s*nicht gemessene Leist\.[\s\S]*?AlignRight">([^<]+)<\/p>[\s\S]*?AlignRight">([^<]+)<\/p>[\s\S]*?AlignRight">([^<]+)<\/p>/i.exec(regionBlock);
     const apRaw = rowMatch?.[2];
+    const snapRaw = rowMatch?.[3];
     if (!apRaw) {
       throw new Error(`Unable to extract E-Control Netznutzungsentgelt AP for ${netzbereich}.`);
     }
-    return this.parseEuropeanNumber(apRaw);
+    return {
+      normalApCentPerKwh: this.parseEuropeanNumber(apRaw),
+      snapApCentPerKwh: snapRaw ? this.parseEuropeanNumber(snapRaw) : this.parseEuropeanNumber(apRaw),
+    };
+  }
+
+  private resolveGridFeeValueFromRecord(record: DynamicPriceRecord, timestamp: string, timeZone: string): number {
+    const metadata = record.metadata;
+    const components = this.extractComponentsFromMetadata(metadata);
+    if (!components) {
+      return record.valueEurPerKwh;
+    }
+    const snapEnabled = this.extractSnapEnabledFromMetadata(metadata);
+    const snapWindow = this.extractSnapWindowFromMetadata(metadata);
+    const snapActive = snapEnabled && snapWindow ? this.isSnapActive(timestamp, timeZone, snapWindow) : false;
+    return this.computeGrossTotalCentPerKwh(components, snapActive) / 100;
+  }
+
+  private extractComponentsFromMetadata(metadata: Record<string, unknown>): EControlGridFeeComponents | null {
+    const components = this.asRecord(metadata.components);
+    if (!components) {
+      return null;
+    }
+    const normalApCentPerKwh = this.asNumber(components.netznutzungsentgelt_ap_cent_per_kwh);
+    const snapApCentPerKwh = this.asNumber(components.netznutzungsentgelt_snap_ap_cent_per_kwh);
+    const netzverlustCentPerKwh = this.asNumber(components.netzverlustentgelt_cent_per_kwh);
+    const renewableWorkCentPerKwh = this.asNumber(components.erneuerbaren_foerderbeitrag_arbeit_cent_per_kwh);
+    const renewableLossCentPerKwh = this.asNumber(components.erneuerbaren_foerderbeitrag_verlust_cent_per_kwh);
+    const electricityTaxCentPerKwh = this.asNumber(components.elektrizitaetsabgabe_cent_per_kwh);
+    if (
+      normalApCentPerKwh == null ||
+      snapApCentPerKwh == null ||
+      netzverlustCentPerKwh == null ||
+      renewableWorkCentPerKwh == null ||
+      renewableLossCentPerKwh == null ||
+      electricityTaxCentPerKwh == null
+    ) {
+      return null;
+    }
+    return {
+      normalApCentPerKwh,
+      snapApCentPerKwh,
+      netzverlustCentPerKwh,
+      renewableWorkCentPerKwh,
+      renewableLossCentPerKwh,
+      electricityTaxCentPerKwh,
+    };
+  }
+
+  private extractSnapEnabledFromMetadata(metadata: Record<string, unknown>): boolean {
+    const snap = this.asRecord(metadata.snap);
+    const enabled = snap ? this.asBoolean(snap.enabled) : null;
+    return enabled ?? true;
+  }
+
+  private extractSnapWindow(body: string): SnapWindow {
+    const normalizedBody = body
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\s+/g, " ");
+    const match = /Sommer-Nieder-Arbeitspreis\s*\(SNAP\).*?im Zeitraum von\s*(\d{1,2})\.\s*([A-Za-zÄÖÜäöü]+)\s*bis\s*(\d{1,2})\.\s*([A-Za-zÄÖÜäöü]+),\s*jeweils\s*(\d{1,2})\s*bis\s*(\d{1,2})\s*Uhr/i.exec(
+      normalizedBody,
+    );
+    if (!match) {
+      throw new Error("Unable to extract SNAP validity window from the official SNE-V source.");
+    }
+    const startMonth = this.parseGermanMonth(match[2]);
+    const endMonth = this.parseGermanMonth(match[4]);
+    return {
+      startDay: Number(match[1]),
+      startMonth,
+      endDay: Number(match[3]),
+      endMonth,
+      startHour: Number(match[5]),
+      endHour: Number(match[6]),
+    };
+  }
+
+  private extractSnapWindowFromMetadata(metadata: Record<string, unknown>): SnapWindow | null {
+    const snap = this.asRecord(metadata.snap);
+    if (!snap) {
+      return null;
+    }
+    const startDay = this.asNumber(snap.start_day);
+    const startMonth = this.asNumber(snap.start_month);
+    const endDay = this.asNumber(snap.end_day);
+    const endMonth = this.asNumber(snap.end_month);
+    const startHour = this.asNumber(snap.start_hour);
+    const endHour = this.asNumber(snap.end_hour);
+    if (
+      startDay == null ||
+      startMonth == null ||
+      endDay == null ||
+      endMonth == null ||
+      startHour == null ||
+      endHour == null
+    ) {
+      return null;
+    }
+    return {
+      startDay,
+      startMonth,
+      endDay,
+      endMonth,
+      startHour,
+      endHour,
+    };
+  }
+
+  private computeNetTotalCentPerKwh(components: EControlGridFeeComponents, useSnap: boolean): number {
+    return (
+      (useSnap ? components.snapApCentPerKwh : components.normalApCentPerKwh) +
+      components.netzverlustCentPerKwh +
+      components.renewableWorkCentPerKwh +
+      components.renewableLossCentPerKwh +
+      components.electricityTaxCentPerKwh
+    );
+  }
+
+  private computeGrossTotalCentPerKwh(components: EControlGridFeeComponents, useSnap: boolean): number {
+    return this.computeNetTotalCentPerKwh(components, useSnap) * VAT_MULTIPLIER;
+  }
+
+  private lookupDynamicPriceRecordAt(context: GridFeeTariffScheduleContext, timestamp: string): DynamicPriceRecord | null {
+    const storage = context.storage as StorageServiceLike;
+    if (typeof storage.getLatestDynamicPriceRecordAt === "function") {
+      return storage.getLatestDynamicPriceRecordAt("grid_fee_eur_per_kwh", this.type, timestamp);
+    }
+    if (typeof storage.getLatestDynamicPriceRecordsAt === "function") {
+      const record = storage.getLatestDynamicPriceRecordsAt(timestamp).grid_fee_eur_per_kwh ?? null;
+      return record?.source === this.type ? record : null;
+    }
+    return null;
+  }
+
+  private hasCompleteSnapMetadata(record: DynamicPriceRecord): boolean {
+    return this.extractComponentsFromMetadata(record.metadata) !== null &&
+      this.extractSnapWindowFromMetadata(record.metadata) !== null;
+  }
+
+  private isSnapActive(timestamp: string, timeZone: string, snapWindow: SnapWindow): boolean {
+    const date = parseTimestamp(timestamp);
+    if (!date) {
+      return false;
+    }
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23",
+    });
+    const parts = formatter.formatToParts(date);
+    const day = Number(parts.find((part) => part.type === "day")?.value ?? Number.NaN);
+    const month = Number(parts.find((part) => part.type === "month")?.value ?? Number.NaN);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value ?? Number.NaN);
+    if (!Number.isFinite(day) || !Number.isFinite(month) || !Number.isFinite(hour)) {
+      return false;
+    }
+    const isAfterOrEqualStart = month > snapWindow.startMonth || (month === snapWindow.startMonth && day >= snapWindow.startDay);
+    const isBeforeOrEqualEnd = month < snapWindow.endMonth || (month === snapWindow.endMonth && day <= snapWindow.endDay);
+    return isAfterOrEqualStart && isBeforeOrEqualEnd && hour >= snapWindow.startHour && hour < snapWindow.endHour;
+  }
+
+  private parseGermanMonth(rawMonth: string): number {
+    const normalized = rawMonth
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "");
+    const monthMap: Record<string, number> = {
+      januar: 1,
+      februar: 2,
+      maerz: 3,
+      marz: 3,
+      april: 4,
+      mai: 5,
+      juni: 6,
+      juli: 7,
+      august: 8,
+      september: 9,
+      oktober: 10,
+      november: 11,
+      dezember: 12,
+    };
+    const month = monthMap[normalized];
+    if (!month) {
+      throw new Error(`Unsupported German month in official SNAP source: ${rawMonth}`);
+    }
+    return month;
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  }
+
+  private asNumber(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  private asBoolean(value: unknown): boolean | null {
+    return typeof value === "boolean" ? value : null;
   }
 
   private extractSection(body: string, startMarker: string, endMarker: string): string {
@@ -334,4 +622,15 @@ export class EControlGridFeePriceProvider implements GridFeePriceProvider {
       clearTimeout(timer);
     }
   }
+}
+
+interface StorageServiceLike {
+  getLatestDynamicPriceRecordAt?: (
+    priceKey: DynamicPriceRecord["priceKey"],
+    source: string,
+    timestamp: string,
+  ) => DynamicPriceRecord | null;
+  getLatestDynamicPriceRecordsAt?: (
+    timestamp: string,
+  ) => Partial<Record<DynamicPriceRecord["priceKey"], DynamicPriceRecord>>;
 }

@@ -14,6 +14,7 @@ import {
   PRICE_FILL_AUTO,
   PRICE_FILL_CHARGE,
   PRICE_FILL_HOLD,
+  GRID_FEE_MARKER,
   PRICE_HISTORY_BAR_BG,
   PRICE_HISTORY_BAR_BORDER,
 } from "./constants";
@@ -108,6 +109,25 @@ const priceBarPlugin: Plugin = {
           ctx.restore();
         };
 
+        const drawGridFeeMarker = (
+          markerValue: number,
+          leftPx: number,
+          widthPx: number,
+        ): void => {
+          const markerTop = yScale.getPixelForValue(markerValue);
+          const inset = Math.max(2, Math.min(6, widthPx * 0.18));
+          const lineLeft = leftPx + inset;
+          const lineRight = leftPx + widthPx - inset;
+          ctx.save();
+          ctx.strokeStyle = GRID_FEE_MARKER;
+          ctx.lineWidth = Math.max(1, Math.min(2, widthPx * 0.08));
+          ctx.beginPath();
+          ctx.moveTo(lineLeft, markerTop);
+          ctx.lineTo(lineRight, markerTop);
+          ctx.stroke();
+          ctx.restore();
+        };
+
         if (hasImportBar) {
           drawBar(
             value,
@@ -116,6 +136,9 @@ const priceBarPlugin: Plugin = {
             resolveBarColors(point, forecastFill, PRICE_HISTORY_BAR_BG),
             resolveBarColors(point, forecastBorder, PRICE_HISTORY_BAR_BORDER),
           );
+          if (point.source === "forecast" && typeof point.gridFeeY === "number" && Number.isFinite(point.gridFeeY) && point.gridFeeY > 0) {
+            drawGridFeeMarker(point.gridFeeY, barLeft, segmentWidth);
+          }
         }
 
         if (hasFeedInBar) {

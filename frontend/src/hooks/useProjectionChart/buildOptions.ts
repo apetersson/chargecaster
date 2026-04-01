@@ -130,15 +130,21 @@ export const buildOptions = ({bounds, timeRangeMs, legendGroups, responsive, val
               return [];
             }
             const raw = item.raw as {
+              gridFeeY?: number | null;
               referencePrices?: { provider: string; cents: number }[];
             } | null;
-            if (!raw?.referencePrices?.length) {
-              return [];
+            const lines: string[] = [];
+            if (typeof raw?.gridFeeY === "number" && Number.isFinite(raw.gridFeeY) && raw.gridFeeY > 0) {
+              lines.push(`grid fee: ${numberFormatter.format(raw.gridFeeY)} ${RIGHT_AXIS_UNIT}`);
             }
-
-            return raw.referencePrices.map(({provider, cents}) =>
-              `${provider}: ${numberFormatter.format(cents)} ${RIGHT_AXIS_UNIT}`,
-            );
+            if (raw?.referencePrices?.length) {
+              lines.push(
+                ...raw.referencePrices.map(({provider, cents}) =>
+                  `${provider}: ${numberFormatter.format(cents)} ${RIGHT_AXIS_UNIT}`,
+                ),
+              );
+            }
+            return lines;
           },
       },
     },

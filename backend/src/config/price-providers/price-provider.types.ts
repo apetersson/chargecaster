@@ -12,6 +12,15 @@ export interface PriceProviderRefreshContext {
   timeZone: string;
 }
 
+export interface GridFeeTariffScheduleContext {
+  config: ConfigDocument;
+  simulationConfig: SimulationConfig;
+  referenceDate: Date;
+  storage: StorageService;
+  forecast?: RawForecastEntry[];
+  history?: HistoryPoint[];
+}
+
 export interface FeedInTariffScheduleContext {
   config: ConfigDocument;
   simulationConfig: SimulationConfig;
@@ -24,6 +33,11 @@ export interface FeedInTariffScheduleContext {
 export interface GridFeePriceProvider {
   readonly type: GridFeeProviderType;
   refresh(context: PriceProviderRefreshContext): Promise<void>;
+}
+
+export interface GridFeeTariffScheduleProvider extends GridFeePriceProvider {
+  buildTariffSchedule(context: GridFeeTariffScheduleContext): (number | undefined)[] | null;
+  resolvePriceAt(context: GridFeeTariffScheduleContext, timestamp: string): number | null;
 }
 
 export interface FeedInPriceProvider {

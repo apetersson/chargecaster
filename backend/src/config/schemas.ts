@@ -112,6 +112,7 @@ export const gridFeeProviderRefSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("e-control"),
     netzbereich: eControlNetzbereichSchema.optional(),
+    snap: optionalBooleanSchema.optional(),
   }).strip(),
 ]);
 export type GridFeeProviderRef = z.infer<typeof gridFeeProviderRefSchema>;

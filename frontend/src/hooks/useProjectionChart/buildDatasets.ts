@@ -52,6 +52,32 @@ const resolveFeedInTariffCents = (era: ForecastEra): number | null => {
   return typeof eur === "number" && Number.isFinite(eur) ? eur * 100 : null;
 };
 
+const resolveGridFeeCents = (era: ForecastEra): number | null => {
+  const costSource = era.sources.find(
+    (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> =>
+      source.type === "cost" && source.provider === "canonical",
+  ) ?? era.sources.find(
+    (source): source is Extract<ForecastEra["sources"][number], { type: "cost" }> => source.type === "cost",
+  );
+  if (!costSource) {
+    return null;
+  }
+  const grossCents = typeof costSource.payload.price_with_fee_ct_per_kwh === "number" && Number.isFinite(costSource.payload.price_with_fee_ct_per_kwh)
+    ? costSource.payload.price_with_fee_ct_per_kwh
+    : typeof costSource.payload.price_with_fee_eur_per_kwh === "number" && Number.isFinite(costSource.payload.price_with_fee_eur_per_kwh)
+      ? costSource.payload.price_with_fee_eur_per_kwh * 100
+      : null;
+  const baseCents = typeof costSource.payload.price_ct_per_kwh === "number" && Number.isFinite(costSource.payload.price_ct_per_kwh)
+    ? costSource.payload.price_ct_per_kwh
+    : typeof costSource.payload.price_eur_per_kwh === "number" && Number.isFinite(costSource.payload.price_eur_per_kwh)
+      ? costSource.payload.price_eur_per_kwh * 100
+      : null;
+  if (!isFiniteNumber(grossCents) || !isFiniteNumber(baseCents)) {
+    return null;
+  }
+  return Math.max(0, grossCents - baseCents);
+};
+
 const resolveCostCents = (era: ForecastEra, provider: string): number | null => {
   const source = era.sources.find(
     (entry): entry is Extract<ForecastEra["sources"][number], { type: "cost" }> =>
@@ -344,11 +370,13 @@ const buildPriceSeries = (
     }
     const referencePrices = resolveReferenceCosts(era.era);
     const feedInPrice = showFeedInPriceBars ? resolveFeedInTariffCents(era.era) : null;
+    const gridFee = resolveGridFeeCents(era.era);
     futurePoints.push({
       x: eraStartMs(era),
       xEnd: eraEndMs(era),
       y: price,
       feedInY: feedInPrice,
+      gridFeeY: gridFee,
       referencePrices,
       source: "forecast",
       strategy: era.oracle?.strategy,

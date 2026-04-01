@@ -10,11 +10,13 @@ import { ForecastAssemblyService } from "./forecast-assembly.service";
 import { DemandForecastService } from "./demand-forecast.service";
 import { SolarForecastCalibrationService } from "./solar-forecast-calibration.service";
 import { OpenMeteoSolarForecastService } from "./open-meteo-solar-forecast.service";
+import { DynamicPriceConfigService } from "./dynamic-price-config.service";
 
 export interface PreparedSimulation {
   simulationConfig: SimulationConfig;
   liveState: { battery_soc?: number | null };
   forecast: RawForecastEntry[];
+  gridFeeEurPerKwhBySlot?: (number | undefined)[];
   warnings: string[];
   errors: string[];
   priceSnapshot: number | null;
@@ -176,6 +178,7 @@ export class SimulationPreparationService {
     @Inject(MarketDataService) private readonly marketDataService: MarketDataService,
     @Inject(EvccDataService) private readonly evccDataService: EvccDataService,
     @Inject(ForecastAssemblyService) private readonly forecastAssembly: ForecastAssemblyService,
+    @Inject(DynamicPriceConfigService) private readonly dynamicPriceConfigService: DynamicPriceConfigService,
     @Inject(DemandForecastService) private readonly demandForecastService: DemandForecastService,
     @Inject(SolarForecastCalibrationService) private readonly solarForecastCalibrationService: SolarForecastCalibrationService,
     @Inject(OpenMeteoSolarForecastService) private readonly openMeteoSolarForecastService: OpenMeteoSolarForecastService,
@@ -258,11 +261,19 @@ export class SimulationPreparationService {
       this.logger.warn(message);
     }
 
+    const gridFeeEurPerKwhBySlot = this.dynamicPriceConfigService.buildGridFeeScheduleFromForecast(
+      configFile,
+      simulationConfig,
+      forecast,
+      new Date(referenceTimeMs),
+    ) ?? undefined;
+
     const forecastErasResult = this.forecastAssembly.buildForecastEras(
       forecast,
       futureProviderForecasts,
       solarForecast,
       simulationConfig.price.grid_fee_eur_per_kwh ?? 0,
+      gridFeeEurPerKwhBySlot,
     );
 
     forecast = forecastErasResult.forecastEntries;
@@ -272,12 +283,18 @@ export class SimulationPreparationService {
       liveHomePowerW: evccResult.homePowerW,
     });
 
-    const priceSnapshotValue = priceSnapshot ?? this.forecastAssembly.derivePriceSnapshot(forecast, simulationConfig);
+    const priceSnapshotValue = this.forecastAssembly.derivePriceSnapshot(
+      forecast,
+      simulationConfig,
+      gridFeeEurPerKwhBySlot,
+      referenceTimeMs,
+    ) ?? priceSnapshot;
 
     return {
       simulationConfig,
       liveState,
       forecast,
+      gridFeeEurPerKwhBySlot,
       warnings,
       errors,
       priceSnapshot: priceSnapshotValue,

@@ -8,6 +8,7 @@ export interface ProjectionPoint extends ScatterDataPoint {
   source: SeriesSource;
   xEnd?: number | null;
   feedInY?: number | null;
+  gridFeeY?: number | null;
   referencePrices?: { provider: string; cents: number }[];
   isCurrentMarker?: boolean;
   // Optional strategy annotation for forecast price bars.

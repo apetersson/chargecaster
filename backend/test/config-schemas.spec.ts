@@ -76,6 +76,7 @@ describe("configuration schema parsers", () => {
         grid_fee: {
           type: "e-control",
           netzbereich: "Graz",
+          snap: false,
         },
         feed_in: {
           type: "awattar-sunny-spot",
@@ -99,6 +100,7 @@ describe("configuration schema parsers", () => {
     expect(parsed.price?.energy?.awattar?.priority).toBe(2);
     expect(parsed.price?.grid_fee?.type).toBe("e-control");
     expect(parsed.price?.grid_fee?.type === "e-control" ? parsed.price.grid_fee.netzbereich : null).toBe("Graz");
+    expect(parsed.price?.grid_fee?.type === "e-control" ? parsed.price.grid_fee.snap : null).toBe(false);
     expect(parsed.price?.feed_in?.type).toBe("awattar-sunny-spot");
     expect(parsed.battery?.chemistry).toBe("lifepo4");
     expect(parsed.logic?.interval_seconds).toBe(300);

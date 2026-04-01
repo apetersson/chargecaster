@@ -44,6 +44,7 @@ export class ForecastAssemblyService {
     providerForecasts: PriceProviderForecast[],
     solarForecast: RawSolarEntry[],
     gridFeeEurPerKwh: number,
+    gridFeeEurPerKwhBySlot?: (number | undefined)[],
   ): { forecastEntries: RawForecastEntry[]; eras: ForecastEra[] } {
     if (!canonicalForecast.length) {
       return {forecastEntries: [], eras: []};
@@ -70,6 +71,14 @@ export class ForecastAssemblyService {
     );
 
     const eraMap = new Map<string, EraEntry>();
+    const gridFeeByStartIso = new Map<string, number>();
+    canonicalForecast.forEach((entry, index) => {
+      const startIso = entry.start ?? entry.from ?? null;
+      const gridFeeValue = gridFeeEurPerKwhBySlot?.[index];
+      if (startIso && typeof gridFeeValue === "number" && Number.isFinite(gridFeeValue)) {
+        gridFeeByStartIso.set(startIso, gridFeeValue);
+      }
+    });
 
     for (const slot of canonicalSlots) {
       if (!slot.startIso) {
@@ -86,7 +95,8 @@ export class ForecastAssemblyService {
         eraMap.set(slot.startIso, entry);
       }
 
-      const baseCost = this.applySlotPrice(entry, slot.payload, gridFeeEurPerKwh);
+      const slotGridFeeEurPerKwh = gridFeeByStartIso.get(slot.startIso) ?? gridFeeEurPerKwh;
+      const baseCost = this.applySlotPrice(entry, slot.payload, slotGridFeeEurPerKwh);
       if (baseCost) {
         const canonicalSource: CostSource = {
           provider: "canonical",
@@ -101,7 +111,7 @@ export class ForecastAssemblyService {
         if (!referencePayload) {
           continue;
         }
-        const referenceCost = this.buildSourcePayload(referencePayload, gridFeeEurPerKwh);
+        const referenceCost = this.buildSourcePayload(referencePayload, slotGridFeeEurPerKwh);
         if (!referenceCost) {
           continue;
         }
@@ -160,11 +170,20 @@ export class ForecastAssemblyService {
     return {forecastEntries, eras};
   }
 
-  derivePriceSnapshot(forecast: RawForecastEntry[], config: SimulationConfig): number | null {
-    return derivePriceSnapshot(
-      normalizePriceSlots(forecast),
-      EnergyPrice.fromEurPerKwh(config.price.grid_fee_eur_per_kwh ?? 0),
-    )?.eurPerKwh ?? null;
+  derivePriceSnapshot(
+    forecast: RawForecastEntry[],
+    config: SimulationConfig,
+    gridFeeEurPerKwhBySlot?: (number | undefined)[],
+    referenceTimeMs = Date.now(),
+  ): number | null {
+    const slots = normalizePriceSlots(forecast);
+    const activeIndex = slots.findIndex((slot) => slot.end.getTime() > referenceTimeMs);
+    if (activeIndex < 0) {
+      return null;
+    }
+    const slot = slots[activeIndex];
+    const gridFee = gridFeeEurPerKwhBySlot?.[activeIndex] ?? config.price.grid_fee_eur_per_kwh ?? 0;
+    return slot.energyPrice.withAdditionalFee(gridFee).eurPerKwh;
   }
 
   private addSource(entry: EraEntry, source: CostSource | SolarSource): void {

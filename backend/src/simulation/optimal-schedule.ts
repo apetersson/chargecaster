@@ -20,6 +20,7 @@ const HOLD_ENERGY_THRESHOLD_KWH = 0.02;
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
   houseLoadWattsPerSlot?: (number | undefined)[];
+  gridFeeEurPerKwhBySlot?: (number | undefined)[];
   feedInTariffEurPerKwh?: number;
   feedInTariffEurPerKwhBySlot?: (number | undefined)[];
   allowBatteryExport?: boolean;
@@ -79,6 +80,7 @@ interface SlotProfile {
   baselineGridEnergy: Energy;
   baselineGridImport: Energy;
   feedInTariff: EnergyPrice;
+  networkTariff: EnergyPrice;
   gridChargeLimit: Energy;
   solarChargeLimit: Energy;
   totalChargeLimit: Energy;
@@ -172,6 +174,9 @@ function prepareSimulationContext(
     feedInTariffBySlot: slots.map((_, index) => EnergyPrice.fromEurPerKwh(
       Number(options.feedInTariffEurPerKwhBySlot?.[index] ?? options.feedInTariffEurPerKwh ?? price.feed_in_tariff_eur_per_kwh ?? 0),
     )),
+    gridFeeBySlot: slots.map((_, index) => EnergyPrice.fromEurPerKwh(
+      Number(options.gridFeeEurPerKwhBySlot?.[index] ?? gridFee(cfg)),
+    )),
     allowBatteryExport:
       typeof options.allowBatteryExport === "boolean"
         ? options.allowBatteryExport
@@ -191,7 +196,6 @@ function prepareSimulationContext(
   const maxDischargePower = battery.max_discharge_power_w != null
     ? Power.fromWatts(Math.max(0, Number(battery.max_discharge_power_w)))
     : null;
-  const networkTariff = EnergyPrice.fromEurPerKwh(gridFee(cfg));
   const fallbackHouseLoad = Power.fromWatts(2200);
 
   let currentSoCPercent = Number(liveState.battery_soc ?? 50);
@@ -234,8 +238,8 @@ function prepareSimulationContext(
   }
 
   const avgPrice = EnergyPrice.weightedAverageByDuration(
-    slots.map((slot) => ({
-      price: slot.energyPrice.add(networkTariff),
+    slots.map((slot, index) => ({
+      price: slot.energyPrice.add(normalizedOptions.gridFeeBySlot[index] ?? EnergyPrice.fromEurPerKwh(gridFee(cfg))),
       duration: slot.duration,
     })),
   );
@@ -253,8 +257,8 @@ function prepareSimulationContext(
     solarGenerationPerSlotKwh: normalizedOptions.solarGenerationPerSlotKwh,
     houseLoadWattsPerSlot: normalizedOptions.houseLoadWattsPerSlot,
     feedInTariffBySlot: normalizedOptions.feedInTariffBySlot,
+    networkTariffBySlot: normalizedOptions.gridFeeBySlot,
     fallbackHouseLoad,
-    networkTariff,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
     maxChargePower,
     maxSolarChargePower,
@@ -277,7 +281,7 @@ function prepareSimulationContext(
     currentSoC,
     minAllowedSoc,
     maxChargeSoC,
-    networkTariff,
+    networkTariff: EnergyPrice.fromEurPerKwh(gridFee(cfg)),
     fallbackHouseLoad,
     capacity,
     maxChargePower,
@@ -298,8 +302,8 @@ function buildSlotProfiles(params: {
   solarGenerationPerSlotKwh: number[];
   houseLoadWattsPerSlot: (number | undefined)[];
   feedInTariffBySlot: EnergyPrice[];
+  networkTariffBySlot: EnergyPrice[];
   fallbackHouseLoad: Power;
-  networkTariff: EnergyPrice;
   allowGridChargeFromGrid: boolean;
   maxChargePower: Power;
   maxSolarChargePower: Power | null;
@@ -313,7 +317,8 @@ function buildSlotProfiles(params: {
     const directUseEnergy = minEnergy(loadEnergy, solarGeneration);
     const loadAfterDirectUse = loadEnergy.subtract(directUseEnergy);
     const availableSolar = solarGeneration.subtract(directUseEnergy);
-    const priceTotal = slot.energyPrice.add(params.networkTariff);
+    const networkTariff = params.networkTariffBySlot[index] ?? EnergyPrice.fromEurPerKwh(0);
+    const priceTotal = slot.energyPrice.add(networkTariff);
     const baselineGridEnergy = loadAfterDirectUse.subtract(availableSolar);
     const baselineGridImport = maxEnergy(baselineGridEnergy, Energy.zero());
     const gridChargeLimit = params.allowGridChargeFromGrid && params.maxChargePower.watts > 0
@@ -341,6 +346,7 @@ function buildSlotProfiles(params: {
       baselineGridEnergy,
       baselineGridImport,
       feedInTariff: params.feedInTariffBySlot[index] ?? EnergyPrice.fromEurPerKwh(0),
+      networkTariff,
       gridChargeLimit,
       solarChargeLimit,
       totalChargeLimit: gridChargeLimit.add(solarChargeLimit),

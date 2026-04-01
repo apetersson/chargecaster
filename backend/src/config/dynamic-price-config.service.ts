@@ -10,6 +10,7 @@ import type {
   FeedInTariffScheduleProvider,
   FeedInPriceProvider,
   GridFeePriceProvider,
+  GridFeeTariffScheduleProvider,
 } from "./price-providers/price-provider.types";
 import type {
   ConfigDocument,
@@ -25,6 +26,7 @@ import {
 export class DynamicPriceConfigService {
   private readonly logger = new Logger(DynamicPriceConfigService.name);
   private readonly gridFeeProvidersByType: Map<string, GridFeePriceProvider>;
+  private readonly gridFeeScheduleProvidersByType: Map<string, GridFeeTariffScheduleProvider>;
   private readonly feedInProvidersByType: Map<string, FeedInPriceProvider>;
   private readonly feedInScheduleProvidersByType: Map<string, FeedInTariffScheduleProvider>;
 
@@ -38,6 +40,10 @@ export class DynamicPriceConfigService {
       eControlGridFeeProvider,
     ] satisfies GridFeePriceProvider[];
     this.gridFeeProvidersByType = new Map(gridFeeProviders.map((provider) => [provider.type, provider]));
+    const gridFeeScheduleProviders = [
+      eControlGridFeeProvider,
+    ] satisfies GridFeeTariffScheduleProvider[];
+    this.gridFeeScheduleProvidersByType = new Map(gridFeeScheduleProviders.map((provider) => [provider.type, provider]));
 
     const feedInProviders = [
       awattarSunnyFeedInPriceProvider,
@@ -106,7 +112,17 @@ export class DynamicPriceConfigService {
       } else if (typeof this.storage.getLatestDynamicPriceRecordAt === "function") {
         const match = this.storage.getLatestDynamicPriceRecordAt("grid_fee_eur_per_kwh", gridFeeSelection.type, effectiveAt);
         if (match) {
-          overrides.grid_fee_eur_per_kwh = match.valueEurPerKwh;
+          const provider = this.gridFeeScheduleProvidersByType.get(gridFeeSelection.type);
+          overrides.grid_fee_eur_per_kwh = provider?.resolvePriceAt({
+            config,
+            simulationConfig: {
+              battery: {capacity_kwh: 0, max_charge_power_w: 0, auto_mode_floor_soc: 0},
+              price: {grid_fee_eur_per_kwh: match.valueEurPerKwh, feed_in_tariff_eur_per_kwh: null},
+              logic: {interval_seconds: 300, min_hold_minutes: null, allow_battery_export: true},
+            },
+            referenceDate: new Date(effectiveAt),
+            storage: this.storage,
+          }, effectiveAt) ?? match.valueEurPerKwh;
         }
       }
     }
@@ -169,6 +185,55 @@ export class DynamicPriceConfigService {
       config,
       simulationConfig,
       referenceDate,
+      history,
+    });
+  }
+
+  buildGridFeeScheduleFromForecast(
+    config: ConfigDocument,
+    simulationConfig: SimulationConfig,
+    forecast: RawForecastEntry[],
+    referenceDate: Date = new Date(),
+  ): (number | undefined)[] | null {
+    const selection = this.resolveGridFeeSelection(config);
+    if (!selection || selection.type === "static") {
+      return null;
+    }
+    const provider = this.gridFeeScheduleProvidersByType.get(selection.type);
+    if (!provider) {
+      return null;
+    }
+    return provider.buildTariffSchedule({
+      config,
+      simulationConfig,
+      referenceDate,
+      storage: this.storage,
+      forecast,
+    });
+  }
+
+  buildGridFeeScheduleFromHistory(
+    config: ConfigDocument | undefined,
+    simulationConfig: SimulationConfig,
+    history: HistoryPoint[],
+    referenceDate: Date = new Date(),
+  ): (number | undefined)[] | null {
+    if (!config) {
+      return null;
+    }
+    const selection = this.resolveGridFeeSelection(config);
+    if (!selection || selection.type === "static") {
+      return null;
+    }
+    const provider = this.gridFeeScheduleProvidersByType.get(selection.type);
+    if (!provider) {
+      return null;
+    }
+    return provider.buildTariffSchedule({
+      config,
+      simulationConfig,
+      referenceDate,
+      storage: this.storage,
       history,
     });
   }

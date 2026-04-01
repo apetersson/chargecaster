@@ -62,6 +62,7 @@ export class SimulationSeedService implements OnModuleDestroy {
         config: prepared.simulationConfig,
         liveState: prepared.liveState,
         forecast: prepared.forecast,
+        gridFeeEurPerKwhBySlot: prepared.gridFeeEurPerKwhBySlot,
         feedInTariffEurPerKwhBySlot: feedInTariffEurPerKwhBySlot ?? undefined,
         solarForecast: prepared.solarForecast,
         forecastEras: prepared.forecastEras,

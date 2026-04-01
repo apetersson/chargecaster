@@ -35,6 +35,7 @@ export interface SimulationInput {
   config: SimulationConfig;
   liveState: { battery_soc?: number | null };
   forecast: RawForecastEntry[];
+  gridFeeEurPerKwhBySlot?: (number | undefined)[];
   feedInTariffEurPerKwhBySlot?: (number | undefined)[];
   warnings?: string[];
   errors?: string[];
@@ -198,6 +199,7 @@ export class SimulationService {
     const result = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
+      gridFeeEurPerKwhBySlot: input.gridFeeEurPerKwhBySlot,
       feedInTariffEurPerKwh: feedInTariff.eurPerKwh,
       feedInTariffEurPerKwhBySlot: input.feedInTariffEurPerKwhBySlot,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
@@ -248,6 +250,7 @@ export class SimulationService {
     const autoResult = simulateOptimalSchedule(input.config, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
+      gridFeeEurPerKwhBySlot: input.gridFeeEurPerKwhBySlot,
       feedInTariffEurPerKwh: feedInTariff.eurPerKwh,
       feedInTariffEurPerKwhBySlot: input.feedInTariffEurPerKwhBySlot,
       allowBatteryExport: input.config.logic.allow_battery_export ?? true,
@@ -270,7 +273,7 @@ export class SimulationService {
       current_mode: currentMode,
       price_snapshot_ct_per_kwh: priceSnapshotCt,
       price_snapshot_eur_per_kwh: priceSnapshotEur,
-      grid_fee_eur_per_kwh: input.config.price.grid_fee_eur_per_kwh ?? null,
+      grid_fee_eur_per_kwh: input.gridFeeEurPerKwhBySlot?.[0] ?? input.config.price.grid_fee_eur_per_kwh ?? null,
       projected_cost_eur: result.projected_cost_eur,
       baseline_cost_eur: result.baseline_cost_eur,
       basic_battery_cost_eur: autoResult.projected_cost_eur,

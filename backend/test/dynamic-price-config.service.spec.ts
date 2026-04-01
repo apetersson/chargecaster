@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { RawForecastEntry, SimulationConfig } from "@chargecaster/domain";
 import type { ConfigDocument } from "../src/config/schemas";
 import { DynamicPriceConfigService } from "../src/config/dynamic-price-config.service";
 import { AwattarSunnyFeedInPriceProvider } from "../src/config/price-providers/awattar-sunny-feed-in-price.provider";
@@ -37,6 +38,7 @@ const mockEControlOfficialFetches = (values: {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (url.includes("Gesetzesnummer=20010107")) {
       return createTextResponse(`
+        <div>„Sommer-Nieder-Arbeitspreis (SNAP)“ die Preisansätze für das Netznutzungsentgelt für die elektrische Arbeitseinheit (kWh) im Zeitraum von 1.&nbsp;April bis 30.&nbsp;September, jeweils 10 bis 16&nbsp;Uhr, gemäß § 5 Abs. 1b;</div>
         <div>Netznutzungsentgelt für die Netzebene 7:</div>
         ${values.netznutzungHtml}
         <div>Netzbereitstellungsentgelt</div>
@@ -192,6 +194,15 @@ describe("DynamicPriceConfigService", () => {
           netzebene: 7,
           customer_profile: "residential_non_demand_metered",
           vat_multiplier: 1.2,
+          snap: expect.objectContaining({
+            enabled: true,
+            start_day: 1,
+            start_month: 4,
+            end_day: 30,
+            end_month: 9,
+            start_hour: 10,
+            end_hour: 16,
+          }),
           components: expect.objectContaining({
             total_net_cent_per_kwh: expect.closeTo(8.4, 6),
             total_gross_cent_per_kwh: expect.closeTo(10.08, 6),
@@ -251,6 +262,125 @@ describe("DynamicPriceConfigService", () => {
     ]);
   });
 
+  it("applies SNAP by default during summer midday hours", async () => {
+    const service = createService();
+    const config: ConfigDocument = {
+      dry_run: true,
+      price: {
+        grid_fee: {
+          type: "e-control",
+          netzbereich: "Wien",
+        },
+      },
+      location: {
+        timezone: "Europe/Vienna",
+      },
+    };
+    const simulationConfig: SimulationConfig = {
+      battery: {
+        capacity_kwh: 10,
+        max_charge_power_w: 3000,
+        auto_mode_floor_soc: 5,
+        max_charge_power_solar_w: null,
+        max_discharge_power_w: null,
+        max_charge_soc_percent: null,
+      },
+      price: {
+        grid_fee_eur_per_kwh: 0,
+        feed_in_tariff_eur_per_kwh: null,
+      },
+      logic: {
+        interval_seconds: 300,
+        min_hold_minutes: null,
+        allow_battery_export: true,
+      },
+    };
+    const forecast: RawForecastEntry[] = [
+      {
+        start: "2026-04-08T08:00:00.000Z",
+        end: "2026-04-08T09:00:00.000Z",
+        price: 0.02,
+        unit: "EUR/kWh",
+      },
+      {
+        start: "2026-04-08T15:00:00.000Z",
+        end: "2026-04-08T16:00:00.000Z",
+        price: 0.02,
+        unit: "EUR/kWh",
+      },
+    ];
+
+    mockEControlOfficialFetches({
+      netznutzungHtml: `
+        <p>Bereich Wien:</p></td>
+        <tr><td><p class="TabTextBlock AlignJustify">bb) nicht gemessene Leist.</p></td>
+        <td><p class="TabTextRechtsb AlignRight">5 400 /Jahr</p></td>
+        <td><p class="TabTextRechtsb AlignRight">6,98</p></td>
+        <td><p class="TabTextRechtsb AlignRight">5,58</p></td></tr>
+      `,
+      netzverlustHtml: `
+        <p>Wien:</p></td>
+        <td><p class="TabTextRechtsb AlignRight">0,700</p></td></tr>
+      `,
+      renewablesWorkCentPerKwh: "0,583",
+      renewablesLossCentPerKwh: "0,037",
+      electricityTaxEuroPerKwh: "0,001",
+    });
+
+    const applied = await service.refreshAndApply(config, new Date("2026-04-08T10:00:00.000Z"));
+
+    expect(applied.price?.grid_fee_eur_per_kwh).toBeCloseTo(0.084, 6);
+    expect(service.buildGridFeeScheduleFromForecast(config, simulationConfig, forecast)).toEqual([
+      expect.closeTo(0.084, 6),
+      expect.closeTo(0.1008, 6),
+    ]);
+  });
+
+  it("allows disabling SNAP explicitly in lowercase config", async () => {
+    const service = createService();
+    const config: ConfigDocument = {
+      dry_run: true,
+      price: {
+        grid_fee: {
+          type: "e-control",
+          netzbereich: "Wien",
+          snap: false,
+        },
+      },
+      location: {
+        timezone: "Europe/Vienna",
+      },
+    };
+
+    mockEControlOfficialFetches({
+      netznutzungHtml: `
+        <p>Bereich Wien:</p></td>
+        <tr><td><p class="TabTextBlock AlignJustify">bb) nicht gemessene Leist.</p></td>
+        <td><p class="TabTextRechtsb AlignRight">5 400 /Jahr</p></td>
+        <td><p class="TabTextRechtsb AlignRight">6,98</p></td>
+        <td><p class="TabTextRechtsb AlignRight">5,58</p></td></tr>
+      `,
+      netzverlustHtml: `
+        <p>Wien:</p></td>
+        <td><p class="TabTextRechtsb AlignRight">0,700</p></td></tr>
+      `,
+      renewablesWorkCentPerKwh: "0,583",
+      renewablesLossCentPerKwh: "0,037",
+      electricityTaxEuroPerKwh: "0,001",
+    });
+
+    const applied = await service.refreshAndApply(config, new Date("2026-04-08T10:00:00.000Z"));
+
+    expect(applied.price?.grid_fee_eur_per_kwh).toBeCloseTo(0.1008, 6);
+    expect(storage?.listDynamicPriceRecords()[0]?.metadata).toEqual(
+      expect.objectContaining({
+        snap: expect.objectContaining({
+          enabled: false,
+        }),
+      }),
+    );
+  });
+
   it("reuses the stored E-Control observation within the same local month", async () => {
     const service = createService();
     const fetchSpy = vi.spyOn(global, "fetch");
@@ -260,7 +390,26 @@ describe("DynamicPriceConfigService", () => {
       effectiveAt: "2025-12-31T23:00:00.000Z",
       observedAt: "2026-01-08T08:00:00.000Z",
       valueEurPerKwh: 0.1008,
-      metadata: {revision: 1},
+      metadata: {
+        revision: 1,
+        snap: {
+          enabled: true,
+          start_day: 1,
+          start_month: 4,
+          end_day: 30,
+          end_month: 9,
+          start_hour: 10,
+          end_hour: 16,
+        },
+        components: {
+          netznutzungsentgelt_ap_cent_per_kwh: 6.98,
+          netznutzungsentgelt_snap_ap_cent_per_kwh: 5.58,
+          netzverlustentgelt_cent_per_kwh: 0.7,
+          erneuerbaren_foerderbeitrag_arbeit_cent_per_kwh: 0.583,
+          erneuerbaren_foerderbeitrag_verlust_cent_per_kwh: 0.037,
+          elektrizitaetsabgabe_cent_per_kwh: 0.1,
+        },
+      },
     });
 
     const applied = await service.refreshAndApply({
@@ -279,6 +428,74 @@ describe("DynamicPriceConfigService", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(applied.price?.grid_fee_eur_per_kwh).toBeCloseTo(0.1008, 6);
     expect(storage?.listDynamicPriceRecords().filter((row) => row.priceKey === "grid_fee_eur_per_kwh")).toHaveLength(1);
+  });
+
+  it("refreshes a current-month E-Control record when SNAP metadata is incomplete", async () => {
+    const service = createService();
+    storage?.upsertDynamicPriceRecord({
+      priceKey: "grid_fee_eur_per_kwh",
+      source: "e-control",
+      effectiveAt: "2025-12-31T23:00:00.000Z",
+      observedAt: "2026-04-02T08:00:00.000Z",
+      valueEurPerKwh: 0.1008,
+      metadata: {
+        components: {
+          netznutzungsentgelt_ap_cent_per_kwh: 6.98,
+          netznutzungsentgelt_snap_ap_cent_per_kwh: 5.58,
+          netzverlustentgelt_cent_per_kwh: 0.7,
+          erneuerbaren_foerderbeitrag_arbeit_cent_per_kwh: 0.583,
+          erneuerbaren_foerderbeitrag_verlust_cent_per_kwh: 0.037,
+          elektrizitaetsabgabe_cent_per_kwh: 0.1,
+        },
+        snap: {
+          enabled: true,
+          start_month: 4,
+          end_month: 9,
+          start_hour: 10,
+          end_hour: 16,
+        },
+      },
+    });
+
+    mockEControlOfficialFetches({
+      netznutzungHtml: `
+        <p>Bereich Wien:</p></td>
+        <tr><td><p class="TabTextBlock AlignJustify">bb) nicht gemessene Leist.</p></td>
+        <td><p class="TabTextRechtsb AlignRight">5 400 /Jahr</p></td>
+        <td><p class="TabTextRechtsb AlignRight">6,98</p></td>
+        <td><p class="TabTextRechtsb AlignRight">5,58</p></td></tr>
+      `,
+      netzverlustHtml: `
+        <p>Wien:</p></td>
+        <td><p class="TabTextRechtsb AlignRight">0,700</p></td></tr>
+      `,
+      renewablesWorkCentPerKwh: "0,583",
+      renewablesLossCentPerKwh: "0,037",
+      electricityTaxEuroPerKwh: "0,001",
+    });
+
+    const applied = await service.refreshAndApply({
+      dry_run: true,
+      price: {
+        grid_fee: {
+          type: "e-control",
+          netzbereich: "Wien",
+        },
+      },
+      location: {
+        timezone: "Europe/Vienna",
+      },
+    }, new Date("2026-04-08T10:00:00.000Z"));
+
+    expect(global.fetch).toHaveBeenCalled();
+    expect(applied.price?.grid_fee_eur_per_kwh).toBeCloseTo(0.084, 6);
+    const latest = storage?.listDynamicPriceRecords().filter((row) => row.priceKey === "grid_fee_eur_per_kwh").at(-1);
+    expect(latest?.metadata).toEqual(expect.objectContaining({
+      snap: expect.objectContaining({
+        start_day: 1,
+        end_day: 30,
+      }),
+    }));
   });
 
   it("refreshes the E-Control grid fee again after the month rolls over", async () => {

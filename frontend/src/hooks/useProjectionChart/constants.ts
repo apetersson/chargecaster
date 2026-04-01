@@ -18,6 +18,7 @@ export const PRICE_BORDER_CHARGE = "#3fdac6"; // green-ish blue
 export const PRICE_FILL_CHARGE = "rgba(63, 218, 198, 0.18)";
 export const PRICE_BORDER_HOLD = "#94a3b8"; // slate-400
 export const PRICE_FILL_HOLD = "rgba(148, 163, 184, 0.18)";
+export const GRID_FEE_MARKER = "rgba(251, 146, 60, 0.95)";
 export const FEED_IN_PRICE_BORDER = "#facc15";
 export const FEED_IN_PRICE_FILL = "rgba(250, 204, 21, 0.22)";
 export const FEED_IN_PRICE_HISTORY_BAR_BG = "rgba(234, 179, 8, 0.28)";
