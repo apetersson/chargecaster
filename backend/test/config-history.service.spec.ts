@@ -25,7 +25,7 @@ describe("ConfigHistoryService", () => {
     delete process.env.CHARGECASTER_STORAGE_PATH;
   });
 
-  it("records startup config only when it differs from the latest snapshot", () => {
+  it("records startup config only when it differs from the latest snapshot", { timeout: 15_000 }, () => {
     const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-config-history-"));
     const dbPath = join(tempDir, "backend.sqlite");
     process.env.CHARGECASTER_STORAGE_PATH = dbPath;

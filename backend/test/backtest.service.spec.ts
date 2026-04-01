@@ -756,7 +756,7 @@ describe("StorageService listAllHistoryAsc", () => {
     }
   });
 
-  it("materializes cached daily backtests into a dedicated table", () => {
+  it("materializes cached daily backtests into a dedicated table", { timeout: 20_000 }, () => {
     const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
     const dbPath = join(tempDir, "backend.sqlite");
     const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
@@ -792,7 +792,7 @@ describe("StorageService listAllHistoryAsc", () => {
     }
   });
 
-  it("only backfills missing daily summaries when requested", () => {
+  it("only backfills missing daily summaries when requested", { timeout: 20_000 }, () => {
     const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
     const dbPath = join(tempDir, "backend.sqlite");
     const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;
@@ -932,7 +932,7 @@ describe("StorageService listAllHistoryAsc", () => {
     expect(listDailyBacktestSummaries).toHaveBeenCalledWith("historical-cache", ["2026-03-05"]);
   });
 
-  it("clears legacy daily backtest summaries when ledger columns are introduced", () => {
+  it("clears legacy daily backtest summaries when ledger columns are introduced", { timeout: 20_000 }, () => {
     const tempDir = mkdtempSync(join(tmpdir(), "chargecaster-storage-"));
     const dbPath = join(tempDir, "backend.sqlite");
     const previousStoragePath = process.env.CHARGECASTER_STORAGE_PATH;

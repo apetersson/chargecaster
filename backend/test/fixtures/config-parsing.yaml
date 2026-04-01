@@ -1,0 +1,14 @@
+dry_run: true
+
+fronius:
+  host: inverter.local
+  username: technician
+  password: secret
+
+battery:
+  capacity_kwh: 10
+  max_charge_power_w: 4000
+  auto_mode_floor_soc: 5
+
+location:
+  timezone: Europe/Vienna

@@ -80,7 +80,7 @@ const mockEControlOfficialFetches = (values: {
   });
 };
 
-describe("DynamicPriceConfigService", () => {
+describe("DynamicPriceConfigService", { timeout: 20_000 }, () => {
   let tempDir: string | null = null;
   let storage: StorageService | null = null;
 

@@ -19,6 +19,7 @@
     "dev": "concurrently -n backend,frontend -c blue,green \"pnpm --filter chargecaster-backend backend:dev:api\" \"VITE_TRPC_URL=http://localhost:4000/trpc pnpm --filter chargecaster-frontend dev\""
   },
   "devDependencies": {
+    "@typescript-eslint/utils": "^8.11.0",
     "concurrently": "^9.2.1",
     "eslint-plugin-sonarjs": "^4.0.2",
     "jiti": "^2.6.1"

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseConfigDocument } from "../src/config/schemas";
 
-const fixturePath = join(process.cwd(), "..", "config.local.yaml");
+const fixturePath = join(process.cwd(), "test/fixtures/config-parsing.yaml");
 
 describe("config document parsing", () => {
   it("parses local config file", () => {
