@@ -32,9 +32,15 @@ const MIN_TARGET_DELTA_PERCENT = 1;
 export function deriveOperationalMode(snapshot: OptimisationSnapshotLike): Mode {
   const rawMode = deriveRawMode(snapshot);
   if (rawMode === "charge") {
+    // The DP can label an era as "charge" even when the practical intent is
+    // still gentle PV-led charging. Only surface a hard charge mode when the
+    // immediate plan really calls for meaningful grid energy right now.
     return hasMeaningfulImmediateGridCharge(snapshot) ? "charge" : "auto";
   }
   if (rawMode === "hold") {
+    // Short "hold" bridges before a rising SoC path should not kick the
+    // inverter out of auto during sunny hours; treat those transient holds as
+    // auto so PV charging can continue naturally.
     return shouldRelaxHoldToAuto(snapshot) ? "auto" : "hold";
   }
   return rawMode;
@@ -71,6 +77,9 @@ function hasMeaningfulImmediateGridCharge(snapshot: OptimisationSnapshotLike): b
       .map((era) => [era.era_id, normalisePositiveNumber(era.duration_hours) ?? 1]),
   );
 
+  // Fronius "charge" is an actuator-level command, so require enough planned
+  // grid energy to justify leaving auto mode instead of reacting to tiny DP
+  // top-up amounts.
   let totalGridChargeWh = 0;
   for (const entry of getEntries(snapshot)) {
     if (entry.strategy !== "charge") {

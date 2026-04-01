@@ -41,6 +41,14 @@ verify:typecheck:
   script:
     - pnpm run typecheck:all
 
+verify:audit:
+  stage: verify
+  extends: .node
+  script:
+    # Keep the release gates honest on transitive security drift, not just
+    # compile/test drift.
+    - pnpm audit
+
 verify:build:
   stage: verify
   extends: .node

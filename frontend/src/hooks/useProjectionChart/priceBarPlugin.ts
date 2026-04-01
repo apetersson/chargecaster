@@ -114,6 +114,9 @@ const priceBarPlugin: Plugin = {
           leftPx: number,
           widthPx: number,
         ): void => {
+          // Keep grid fee inside the existing tariff bar instead of adding a
+          // second series: the short horizontal marker shows the fee component
+          // without visually overpowering the full price.
           const markerTop = yScale.getPixelForValue(markerValue);
           const inset = Math.max(2, Math.min(6, widthPx * 0.18));
           const lineLeft = leftPx + inset;

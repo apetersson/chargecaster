@@ -181,6 +181,8 @@ export class EControlGridFeePriceProvider implements GridFeeTariffScheduleProvid
     if (config.price?.grid_fee?.type !== "e-control") {
       return true;
     }
+    // Keep SNAP on by default for the legal tariff model and let operators opt
+    // out explicitly with lowercase `snap: false` in config.
     return config.price.grid_fee.snap ?? true;
   }
 
@@ -327,6 +329,8 @@ export class EControlGridFeePriceProvider implements GridFeeTariffScheduleProvid
   }
 
   private extractSnapWindow(body: string): SnapWindow {
+    // Read the SNAP season and hour window from the regulator text itself so
+    // DST-sensitive tariff logic does not depend on duplicated local constants.
     const normalizedBody = body
       .replace(/&nbsp;/gi, " ")
       .replace(/\s+/g, " ");
