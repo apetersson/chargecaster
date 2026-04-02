@@ -64,6 +64,7 @@ describe("TrpcRouter planning variant", () => {
       projected_savings_eur: 1,
       projected_grid_power_w: 300,
       expected_feed_in_kwh: 2,
+      expected_feed_in_profit_eur: 0.5,
       solar_forecast_discrepancy_w: 0,
       solar_forecast_discrepancy_start: undefined,
       solar_forecast_discrepancy_end: undefined,

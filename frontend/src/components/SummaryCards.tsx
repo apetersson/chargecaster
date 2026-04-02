@@ -60,6 +60,7 @@ function SummaryCards({
   })();
   const projectedSavingsTone = (data.projected_savings_eur ?? 0) >= 0 ? "positive" : "negative";
   const activeControlSavingsTone = (data.active_control_savings_eur ?? 0) >= 0 ? "positive" : "negative";
+  const expectedFeedInProfitTone = (data.expected_feed_in_profit_eur ?? 0) >= 0 ? "positive" : "negative";
 
   return (
     <section className="card">
@@ -104,6 +105,11 @@ function SummaryCards({
             emphasis="headline"
           />
           <MetricTile label="Expected Feed-in" value={formatNumber(data.expected_feed_in_kwh, " kWh")} />
+          <MetricTile
+            label="Expected Feed-in Profit"
+            value={formatNumber(data.expected_feed_in_profit_eur, " €")}
+            tone={expectedFeedInProfitTone}
+          />
           <MetricTile label="Baseline Cost" value={formatNumber(data.baseline_cost_eur, " €")} />
           <MetricTile label="Basic Battery Cost" value={formatNumber(data.basic_battery_cost_eur, " €")} />
         </MetricGroupCard>

@@ -203,16 +203,22 @@ describe("dashboard tRPC", () => {
     expect(snapshot.history.length).toBeGreaterThan(0);
 
     const summary = await client.dashboard.summary.query();
+    const previewSummary = await client.dashboard.summary.query({ previewHours: 12 });
     expect(summary.timestamp).toEqual(snapshot.timestamp);
     expect(summary.recommended_final_soc_percent).toEqual(snapshot.recommended_final_soc_percent);
     expect(summary.charge_efficiency_percent).toEqual(snapshot.charge_efficiency_percent);
     expect(summary.discharge_efficiency_percent).toEqual(snapshot.discharge_efficiency_percent);
     expect(summary.expected_feed_in_kwh).toEqual(snapshot.expected_feed_in_kwh);
+    expect(summary.expected_feed_in_profit_eur).toEqual(snapshot.expected_feed_in_profit_eur);
     expect(summary.grid_fee_eur_per_kwh).toEqual(config.price.grid_fee_eur_per_kwh);
     expect("solar_forecast_discrepancy_w" in summary).toBe(true);
     expect(summary.show_feed_in_price_bars).toBe(true);
     expect(summary.charge_efficiency_percent).toBeGreaterThan(0);
     expect(summary.discharge_efficiency_percent).toBeGreaterThan(0);
+    expect(previewSummary.forecast_hours).toBeLessThanOrEqual(12.1);
+    expect(previewSummary.forecast_samples).toBeLessThanOrEqual(summary.forecast_samples ?? Number.POSITIVE_INFINITY);
+    expect(previewSummary.current_soc_percent).toEqual(summary.current_soc_percent);
+    expect(previewSummary.expected_feed_in_kwh).not.toBeNull();
     if (summary.solar_forecast_discrepancy_w == null) {
       expect(summary.solar_forecast_discrepancy_start).toBeUndefined();
       expect(summary.solar_forecast_discrepancy_end).toBeUndefined();

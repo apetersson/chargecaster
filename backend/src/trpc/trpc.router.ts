@@ -75,6 +75,9 @@ const historyInputSchema = z.object({
 });
 
 const planningVariantSchema = z.enum(PLANNING_VARIANTS);
+const summaryInputSchema = z.object({
+  previewHours: z.number().int().min(1).max(120).optional(),
+});
 
 @Injectable()
 export class TrpcRouter {
@@ -100,9 +103,11 @@ export class TrpcRouter {
         return {status: "ok", version: getBuildVersion()};
       }),
       dashboard: t.router({
-        summary: t.procedure.query(() => {
+        summary: t.procedure.input(summaryInputSchema.optional()).query(({input}) => {
           this.logger.log("tRPC.dashboard.summary requested");
-          return this.summaryService.toSummary(this.simulationService.ensureSeedFromFixture());
+          return this.summaryService.toSummary(this.simulationService.ensureSeedFromFixture(), {
+            previewHours: input?.previewHours ?? null,
+          });
         }),
         history: t.procedure.input(historyInputSchema.optional()).query(({input}) => {
           const limit = input?.limit ?? 96;

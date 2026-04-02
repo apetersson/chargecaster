@@ -283,6 +283,7 @@ export class SimulationService {
         : null,
       projected_grid_power_w: result.projected_grid_power_w,
       expected_feed_in_kwh: result.expected_feed_in_kwh,
+      expected_feed_in_profit_eur: result.expected_feed_in_profit_eur,
       solar_forecast_discrepancy_w: peakSolarDiscrepancy?.power.watts ?? null,
       solar_forecast_discrepancy_start: peakSolarDiscrepancy?.start,
       solar_forecast_discrepancy_end: peakSolarDiscrepancy?.end ?? undefined,

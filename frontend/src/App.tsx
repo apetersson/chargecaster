@@ -10,9 +10,10 @@ import { useBacktestHistory } from "./hooks/useBacktestHistory";
 import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChart";
 import { useIsMobile } from "./hooks/useIsMobile";
 
-const PREVIEW_HOURS_OPTIONS = [24, 48, 72, 96, 120] as const;
+const PREVIEW_HOURS_OPTIONS = [12, 24, 48, 72, 96, 120] as const;
 
 function App(): JSX.Element {
+  const [previewHours, setPreviewHours] = useState<number>(24);
   const {
     frontendBuildVersion,
     backendBuildVersion,
@@ -28,12 +29,11 @@ function App(): JSX.Element {
     loading,
     error,
     refresh,
-  } = useDashboardData();
+  } = useDashboardData(previewHours);
   const isMobile = useIsMobile();
   const backtestState = useBacktestHistory();
   const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
   const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
-  const [previewHours, setPreviewHours] = useState<number>(24);
 
   useEffect(() => {
     setShowPowerAxisLabels(!isMobile);
@@ -41,21 +41,23 @@ function App(): JSX.Element {
   }, [isMobile]);
 
   const {filteredForecast, filteredDemandForecast} = useMemo(() => {
-    const nowMs = Date.now();
-    const cutoffMs = nowMs + (previewHours * 3_600_000);
+    const anchorMs = summary?.timestamp ? new Date(summary.timestamp).getTime() : Date.now();
+    const cutoffMs = anchorMs + (previewHours * 3_600_000);
     const visibleForecast = forecast.filter((era) => {
       const startMs = era.start ? new Date(era.start).getTime() : Number.NaN;
-      return Number.isFinite(startMs) && startMs < cutoffMs;
+      const endMs = era.end ? new Date(era.end).getTime() : Number.NaN;
+      return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs < cutoffMs && endMs > anchorMs;
     });
     const visibleDemand = demandForecast.filter((entry) => {
       const startMs = new Date(entry.start).getTime();
-      return Number.isFinite(startMs) && startMs < cutoffMs;
+      const endMs = entry.end ? new Date(entry.end).getTime() : Number.NaN;
+      return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs < cutoffMs && endMs > anchorMs;
     });
     return {
       filteredForecast: visibleForecast,
       filteredDemandForecast: visibleDemand,
     };
-  }, [demandForecast, forecast, previewHours]);
+  }, [demandForecast, forecast, previewHours, summary?.timestamp]);
 
   const projectionChartRef = useProjectionChart(history, filteredForecast, filteredDemandForecast, oracleEntries, summary, {
     isMobile,

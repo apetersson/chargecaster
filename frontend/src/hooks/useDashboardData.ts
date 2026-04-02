@@ -53,7 +53,7 @@ type DashboardDataState = {
   refresh: () => void;
 };
 
-export function useDashboardData(): DashboardDataState {
+export function useDashboardData(previewHours: number): DashboardDataState {
   const [frontendBuildVersion, setFrontendBuildVersion] = useState<string | null>(null);
   const [backendBuildVersion, setBackendBuildVersion] = useState<string | null>(null);
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
@@ -83,7 +83,7 @@ export function useDashboardData(): DashboardDataState {
             })
             .catch(() => ({version: null})),
           trpcClient.health.query(),
-          trpcClient.dashboard.summary.query(),
+          trpcClient.dashboard.summary.query({previewHours}),
           trpcClient.dashboard.history.query(),
           trpcClient.dashboard.forecast.query(),
           trpcClient.dashboard.demandForecast.query(),
@@ -116,7 +116,7 @@ export function useDashboardData(): DashboardDataState {
     };
 
     void execute();
-  }, []);
+  }, [previewHours]);
 
   const setPlanningVariant = useCallback((variant: PlanningVariant) => {
     if (!planningVariantDryRunEnabled) {
