@@ -26,6 +26,7 @@
   },
   "pnpm": {
     "overrides": {
+      "@nestjs/config>lodash": "4.18.1",
       "@nestjs/core>path-to-regexp": "8.4.0",
       "@nestjs/platform-fastify>fastify": "5.8.3",
       "@nestjs/platform-fastify>path-to-regexp": "8.4.0"

@@ -21,13 +21,18 @@ pnpm --dir backend test
 
 The current list is intentionally short. We re-checked every previous override one-by-one after the direct dependency bumps and removed the ones that no longer affected `pnpm audit`.
 
+### `@nestjs/config>lodash = 4.18.1`
+- Reason: `@nestjs/config@4.0.3` is already the latest published direct dependency we can use, but it still resolves `lodash@4.17.23` transitively without help.
+- Advisories: `GHSA-r5fr-rjxr-66jc`, `GHSA-f23m-r3pf-42rh`
+- How to remove it: once a published `@nestjs/config` release resolves `lodash@>=4.18.0` on its own, remove the override and re-check the audit.
+
 ### `@nestjs/core>path-to-regexp = 8.4.0`
-- Reason: even after updating Nest to the latest patch we use, `@nestjs/core` still resolves `path-to-regexp@8.3.0`.
+- Reason: even after re-checking the override list against the latest published Nest patch, `@nestjs/core` still resolves `path-to-regexp@8.3.0` without help.
 - Advisories: `GHSA-j3q9-mxjg-w52f`, `GHSA-27v5-c462-wpq7`
 - How to remove it: update Nest once a release pulls in `path-to-regexp@>=8.4.0` without help, drop the override, and re-check the audit.
 
 ### `@nestjs/platform-fastify>path-to-regexp = 8.4.0`
-- Reason: `pnpm audit` still traces the same `path-to-regexp` advisory through the backend's `@nestjs/platform-fastify` path, so we pin that edge explicitly as well.
+- Reason: `pnpm audit` still traces the same `path-to-regexp` advisories through the backend's `@nestjs/platform-fastify` path, so we pin that edge explicitly as well.
 - Advisories: `GHSA-j3q9-mxjg-w52f`, `GHSA-27v5-c462-wpq7`
 - How to remove it: once Nest no longer needs the `@nestjs/core>path-to-regexp` pin, remove this companion pin too and confirm the audit stays green.
 
