@@ -375,7 +375,7 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(firstEntry.strategy).toBe("charge");
   });
 
-  it("creates midday headroom once sunny-spot value collapses and refills from later solar", () => {
+  it("discharges through the valuable morning export window and refills from later solar", () => {
     const fixture = loadSunnySpotLimitFixture();
     const config: SimulationConfig = {
       battery: {
@@ -420,16 +420,15 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(result.oracle_entries).toHaveLength(fixture.slots.length);
     expect(result.expected_feed_in_kwh).toBeGreaterThan(0);
     expect(result.projected_grid_power_w).toBeLessThan(0);
-    expect(result.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[0]?.start_soc_percent ?? 0);
-    expect(result.oracle_entries[1]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[0]?.end_soc_percent ?? 0);
-    expect(result.oracle_entries[2]?.end_soc_percent).toBeGreaterThanOrEqual(
-      result.oracle_entries[1]?.end_soc_percent ?? 0,
+    expect(result.oracle_entries[0]?.end_soc_percent).toBeLessThan(result.oracle_entries[0]?.start_soc_percent ?? 100);
+    expect(result.oracle_entries[1]?.end_soc_percent).toBeLessThanOrEqual(
+      result.oracle_entries[0]?.end_soc_percent ?? 100,
     );
-    expect(result.oracle_entries[3]?.end_soc_percent).toBeLessThan(result.oracle_entries[2]?.end_soc_percent ?? 100);
+    expect(result.oracle_entries[1]?.end_soc_percent).toBe(5);
+    expect(result.oracle_entries[2]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[1]?.end_soc_percent ?? 0);
+    expect(result.oracle_entries[3]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[2]?.end_soc_percent ?? 0);
     expect(result.oracle_entries[4]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[3]?.end_soc_percent ?? 0);
     expect(result.oracle_entries.slice(0, 5).every((entry) => (entry.grid_energy_wh ?? 0) <= 0)).toBe(true);
-    expect(result.oracle_entries[5]?.end_soc_percent).toBeGreaterThanOrEqual(
-      result.oracle_entries[4]?.end_soc_percent ?? 0,
-    );
+    expect(result.oracle_entries[5]?.end_soc_percent).toBe(100);
   });
 });

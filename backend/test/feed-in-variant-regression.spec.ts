@@ -2,108 +2,62 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { Percentage } from "@chargecaster/domain";
-import type {
-  DemandForecastEntry,
-  HistoryPoint,
-  OracleEntry,
-  RawForecastEntry,
-  RawSolarEntry,
-  SimulationConfig,
-  SnapshotPayload,
-} from "@chargecaster/domain";
-import { SimulationService } from "../src/simulation/simulation.service";
+import { EnergyPrice, TariffSlot } from "@chargecaster/domain";
+import type { OracleEntry, PriceSlot, SimulationConfig } from "@chargecaster/domain";
+import { simulateOptimalSchedule } from "../src/simulation/simulation.service";
 
-interface FeedInVariantRegressionFixture {
+interface LivePlanningVariantFixture {
   captured_at: string;
-  timezone: string;
-  common_inputs: {
-    live_state: {
-      battery_soc: number;
-    };
-    price_snapshot_eur_per_kwh: number | null;
-    forecast: RawForecastEntry[];
-    solar_forecast: RawSolarEntry[];
-    demand_forecast: DemandForecastEntry[];
+  description: string;
+  live_state: {
+    battery_soc: number;
   };
-  battery_efficiency: {
-    charge_efficiency_percent: number;
-    discharge_efficiency_percent: number;
-    charge_average_c_rate: number;
-    discharge_average_c_rate: number;
-  };
-  variants: {
-    sunny: {
-      config: SimulationConfig;
-      feed_in_tariff_eur_per_kwh_by_slot: (number | undefined)[];
-      observed_result: {
-        expected_feed_in_kwh: number;
-        oracle_entries: OracleEntry[];
-      };
-    };
-    sunny_spot: {
-      config: SimulationConfig;
-      feed_in_tariff_eur_per_kwh_by_slot: (number | undefined)[];
-      observed_result: {
-        expected_feed_in_kwh: number;
-        oracle_entries: OracleEntry[];
-      };
-    };
-  };
+  config: SimulationConfig;
+  slots: {
+    start: string;
+    end: string;
+    era_id: string;
+    price_eur_per_kwh: number;
+    solar_generation_kwh: number;
+    house_load_watts: number;
+    feed_in_tariff_eur_per_kwh_sunny: number;
+    feed_in_tariff_eur_per_kwh_sunny_spot: number;
+  }[];
 }
 
-function loadFixture(): FeedInVariantRegressionFixture {
-  const fixturePath = join(process.cwd(), "test", "fixtures", "feed-in-variant-regression.json");
-  return JSON.parse(readFileSync(fixturePath, "utf-8")) as FeedInVariantRegressionFixture;
+function loadFixture(): LivePlanningVariantFixture {
+  const fixturePath = join(process.cwd(), "test", "fixtures", "live-planning-variant-regression.json");
+  return JSON.parse(readFileSync(fixturePath, "utf-8")) as LivePlanningVariantFixture;
 }
 
-function createSimulationService(fixture: FeedInVariantRegressionFixture): SimulationService {
-  const history: HistoryPoint[] = [];
-  const storage = {
-    replaceSnapshot: (_payload: SnapshotPayload) => undefined,
-    appendHistory: (entries: HistoryPoint[]) => {
-      history.push(...entries);
-    },
-    listHistory: () => history.map((payload, index) => ({
-      id: index + 1,
-      timestamp: payload.timestamp,
-      payload,
-    })),
-  } as never;
-  const batteryEfficiency = {
-    estimateRecentEfficiencies: () => ({
-      chargeEfficiency: Percentage.fromPercent(fixture.battery_efficiency.charge_efficiency_percent),
-      dischargeEfficiency: Percentage.fromPercent(fixture.battery_efficiency.discharge_efficiency_percent),
-      chargeAverageCRate: fixture.battery_efficiency.charge_average_c_rate,
-      dischargeAverageCRate: fixture.battery_efficiency.discharge_average_c_rate,
-      chargeRuns: 0,
-      dischargeRuns: 0,
-      source: "fallback" as const,
-    }),
-  } as never;
-
-  return new SimulationService(storage, batteryEfficiency);
+function buildSlots(fixture: LivePlanningVariantFixture): PriceSlot[] {
+  return fixture.slots.map((slot) =>
+    TariffSlot.fromDates(
+      new Date(slot.start),
+      new Date(slot.end),
+      EnergyPrice.fromEurPerKwh(slot.price_eur_per_kwh),
+      slot.era_id,
+    )
+  );
 }
 
-function runVariant(
-  service: SimulationService,
-  fixture: FeedInVariantRegressionFixture,
-  key: keyof FeedInVariantRegressionFixture["variants"],
-) {
-  const variant = fixture.variants[key];
-  return service.runSimulation({
-    config: variant.config,
-    liveState: fixture.common_inputs.live_state,
-    forecast: fixture.common_inputs.forecast,
-    feedInTariffEurPerKwhBySlot: variant.feed_in_tariff_eur_per_kwh_by_slot,
-    priceSnapshotEurPerKwh: fixture.common_inputs.price_snapshot_eur_per_kwh,
-    solarForecast: fixture.common_inputs.solar_forecast,
-    demandForecast: fixture.common_inputs.demand_forecast,
+function runVariant(fixture: LivePlanningVariantFixture, key: "sunny" | "sunny_spot") {
+  return simulateOptimalSchedule(fixture.config, fixture.live_state, buildSlots(fixture), {
+    solarGenerationKwhPerSlot: fixture.slots.map((slot) => slot.solar_generation_kwh),
+    houseLoadWattsPerSlot: fixture.slots.map((slot) => slot.house_load_watts),
+    feedInTariffEurPerKwhBySlot: fixture.slots.map((slot) =>
+      key === "sunny" ? slot.feed_in_tariff_eur_per_kwh_sunny : slot.feed_in_tariff_eur_per_kwh_sunny_spot
+    ),
+    allowBatteryExport: fixture.config.logic.allow_battery_export ?? true,
   });
 }
 
+function mapOracleByEra(entries: OracleEntry[]): Map<string, OracleEntry> {
+  return new Map(entries.map((entry) => [entry.era_id, entry]));
+}
+
 function maxOracleSocDelta(left: OracleEntry[], right: OracleEntry[]): number {
-  const rightByEra = new Map(right.map((entry) => [entry.era_id, entry]));
+  const rightByEra = mapOracleByEra(right);
   let maxDelta = 0;
   for (const leftEntry of left) {
     const rightEntry = rightByEra.get(leftEntry.era_id);
@@ -121,7 +75,7 @@ function maxOracleSocDelta(left: OracleEntry[], right: OracleEntry[]): number {
 }
 
 function countStrategyDifferences(left: OracleEntry[], right: OracleEntry[]): number {
-  const rightByEra = new Map(right.map((entry) => [entry.era_id, entry]));
+  const rightByEra = mapOracleByEra(right);
   let differences = 0;
   for (const leftEntry of left) {
     const rightEntry = rightByEra.get(leftEntry.era_id);
@@ -136,41 +90,50 @@ function countStrategyDifferences(left: OracleEntry[], right: OracleEntry[]): nu
 }
 
 describe("feed-in variant regression", () => {
-  // Findings from the captured live case:
-  // - Both awattar-sunny and awattar-sunny-spot predict negligible export (< 1 kWh).
-  // - Their old divergence was not caused by organic DP trade-offs from feed-in prices.
-  // - It came from special-case LIMIT/headroom preservation logic that rewrote most of the horizon.
-  // This regression keeps the optimiser honest: when export stays negligible, changing only the
-  // feed-in tariff source must not radically reshape SoC or strategy curves.
-  it("captures a live case where both variants predict negligible export", () => {
+  it("keeps more headroom under sunny-spot during the expensive export morning hours", () => {
     const fixture = loadFixture();
-    const service = createSimulationService(fixture);
-    const sunny = runVariant(service, fixture, "sunny");
-    const sunnySpot = runVariant(service, fixture, "sunny_spot");
+    const sunny = runVariant(fixture, "sunny");
+    const sunnySpot = runVariant(fixture, "sunny_spot");
+    const sunnyByEra = mapOracleByEra(sunny.oracle_entries);
+    const sunnySpotByEra = mapOracleByEra(sunnySpot.oracle_entries);
 
-    expect(sunny.expected_feed_in_kwh).toBeLessThan(1);
-    expect(sunnySpot.expected_feed_in_kwh).toBeLessThan(1);
+    const sunny08 = sunnyByEra.get("2026-04-03T08:00:00.000Z");
+    const spot08 = sunnySpotByEra.get("2026-04-03T08:00:00.000Z");
+    const sunny09 = sunnyByEra.get("2026-04-03T09:00:00.000Z");
+    const spot09 = sunnySpotByEra.get("2026-04-03T09:00:00.000Z");
+
+    expect(sunny08?.strategy).toBe("auto");
+    expect(spot08?.strategy).toBe("hold");
+    expect(sunny09?.strategy).toBe("auto");
+    expect(spot09?.strategy).toBe("hold");
+    expect(sunny08?.end_soc_percent).toBeGreaterThan(spot08?.end_soc_percent ?? 0);
+    expect(sunny09?.end_soc_percent).toBeGreaterThan(spot09?.end_soc_percent ?? 0);
   });
 
-  it("keeps SoC trajectories near-identical when feed-in stays negligible", () => {
+  it("shifts more charging into the later low-value window for sunny-spot", () => {
     const fixture = loadFixture();
-    const service = createSimulationService(fixture);
-    const sunny = runVariant(service, fixture, "sunny");
-    const sunnySpot = runVariant(service, fixture, "sunny_spot");
+    const sunny = runVariant(fixture, "sunny");
+    const sunnySpot = runVariant(fixture, "sunny_spot");
+    const sunnyByEra = mapOracleByEra(sunny.oracle_entries);
+    const sunnySpotByEra = mapOracleByEra(sunnySpot.oracle_entries);
 
-    const maxDelta = maxOracleSocDelta(sunny.oracle_entries, sunnySpot.oracle_entries);
+    const sunny11 = sunnyByEra.get("2026-04-03T11:00:00.000Z");
+    const spot11 = sunnySpotByEra.get("2026-04-03T11:00:00.000Z");
+    const sunny12 = sunnyByEra.get("2026-04-03T12:00:00.000Z");
+    const spot12 = sunnySpotByEra.get("2026-04-03T12:00:00.000Z");
 
-    expect(maxDelta).toBeLessThan(10);
+    expect(spot11?.end_soc_percent).toBeGreaterThan(sunny11?.end_soc_percent ?? 0);
+    expect(spot12?.end_soc_percent).toBeGreaterThan(sunny12?.end_soc_percent ?? 0);
+    expect(sunny.expected_feed_in_kwh).toBeGreaterThan(0);
+    expect(sunnySpot.expected_feed_in_kwh).toBeGreaterThan(0);
   });
 
-  it("does not rewrite most of the horizon into a different strategy when export stays negligible", () => {
+  it("does not collapse the two live variants back into the same oracle curve", () => {
     const fixture = loadFixture();
-    const service = createSimulationService(fixture);
-    const sunny = runVariant(service, fixture, "sunny");
-    const sunnySpot = runVariant(service, fixture, "sunny_spot");
+    const sunny = runVariant(fixture, "sunny");
+    const sunnySpot = runVariant(fixture, "sunny_spot");
 
-    const differingStrategies = countStrategyDifferences(sunny.oracle_entries, sunnySpot.oracle_entries);
-
-    expect(differingStrategies).toBeLessThan(8);
+    expect(maxOracleSocDelta(sunny.oracle_entries, sunnySpot.oracle_entries)).toBeGreaterThan(15);
+    expect(countStrategyDifferences(sunny.oracle_entries, sunnySpot.oracle_entries)).toBeGreaterThanOrEqual(4);
   });
 });

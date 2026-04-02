@@ -42,6 +42,7 @@ export interface SimulationOutput {
   projected_savings_eur: number;
   projected_grid_power_w: number;
   expected_feed_in_kwh: number;
+  expected_feed_in_profit_eur: number;
   average_price_eur_per_kwh: number;
   forecast_samples: number;
   forecast_hours: number;
@@ -129,6 +130,7 @@ interface RolloutResult {
   gridEnergyTotal: Energy;
   gridChargeTotal: Energy;
   feedInTotal: Energy;
+  feedInProfitTotal: Money;
   oracleEntries: OracleEntry[];
 }
 
@@ -448,10 +450,6 @@ function evaluateStateTransitions(
       continue;
     }
 
-    if (!pvCanExportUnderState(context, profile, currentSoCStep, storedEnergyChange, batteryEnergyAtBus, gridEnergy)) {
-      continue;
-    }
-
     if (!allowBatteryExport) {
       const minGridEnergy = profile.baselineGridEnergy.wattHours < 0 ? profile.baselineGridEnergy : Energy.zero();
       if (gridEnergy.kilowattHours < minGridEnergy.kilowattHours - EPSILON) {
@@ -511,37 +509,21 @@ function evaluateStateTransitions(
   return {cost: bestCost, transition: bestTransition};
 }
 
-function pvCanExportUnderState(
-  context: SimulationContext,
-  profile: SlotProfile,
-  socStep: number,
-  storedEnergyChange: Energy,
-  batteryEnergyAtBus: Energy,
-  gridEnergy: Energy,
-): boolean {
-  if (gridEnergy.wattHours >= 0) {
-    return true;
-  }
-  const socStepsToFull = Math.max(0, (context.numSoCStates - 1) - socStep);
-  if (socStepsToFull <= 0) {
-    return true;
-  }
-  const socHeadroom = context.energyPerStep.multiply(socStepsToFull);
-  const requiredToAvoidExport = maxEnergy(profile.availableSolar.subtract(profile.loadAfterDirectUse), Energy.zero());
-  const headroomAtBus = socHeadroom.multiply(1 / context.chargeEfficiency.ratio);
-  const requiredCharge = minEnergy(requiredToAvoidExport, minEnergy(profile.solarChargeLimit, headroomAtBus));
-  if (!(requiredCharge.kilowattHours > EPSILON)) {
-    return true;
-  }
-  return batteryEnergyAtBus.kilowattHours + EPSILON >= requiredCharge.kilowattHours || storedEnergyChange.wattHours <= 0;
-}
-
 function buildSimulationOutput(
   context: SimulationContext,
   policy: PolicyTransition[][],
 ): SimulationOutput {
   const rollout = runForwardPass(context, policy);
-  const {socPathSteps, costTotal, baselineCost, gridEnergyTotal, gridChargeTotal, feedInTotal, oracleEntries} = rollout;
+  const {
+    socPathSteps,
+    costTotal,
+    baselineCost,
+    gridEnergyTotal,
+    gridChargeTotal,
+    feedInTotal,
+    feedInProfitTotal,
+    oracleEntries,
+  } = rollout;
 
   const finalEnergy = context.energyPerStep.multiply(socPathSteps[socPathSteps.length - 1]);
   const adjustedCost = costTotal.subtract(context.avgPrice.costFor(finalEnergy));
@@ -575,6 +557,7 @@ function buildSimulationOutput(
     projected_savings_eur: projectedSavings.eur,
     projected_grid_power_w: projectedGridPower.watts,
     expected_feed_in_kwh: feedInTotal.kilowattHours,
+    expected_feed_in_profit_eur: feedInProfitTotal.eur,
     average_price_eur_per_kwh: context.avgPrice.eurPerKwh,
     forecast_samples: context.slots.length,
     forecast_hours: context.totalDuration.hours,
@@ -591,6 +574,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
   let gridEnergyTotal = Energy.zero();
   let gridChargeTotal = Energy.zero();
   let feedInTotal = Energy.zero();
+  let feedInProfitTotal = Money.zero();
   let socStepIter = context.currentSoCStep;
 
   for (let index = 0; index < context.horizon; index += 1) {
@@ -617,14 +601,6 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     const importPrice = profile.priceTotal;
     baselineCost = baselineCost.add(computeGridCost(profile.baselineGridEnergy, importPrice, profile.feedInTariff));
     let gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
-
-    ({nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy} = adjustForPvExportDuringRollout(
-      context,
-      index,
-      profile,
-      socStepIter,
-      {nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy},
-    ));
 
     if (nextSoCStep < context.minAllowedSoCStep) {
       nextSoCStep = context.minAllowedSoCStep;
@@ -656,6 +632,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     gridEnergyTotal = gridEnergyTotal.add(gridEnergy);
     if (gridEnergy.wattHours < 0) {
       feedInTotal = feedInTotal.add(Energy.fromWattHours(Math.abs(gridEnergy.wattHours)));
+      feedInProfitTotal = feedInProfitTotal.add(computeGridCost(gridEnergy, importPrice, profile.feedInTariff).negate());
     }
     const gridImport = maxEnergy(gridEnergy, Energy.zero());
     const additionalGridChargeRaw = storedEnergyChange.wattHours > 0
@@ -707,6 +684,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     gridEnergyTotal,
     gridChargeTotal,
     feedInTotal,
+    feedInProfitTotal,
     oracleEntries,
   };
 }
@@ -720,78 +698,6 @@ function energyFromOptionalPowerWatts(powerWatts: number | undefined, duration: 
 
 function computeGridCost(gridEnergy: Energy, importPrice: EnergyPrice, feedInTariff: EnergyPrice): Money {
   return computeGridEnergyCost(gridEnergy, importPrice, feedInTariff);
-}
-
-function adjustForPvExportDuringRollout(
-  context: SimulationContext,
-  index: number,
-  profile: SlotProfile,
-  socStepIter: number,
-  input: StateTransitionSnapshot,
-): StateTransitionSnapshot {
-  let {nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy} = input;
-  if (gridEnergy.wattHours < 0) {
-    const socStepsToFull = Math.max(0, (context.numSoCStates - 1) - socStepIter);
-    const socHeadroom = context.energyPerStep.multiply(socStepsToFull);
-    const requiredToAvoidExport = maxEnergy(profile.availableSolar.subtract(profile.loadAfterDirectUse), Energy.zero());
-    const headroomAtBus = socHeadroom.multiply(1 / context.chargeEfficiency.ratio);
-    const requiredCharge = minEnergy(requiredToAvoidExport, minEnergy(profile.solarChargeLimit, headroomAtBus));
-    if (requiredCharge.kilowattHours > batteryEnergyAtBus.kilowattHours + EPSILON && socHeadroom.kilowattHours > EPSILON) {
-      const extraAtBus = minEnergy(
-        requiredCharge.subtract(batteryEnergyAtBus),
-        headroomAtBus,
-      );
-      const extraStored = extraAtBus.multiply(context.chargeEfficiency.ratio);
-      const extraSteps = Math.max(0, Math.ceil(extraStored.kilowattHours / context.energyPerStep.kilowattHours - EPSILON));
-      if (extraSteps > 0) {
-        nextSoCStep = Math.min(context.numSoCStates - 1, nextSoCStep + extraSteps);
-        deltaSoCSteps = nextSoCStep - socStepIter;
-        storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-        const transitionEfficiencies = resolveTransitionEfficiencies(
-          context.chemistry,
-          storedEnergyChange,
-          profile.duration,
-          context.capacity,
-          context.chargeEfficiency,
-          context.dischargeEfficiency,
-          context.chargeAverageCRate,
-          context.dischargeAverageCRate,
-        );
-        batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
-          storedEnergyChange,
-          transitionEfficiencies.chargeEfficiency,
-          transitionEfficiencies.dischargeEfficiency,
-        );
-        gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
-      }
-      if (gridEnergy.kilowattHours < -EPSILON) {
-        const targetStored = requiredCharge.multiply(context.chargeEfficiency.ratio);
-        const targetSteps = Math.max(0, Math.ceil(targetStored.kilowattHours / context.energyPerStep.kilowattHours - EPSILON));
-        if (targetSteps > 0) {
-          nextSoCStep = Math.min(context.numSoCStates - 1, socStepIter + targetSteps);
-          deltaSoCSteps = nextSoCStep - socStepIter;
-          storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-          const transitionEfficiencies = resolveTransitionEfficiencies(
-            context.chemistry,
-            storedEnergyChange,
-            profile.duration,
-            context.capacity,
-            context.chargeEfficiency,
-            context.dischargeEfficiency,
-            context.chargeAverageCRate,
-            context.dischargeAverageCRate,
-          );
-          batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
-            storedEnergyChange,
-            transitionEfficiencies.chargeEfficiency,
-            transitionEfficiencies.dischargeEfficiency,
-          );
-          gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
-        }
-      }
-    }
-  }
-  return {nextSoCStep, deltaSoCSteps, storedEnergyChange, batteryEnergyAtBus, gridEnergy};
 }
 
 function energyAtBusFromStoredEnergyChange(
