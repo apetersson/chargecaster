@@ -33,6 +33,7 @@ import { PriceForecastArtifactService } from "./forecasting/price-forecast-artif
 import { PriceForecastInferenceService } from "./forecasting/price-forecast-inference.service";
 import { ModelTrainingCoordinator } from "./forecasting/model-training-coordinator.service";
 import { FroniusService } from "./fronius/fronius.service";
+import { BATTERY_CONTROL_BACKEND } from "./hardware/battery-control-backend";
 import { OptimisationCommandTranslator } from "./hardware/optimisation-command-translator.service";
 import { StorageModule } from "./storage/storage.module";
 import { RuntimeConfigService } from "./config/runtime-config.service";
@@ -76,6 +77,10 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,
+    {
+      provide: BATTERY_CONTROL_BACKEND,
+      useExisting: FroniusService,
+    },
     OptimisationCommandTranslator,
     RuntimeConfigService,
   ],
@@ -110,6 +115,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,
+    BATTERY_CONTROL_BACKEND,
     OptimisationCommandTranslator,
     RuntimeConfigService,
   ],

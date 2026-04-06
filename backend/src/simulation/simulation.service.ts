@@ -24,6 +24,11 @@ import {
 import { StorageService } from "../storage/storage.service";
 import { parseEvccState } from "../config/schemas";
 import { deriveOperationalMode } from "../hardware/optimisation-mode";
+import type { BatteryControlCapabilities } from "../hardware/battery-control-backend";
+import {
+  clampSimulationConfigToBatteryCapabilities,
+  deriveBatteryOptimisationConstraints,
+} from "../hardware/battery-control-backend";
 import { normalizeHistoryList } from "./history.serializer";
 import { BatteryEfficiencyService } from "./battery-efficiency.service";
 import { buildSolarForecastFromTimeseries, parseTimestamp } from "./solar";
@@ -33,6 +38,7 @@ const DEFAULT_SLOT_DURATION = Duration.fromHours(1);
 
 export interface SimulationInput {
   config: SimulationConfig;
+  batteryControlCapabilities?: BatteryControlCapabilities | null;
   liveState: { battery_soc?: number | null };
   forecast: RawForecastEntry[];
   gridFeeEurPerKwhBySlot?: (number | undefined)[];
@@ -137,6 +143,8 @@ export class SimulationService {
   runSimulation(input: SimulationInput): SnapshotPayload {
     // Normalise live telemetry so downstream optimisers always receive a concrete SoC
     // Ensure the optimiser always receives a deterministic SoC input
+    const effectiveConfig = clampSimulationConfigToBatteryCapabilities(input.config, input.batteryControlCapabilities);
+    const optimisationConstraints = deriveBatteryOptimisationConstraints(input.batteryControlCapabilities);
     const resolvedSoCPercent = this.resolveLiveSoCPercent(input.liveState.battery_soc);
     const liveState = {battery_soc: resolvedSoCPercent};
     const slots = normalizePriceSlots(input.forecast);
@@ -174,9 +182,9 @@ export class SimulationService {
     });
 
     const solarGenerationPerSlotKwh = solarEnergyPerSlot.map((energy) => energy.kilowattHours);
-    const feedInTariff = EnergyPrice.fromEurPerKwh(Math.max(0, Number(input.config.price.feed_in_tariff_eur_per_kwh ?? 0)));
+    const feedInTariff = EnergyPrice.fromEurPerKwh(Math.max(0, Number(effectiveConfig.price.feed_in_tariff_eur_per_kwh ?? 0)));
     const batteryEfficiency = this.batteryEfficiencyRef.estimateRecentEfficiencies(
-      Energy.fromKilowattHours(Number(input.config.battery.capacity_kwh ?? 0)),
+      Energy.fromKilowattHours(Number(effectiveConfig.battery.capacity_kwh ?? 0)),
     );
     const peakSolarDiscrepancy = computePeakSolarForecastDiscrepancy(input.solarForecast ?? []);
     const demandProfilePerSlot = slots.map((priceSlot) => {
@@ -196,20 +204,24 @@ export class SimulationService {
     }));
 
     // Run the DP-based optimiser with the caller's grid and export preferences
-    const result = simulateOptimalSchedule(input.config, liveState, slots, {
+    const result = simulateOptimalSchedule(effectiveConfig, liveState, slots, {
       solarGenerationKwhPerSlot: solarGenerationPerSlotKwh,
       houseLoadWattsPerSlot: demandProfilePerSlot.map((entry) => entry.housePowerW ?? undefined),
       gridFeeEurPerKwhBySlot: input.gridFeeEurPerKwhBySlot,
       feedInTariffEurPerKwh: feedInTariff.eurPerKwh,
       feedInTariffEurPerKwhBySlot: input.feedInTariffEurPerKwhBySlot,
-      allowBatteryExport: input.config.logic.allow_battery_export ?? true,
+      allowBatteryExport: effectiveConfig.logic.allow_battery_export ?? true,
+      allowGridChargeFromGrid: optimisationConstraints.allowGridChargeFromGrid,
+      canHoldTargetSoc: optimisationConstraints.canHoldTargetSoc,
+      canLimitChargePower: optimisationConstraints.canLimitChargePower,
+      canPreventAutomaticSolarCharging: optimisationConstraints.canPreventAutomaticSolarCharging,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
       dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
       chargeAverageCRate: batteryEfficiency.chargeAverageCRate,
       dischargeAverageCRate: batteryEfficiency.dischargeAverageCRate,
     });
     const fallbackPrice = slots.length
-      ? EnergyPrice.fromEurPerKwh(slots[0].price).withAdditionalFee(gridFee(input.config))
+      ? EnergyPrice.fromEurPerKwh(slots[0].price).withAdditionalFee(gridFee(effectiveConfig))
       : null;
     const priceSnapshot = input.priceSnapshotEurPerKwh != null
       ? EnergyPrice.fromEurPerKwh(input.priceSnapshotEurPerKwh)
@@ -273,7 +285,7 @@ export class SimulationService {
       current_mode: currentMode,
       price_snapshot_ct_per_kwh: priceSnapshotCt,
       price_snapshot_eur_per_kwh: priceSnapshotEur,
-      grid_fee_eur_per_kwh: input.gridFeeEurPerKwhBySlot?.[0] ?? input.config.price.grid_fee_eur_per_kwh ?? null,
+      grid_fee_eur_per_kwh: input.gridFeeEurPerKwhBySlot?.[0] ?? effectiveConfig.price.grid_fee_eur_per_kwh ?? null,
       projected_cost_eur: result.projected_cost_eur,
       baseline_cost_eur: result.baseline_cost_eur,
       basic_battery_cost_eur: autoResult.projected_cost_eur,

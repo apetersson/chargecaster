@@ -2,8 +2,9 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 
 import { describeError } from "@chargecaster/domain";
 import { SimulationService } from "../simulation/simulation.service";
-import { FroniusService } from "../fronius/fronius.service";
 import { OptimisationCommandTranslator } from "../hardware/optimisation-command-translator.service";
+import { BATTERY_CONTROL_BACKEND } from "../hardware/battery-control-backend";
+import type { BatteryControlBackend } from "../hardware/battery-control-backend";
 import { ModelTrainingCoordinator } from "../forecasting/model-training-coordinator.service";
 import { SimulationPreparationService } from "./simulation-preparation.service";
 import { DynamicPriceConfigService } from "./dynamic-price-config.service";
@@ -21,7 +22,7 @@ export class SimulationSeedService implements OnModuleDestroy {
     @Inject(DynamicPriceConfigService) private readonly dynamicPriceConfigService: DynamicPriceConfigService,
     @Inject(SimulationPreparationService) private readonly preparationService: SimulationPreparationService,
     @Inject(SimulationService) private readonly simulationService: SimulationService,
-    @Inject(FroniusService) private readonly froniusService: FroniusService,
+    @Inject(BATTERY_CONTROL_BACKEND) private readonly batteryControlBackend: BatteryControlBackend,
     @Inject(OptimisationCommandTranslator) private readonly optimisationCommandTranslator: OptimisationCommandTranslator,
     @Inject(ModelTrainingCoordinator) private readonly modelTrainingCoordinator: ModelTrainingCoordinator,
   ) {
@@ -57,9 +58,11 @@ export class SimulationSeedService implements OnModuleDestroy {
           prepared.liveState.battery_soc ?? "n/a"
         }`,
       );
+      const batteryControlCapabilities = this.batteryControlBackend.getCapabilities();
 
       const snapshot = this.simulationService.runSimulation({
         config: prepared.simulationConfig,
+        batteryControlCapabilities,
         liveState: prepared.liveState,
         forecast: prepared.forecast,
         gridFeeEurPerKwhBySlot: prepared.gridFeeEurPerKwhBySlot,
@@ -100,7 +103,7 @@ export class SimulationSeedService implements OnModuleDestroy {
   private async applyFronius(snapshot: Awaited<ReturnType<SimulationService["runSimulation"]>>): Promise<void> {
     try {
       const command = this.optimisationCommandTranslator.fromSimulationSnapshot(snapshot);
-      const result = await this.froniusService.applyOptimization(command);
+      const result = await this.batteryControlBackend.applyOptimization(command);
       if (result.errorMessage) {
         this.logger.warn(`Snapshot flagged with error: ${result.errorMessage}`);
         this.simulationService.appendErrorsToLatestSnapshot([result.errorMessage]);

@@ -4,6 +4,12 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { describeError, Percentage, Power } from "@chargecaster/domain";
 import type { ConfigDocument } from "../config/schemas";
 import { RuntimeConfigService } from "../config/runtime-config.service";
+import type {
+  BatteryControlApplyResult,
+  BatteryControlBackend,
+  BatteryControlCapabilities,
+  BatteryControlCommand,
+} from "../hardware/battery-control-backend";
 
 export interface FroniusConnectionConfig {
   host: string;
@@ -21,24 +27,11 @@ const TARGET_TOLERANCE_PERCENT = 0.5;
 const BATTERIES_PATH = "/api/config/batteries";
 const TIME_OF_USE_PATH = "/api/config/timeofuse";
 
-export interface FroniusApplyResult {
-  errorMessage: string | null;
-}
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 type FroniusBatteryMode = "charge" | "auto" | "hold";
 type FroniusMode = FroniusBatteryMode | "limit";
-
-export type OptimisationCommand =
-  | {charge: {untilTimestamp?: string | null}}
-  | "charge"
-  | "auto"
-  | "limit"
-  | {auto: {floorSocPercent?: number | null}}
-  | {limit: {floorSocPercent?: number | null; maxChargePowerW?: number | null}}
-  | {hold: {minSocPercent: number; observedSocPercent?: number | null; floorSocPercent?: number | null}};
 
 interface NormalisedStrategy {
   mode: FroniusMode;
@@ -46,6 +39,7 @@ interface NormalisedStrategy {
   observedSocPercent: number | null;
   floorTarget: Percentage | null;
   maxChargePower: Power | null;
+  minChargePower: Power | null;
 }
 
 interface DigestSession {
@@ -81,7 +75,7 @@ interface FroniusTimeOfUseEntry {
 
 @Injectable()
 
-export class FroniusService {
+export class FroniusService implements BatteryControlBackend {
   private readonly logger = new Logger(FroniusService.name);
   private readonly froniusConfig: FroniusConnectionConfig | null;
   private readonly dryRunEnabled: boolean;
@@ -120,7 +114,62 @@ export class FroniusService {
     this.froniusConfig = froniusConfig;
   }
 
-  async applyOptimization(strategyInput: OptimisationCommand): Promise<FroniusApplyResult> {
+  getCapabilities(): BatteryControlCapabilities {
+    const autoFloorMin = this.autoModeFloorOverride?.percent ?? 0;
+    const targetSocMax = this.maxChargeLimit?.percent ?? 100;
+    const configuredChargePower = this.chargeFloorPower?.watts ?? null;
+
+    return {
+      backendId: "fronius",
+      modeSupport: {
+        auto: true,
+        holdTargetSoc: true,
+        chargeToTargetSoc: true,
+        chargeLimitPower: true,
+        chargeBoostPower: configuredChargePower != null,
+        absoluteChargeWindow: false,
+        recurringScheduleWindow: true,
+      },
+      autoFloorSocRange: {
+        minPercent: autoFloorMin,
+        maxPercent: targetSocMax,
+        stepPercent: 1,
+      },
+      targetSocRange: {
+        minPercent: autoFloorMin,
+        maxPercent: targetSocMax,
+        stepPercent: 1,
+      },
+      chargeLimitPowerRange: {
+        minPowerW: 0,
+        maxPowerW: configuredChargePower,
+        stepPowerW: 1,
+        supportsZeroPower: true,
+        supportsWindows: true,
+      },
+      chargeBoostPowerRange: configuredChargePower == null
+        ? null
+        : {
+            minPowerW: configuredChargePower,
+            maxPowerW: configuredChargePower,
+            stepPowerW: null,
+            supportsZeroPower: false,
+            supportsWindows: true,
+            fixedPowerW: configuredChargePower,
+          },
+      scheduleConstraints: {
+        minWindowMinutes: 1,
+        maxWindows: null,
+      },
+    };
+  }
+
+  async applyOptimization(strategyInput: BatteryControlCommand): Promise<BatteryControlApplyResult> {
+    try {
+      this.assertCommandSupported(strategyInput);
+    } catch (error: unknown) {
+      return {errorMessage: describeError(error)};
+    }
     if (this.dryRunEnabled) {
       this.logger.log("Dry run enabled; skipping Fronius optimization apply.");
       return {errorMessage: null};
@@ -212,12 +261,26 @@ export class FroniusService {
     }
   }
 
-  private normaliseStrategy(input: OptimisationCommand): NormalisedStrategy {
+  private normaliseStrategy(input: BatteryControlCommand): NormalisedStrategy {
     if (input === "charge") {
-      return {mode: "charge", manualTarget: null, observedSocPercent: null, floorTarget: null, maxChargePower: null};
+      return {
+        mode: "charge",
+        manualTarget: null,
+        observedSocPercent: null,
+        floorTarget: null,
+        maxChargePower: null,
+        minChargePower: null,
+      };
     }
     if (input === "auto") {
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget: null, maxChargePower: null};
+      return {
+        mode: "auto",
+        manualTarget: null,
+        observedSocPercent: null,
+        floorTarget: null,
+        maxChargePower: null,
+        minChargePower: null,
+      };
     }
     if (input === "limit") {
       return {
@@ -226,15 +289,18 @@ export class FroniusService {
         observedSocPercent: null,
         floorTarget: null,
         maxChargePower: Power.zero(),
+        minChargePower: null,
       };
     }
     if ("charge" in input) {
+      const chargeConfig = input.charge;
       return {
         mode: "charge",
-        manualTarget: null,
+        manualTarget: this.parsePercentage(chargeConfig.targetSocPercent ?? null),
         observedSocPercent: null,
         floorTarget: null,
         maxChargePower: null,
+        minChargePower: this.parsePositivePower(chargeConfig.minChargePowerW ?? null),
       };
     }
     if ("hold" in input) {
@@ -251,12 +317,20 @@ export class FroniusService {
         observedSocPercent,
         floorTarget,
         maxChargePower: null,
+        minChargePower: null,
       };
     }
     if ("auto" in input) {
       const autoConfig = input.auto;
       const floorTarget = this.parsePercentage(autoConfig.floorSocPercent ?? null);
-      return {mode: "auto", manualTarget: null, observedSocPercent: null, floorTarget, maxChargePower: null};
+      return {
+        mode: "auto",
+        manualTarget: null,
+        observedSocPercent: null,
+        floorTarget,
+        maxChargePower: null,
+        minChargePower: null,
+      };
     }
     if ("limit" in input) {
       const limitConfig = input.limit;
@@ -268,6 +342,7 @@ export class FroniusService {
         observedSocPercent: null,
         floorTarget,
         maxChargePower,
+        minChargePower: null,
       };
     }
     throw new Error("Unsupported Fronius optimisation command.");
@@ -400,7 +475,7 @@ export class FroniusService {
     const maxCharge = this.resolveMaxCharge();
 
     if (strategy.mode === "charge") {
-      const target = maxCharge ?? Percentage.full();
+      const target = strategy.manualTarget ?? maxCharge ?? Percentage.full();
       return {
         body: this.serializeManualTarget(target),
         target,
@@ -466,8 +541,8 @@ export class FroniusService {
     return this.maxChargeLimit;
   }
 
-  private resolveChargeFloorPower(): Power | null {
-    return this.chargeFloorPower;
+  private resolveChargeFloorPower(strategy: NormalisedStrategy): Power | null {
+    return strategy.minChargePower ?? this.chargeFloorPower;
   }
 
   private serializeManualTarget(target: Percentage): Record<string, unknown> {
@@ -728,13 +803,79 @@ export class FroniusService {
 
   private buildManagedTimeOfUseEntries(strategy: NormalisedStrategy): FroniusTimeOfUseEntry[] {
     const entries: FroniusTimeOfUseEntry[] = [];
-    const chargeFloorPower = this.resolveChargeFloorPower();
+    const chargeFloorPower = this.resolveChargeFloorPower(strategy);
     if (chargeFloorPower != null) {
       entries.push(this.buildManagedTimeOfUseEntry("CHARGE_MIN", chargeFloorPower, strategy.mode === "charge"));
     }
     const limitPower = strategy.maxChargePower ?? Power.zero();
     entries.push(this.buildManagedTimeOfUseEntry("CHARGE_MAX", limitPower, strategy.mode === "limit"));
     return entries;
+  }
+
+  private assertCommandSupported(command: BatteryControlCommand): void {
+    const capabilities = this.getCapabilities();
+
+    if (command === "charge" || command === "auto" || command === "limit") {
+      return;
+    }
+
+    if ("charge" in command) {
+      const {startTimestamp, untilTimestamp, targetSocPercent, minChargePowerW} = command.charge;
+      if ((startTimestamp || untilTimestamp) && !capabilities.modeSupport.absoluteChargeWindow) {
+        throw new Error("Fronius backend does not support bounded charge windows.");
+      }
+      this.assertPercentInRange(targetSocPercent, capabilities.targetSocRange, "charge.targetSocPercent");
+      this.assertPowerInRange(minChargePowerW, capabilities.chargeBoostPowerRange, "charge.minChargePowerW");
+      return;
+    }
+
+    if ("limit" in command) {
+      const {startTimestamp, untilTimestamp, floorSocPercent, maxChargePowerW} = command.limit;
+      if (startTimestamp || untilTimestamp) {
+        throw new Error("Fronius backend does not support bounded limit windows.");
+      }
+      this.assertPercentInRange(floorSocPercent, capabilities.autoFloorSocRange, "limit.floorSocPercent");
+      this.assertPowerInRange(maxChargePowerW, capabilities.chargeLimitPowerRange, "limit.maxChargePowerW");
+      return;
+    }
+
+    if ("hold" in command) {
+      this.assertPercentInRange(command.hold.minSocPercent, capabilities.targetSocRange, "hold.minSocPercent");
+      this.assertPercentInRange(command.hold.floorSocPercent, capabilities.autoFloorSocRange, "hold.floorSocPercent");
+    }
+  }
+
+  private assertPercentInRange(
+    value: number | null | undefined,
+    range: BatteryControlCapabilities["targetSocRange"],
+    label: string,
+  ): void {
+    if (value == null) {
+      return;
+    }
+    if (!Number.isFinite(value) || value < range.minPercent || value > range.maxPercent) {
+      throw new Error(`${label} must be within ${range.minPercent}-${range.maxPercent}.`);
+    }
+  }
+
+  private assertPowerInRange(
+    value: number | null | undefined,
+    range: BatteryControlCapabilities["chargeBoostPowerRange"] | BatteryControlCapabilities["chargeLimitPowerRange"],
+    label: string,
+  ): void {
+    if (value == null || !range) {
+      return;
+    }
+    if (!Number.isFinite(value)) {
+      throw new Error(`${label} must be a finite number.`);
+    }
+    if (value === 0 && range.supportsZeroPower) {
+      return;
+    }
+    const upperBound = range.maxPowerW ?? value;
+    if (value < range.minPowerW || value > upperBound) {
+      throw new Error(`${label} must be within ${range.minPowerW}-${upperBound} W.`);
+    }
   }
 
   private buildManagedTimeOfUseEntry(

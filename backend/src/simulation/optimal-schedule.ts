@@ -25,6 +25,9 @@ export interface SimulationOptions {
   feedInTariffEurPerKwhBySlot?: (number | undefined)[];
   allowBatteryExport?: boolean;
   allowGridChargeFromGrid?: boolean;
+  canHoldTargetSoc?: boolean;
+  canLimitChargePower?: boolean;
+  canPreventAutomaticSolarCharging?: boolean;
   chargeEfficiency?: Percentage;
   dischargeEfficiency?: Percentage;
   chargeAverageCRate?: number;
@@ -113,6 +116,9 @@ interface SimulationContext {
   chemistry: BatteryChemistry | null;
   allowBatteryExport: boolean;
   allowGridChargeFromGrid: boolean;
+  canHoldTargetSoc: boolean;
+  canLimitChargePower: boolean;
+  canPreventAutomaticSolarCharging: boolean;
   chargeEfficiency: Percentage;
   dischargeEfficiency: Percentage;
   chargeAverageCRate: number;
@@ -185,6 +191,12 @@ function prepareSimulationContext(
         : logic.allow_battery_export ?? true,
     allowGridChargeFromGrid:
       typeof options.allowGridChargeFromGrid === "boolean" ? options.allowGridChargeFromGrid : true,
+    canHoldTargetSoc:
+      typeof options.canHoldTargetSoc === "boolean" ? options.canHoldTargetSoc : true,
+    canLimitChargePower:
+      typeof options.canLimitChargePower === "boolean" ? options.canLimitChargePower : true,
+    canPreventAutomaticSolarCharging:
+      typeof options.canPreventAutomaticSolarCharging === "boolean" ? options.canPreventAutomaticSolarCharging : true,
     chargeEfficiency: normalizeEfficiency(options.chargeEfficiency),
     dischargeEfficiency: normalizeEfficiency(options.dischargeEfficiency),
     chargeAverageCRate: normalizeAverageCRate(options.chargeAverageCRate),
@@ -292,6 +304,9 @@ function prepareSimulationContext(
     chemistry: battery.chemistry ?? null,
     allowBatteryExport: normalizedOptions.allowBatteryExport,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
+    canHoldTargetSoc: normalizedOptions.canHoldTargetSoc,
+    canLimitChargePower: normalizedOptions.canLimitChargePower,
+    canPreventAutomaticSolarCharging: normalizedOptions.canPreventAutomaticSolarCharging,
     chargeEfficiency: normalizedOptions.chargeEfficiency,
     dischargeEfficiency: normalizedOptions.dischargeEfficiency,
     chargeAverageCRate: normalizedOptions.chargeAverageCRate,
@@ -400,6 +415,8 @@ function evaluateStateTransitions(
     maxAllowedSoCStep,
     minAllowedSoCStep,
     allowBatteryExport,
+    canHoldTargetSoc,
+    canPreventAutomaticSolarCharging,
   } = context;
 
   let maxChargeSteps = numSoCStates - 1 - currentSoCStep;
@@ -455,6 +472,24 @@ function evaluateStateTransitions(
       if (gridEnergy.kilowattHours < minGridEnergy.kilowattHours - EPSILON) {
         continue;
       }
+    }
+
+    if (
+      !canPreventAutomaticSolarCharging &&
+      deltaSoCSteps <= 0 &&
+      gridEnergy.wattHours < -EPSILON &&
+      nextSoCStep < maxAllowedSoCStep
+    ) {
+      continue;
+    }
+
+    if (
+      !canHoldTargetSoc &&
+      deltaSoCSteps === 0 &&
+      currentSoCStep > minAllowedSoCStep &&
+      gridEnergy.wattHours > EPSILON
+    ) {
+      continue;
     }
 
     if (storedEnergyChange.wattHours > 0) {
@@ -685,8 +720,55 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     gridChargeTotal,
     feedInTotal,
     feedInProfitTotal,
-    oracleEntries,
+    oracleEntries: relabelHeadroomPreservingHolds(context, oracleEntries),
   };
+}
+
+function relabelHeadroomPreservingHolds(
+  context: SimulationContext,
+  oracleEntries: OracleEntry[],
+): OracleEntry[] {
+  if (!context.canLimitChargePower) {
+    return oracleEntries;
+  }
+  const floorPercent = context.minAllowedSoc.percent;
+  const relabelled = oracleEntries.map((entry) => ({...entry}));
+
+  for (let index = 0; index < relabelled.length; index += 1) {
+    const entry = relabelled[index];
+    if (!isFloorHoldEntry(entry, floorPercent)) {
+      continue;
+    }
+
+    const nextDirective = relabelled
+      .slice(index + 1)
+      .find((candidate) => candidate.strategy !== "hold" && candidate.strategy !== "limit");
+    if (!nextDirective || nextDirective.strategy !== "charge") {
+      continue;
+    }
+
+    const chargeTarget = extractOracleTargetPercent(nextDirective);
+    if (chargeTarget == null || chargeTarget <= floorPercent + 0.5) {
+      continue;
+    }
+
+    entry.strategy = "limit";
+  }
+
+  return relabelled;
+}
+
+function isFloorHoldEntry(entry: OracleEntry, floorPercent: number): boolean {
+  if (entry.strategy !== "hold") {
+    return false;
+  }
+  const targetPercent = extractOracleTargetPercent(entry);
+  return targetPercent != null && Math.abs(targetPercent - floorPercent) <= 0.5;
+}
+
+function extractOracleTargetPercent(entry: OracleEntry): number | null {
+  const candidate = entry.target_soc_percent ?? entry.end_soc_percent ?? entry.start_soc_percent ?? null;
+  return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : null;
 }
 
 function energyFromOptionalPowerWatts(powerWatts: number | undefined, duration: Duration): Energy | null {

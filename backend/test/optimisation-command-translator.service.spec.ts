@@ -222,6 +222,8 @@ describe("OptimisationCommandTranslator", () => {
     expect(command).toEqual({
       charge: {
         untilTimestamp: "2026-03-20T21:00:00+01:00",
+        targetSocPercent: 51,
+        minChargePowerW: null,
       },
     });
   });

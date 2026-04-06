@@ -93,7 +93,7 @@ describe("FroniusService", () => {
 
     const service = createService();
     const result = await service.applyOptimization({
-      charge: {untilTimestamp: "2026-03-20T22:15:00+01:00"},
+      charge: {targetSocPercent: 100, minChargePowerW: 4000},
     });
 
     expect(result.errorMessage).toBeNull();
@@ -167,7 +167,7 @@ describe("FroniusService", () => {
     );
 
     await service.applyOptimization({
-      charge: {untilTimestamp: "2026-03-20T22:15:00+01:00"},
+      charge: {targetSocPercent: 100, minChargePowerW: 4000},
     });
 
     vi.setSystemTime(new Date("2026-03-20T22:16:00+01:00"));
@@ -218,63 +218,17 @@ describe("FroniusService", () => {
     });
   });
 
-  it("keeps the managed charge-floor entry as a permanent all-day row", async () => {
+  it("rejects bounded charge windows that the backend cannot honor safely", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-23T01:00:30.000Z"));
-
-    const responses = [
-      digestChallenge(),
-      jsonResponse({}),
-      jsonResponse({}),
-      jsonResponse({timeofuse: []}),
-      jsonResponse({writeSuccess: ["timeofuse"]}),
-      jsonResponse({}),
-    ];
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: URL | string, init?: RequestInit) => {
-        requests.push({
-          url: input.toString(),
-          method: init?.method ?? "GET",
-          body: typeof init?.body === "string" ? init.body : null,
-        });
-        const next = responses.shift();
-        if (!next) {
-          throw new Error("Unexpected fetch call");
-        }
-        return next;
-      }),
-    );
 
     const service = createService();
     const result = await service.applyOptimization({
       charge: {untilTimestamp: "2026-03-23T01:10:00.000Z"},
     });
 
-    expect(result.errorMessage).toBeNull();
-
-    const touPost = requests.find((request) =>
-      request.method === "POST" && request.url.endsWith("/api/config/timeofuse")
-    );
-    expect(JSON.parse(touPost?.body ?? "{}")).toEqual({
-      timeofuse: [
-        {
-          Active: true,
-          Power: 4000,
-          ScheduleType: "CHARGE_MIN",
-          TimeTable: {Start: "00:00", End: "23:59"},
-          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
-        },
-        {
-          Active: false,
-          Power: 0,
-          ScheduleType: "CHARGE_MAX",
-          TimeTable: {Start: "00:00", End: "23:59"},
-          Weekdays: {Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: true},
-        },
-      ],
-    });
+    expect(result.errorMessage).toContain("does not support bounded charge windows");
+    expect(requests).toHaveLength(0);
   });
 
   it("uses an all-day CHARGE_MAX rule for limit mode while keeping CHARGE_MIN inactive", async () => {
