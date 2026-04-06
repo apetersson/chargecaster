@@ -1,4 +1,5 @@
 import { type JSX, useMemo } from "react";
+import { buildOracleLookup, resolveOracleEntryForEra } from "@chargecaster/domain";
 
 import type { DemandForecastEntry, ForecastEra, OracleEntry } from "../types";
 import { dateTimeNoSecondsFormatter, formatNumber, formatPercent, timeFormatter } from "../utils/format";
@@ -13,7 +14,7 @@ type TrajectoryRow = {
   key: string;
   timeCell: string;
   planningPriceLabel: string;
-  referencePriceLabel: string;
+  proposedActionLabel: string;
   solarLabel: string;
   demandLabel: string;
   targetLabel: string;
@@ -27,12 +28,6 @@ function resolvePrimaryCostSource(era: ForecastEra): CostSource | undefined {
     ?? era.sources.find((source): source is CostSource => source.type === "cost");
 }
 
-function resolveReferenceCostSources(era: ForecastEra): CostSource[] {
-  return era.sources.filter((source): source is CostSource =>
-    source.type === "cost" && source.provider !== "canonical",
-  );
-}
-
 function formatCostSource(source: CostSource | undefined): string {
   if (!source) {
     return "n/a";
@@ -40,14 +35,27 @@ function formatCostSource(source: CostSource | undefined): string {
   return formatNumber(source.payload.price_with_fee_ct_per_kwh, " ct/kWh");
 }
 
-function buildReferencePriceLabel(era: ForecastEra): string {
-  const references = resolveReferenceCostSources(era);
-  if (!references.length) {
+function buildProposedActionDetail(
+  oracle: OracleEntry | undefined,
+): string {
+  if (!oracle?.strategy) {
     return "n/a";
   }
-  return references
-    .map((source) => `${source.provider} ${formatCostSource(source)}`)
-    .join(" · ");
+  const targetPercent = oracle.target_soc_percent ?? oracle.end_soc_percent ?? oracle.start_soc_percent ?? null;
+  const targetLabel = targetPercent != null ? formatPercent(targetPercent) : null;
+
+  switch (oracle.strategy) {
+    case "charge":
+      return targetLabel ? `Charge to ${targetLabel}` : "Charge";
+    case "hold":
+      return targetLabel ? `Hold at ${targetLabel}` : "Hold";
+    case "limit":
+      return targetLabel ? `Limit to ${targetLabel}` : "Limit";
+    case "auto":
+      return "Auto";
+    default:
+      return "n/a";
+  }
 }
 
 function buildTrajectoryRows(
@@ -55,11 +63,11 @@ function buildTrajectoryRows(
   demandForecast: DemandForecastEntry[],
   oracleEntries: OracleEntry[],
 ): TrajectoryRow[] {
-  const oracleByEraId = new Map(oracleEntries.map((entry) => [entry.era_id, entry]));
+  const oracleLookup = buildOracleLookup(oracleEntries);
   const demandByStart = new Map(demandForecast.map((entry) => [entry.start, entry]));
   return forecast.flatMap((era) => {
     const demand = era.start ? demandByStart.get(era.start) : undefined;
-    const oracle = oracleByEraId.get(era.era_id);
+    const oracle = resolveOracleEntryForEra(era, oracleLookup);
     const start = era.start ? new Date(era.start) : null;
     const end = era.end ? new Date(era.end) : null;
     const solarSource = era.sources.find((source) => source.type === "solar");
@@ -74,7 +82,7 @@ function buildTrajectoryRows(
       key: era.era_id,
       timeCell: `${dateTimeNoSecondsFormatter.format(start)} — ${timeFormatter.format(end)}`,
       planningPriceLabel: formatCostSource(planningCostSource),
-      referencePriceLabel: buildReferencePriceLabel(era),
+      proposedActionLabel: buildProposedActionDetail(oracle),
       solarLabel: solarSource ? formatNumber(solarSource.payload.average_power_w ?? solarSource.payload.energy_wh, " W") : "n/a",
       demandLabel: demand ? formatNumber(demand.house_power_w, " W") : "n/a",
       targetLabel,
@@ -113,7 +121,7 @@ function TrajectoryTable({forecast, demandForecast, oracleEntries}: TrajectoryTa
           <tr>
             <th className="timestamp">Time</th>
             <th className="numeric">Planning Price</th>
-            <th className="numeric">Alternative Prices</th>
+            <th className="numeric">Proposed Action</th>
             <th className="numeric">Solar (W)</th>
             <th className="numeric">Demand (W)</th>
             <th className="numeric">End SOC %</th>
@@ -125,7 +133,7 @@ function TrajectoryTable({forecast, demandForecast, oracleEntries}: TrajectoryTa
             <tr key={row.key}>
               <td className="timestamp">{row.timeCell}</td>
               <td className="numeric">{row.planningPriceLabel}</td>
-              <td className="numeric">{row.referencePriceLabel}</td>
+              <td className="numeric">{row.proposedActionLabel}</td>
               <td className="numeric">{row.solarLabel}</td>
               <td className="numeric">{row.demandLabel}</td>
               <td className="numeric">{row.targetLabel}</td>
