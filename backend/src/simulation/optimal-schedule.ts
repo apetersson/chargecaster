@@ -366,7 +366,9 @@ function buildSlotProfiles(params: {
       networkTariff,
       gridChargeLimit,
       solarChargeLimit,
-      totalChargeLimit: gridChargeLimit.add(solarChargeLimit),
+      // The battery may accept the higher solar-only rate, but once grid charging is involved
+      // the total charge rate must stay within the grid-backed battery ceiling.
+      totalChargeLimit: maxEnergy(gridChargeLimit, solarChargeLimit),
       dischargeLimit,
     } satisfies SlotProfile;
   });
@@ -505,6 +507,12 @@ function evaluateStateTransitions(
       }
       const solarCharging = maxEnergy(batteryEnergyAtBus.subtract(additionalGridCharge), Energy.zero());
       if (solarCharging.kilowattHours > profile.solarChargeLimit.kilowattHours + EPSILON) {
+        continue;
+      }
+      if (
+        additionalGridCharge.kilowattHours > EPSILON &&
+        batteryEnergyAtBus.kilowattHours > profile.gridChargeLimit.kilowattHours + EPSILON
+      ) {
         continue;
       }
     }
