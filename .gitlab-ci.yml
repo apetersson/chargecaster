@@ -33,6 +33,7 @@ default:
       - .pnpm-store/
   before_script:
     - corepack enable
+    - pnpm config set store-dir .pnpm-store
     - pnpm install --frozen-lockfile
 
 verify:typecheck:
