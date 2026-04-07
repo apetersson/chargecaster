@@ -188,7 +188,10 @@ export function deriveBatteryOptimisationConstraints(
     availableModes,
     availableModeDefinitions: capabilities?.modes?.filter((mode) => availableModes.includes(mode.id)) ?? buildGenericBatteryControlCapabilities().modes,
     allowGridChargeFromGrid: availableModes.includes("charge"),
-    canPreventAutomaticSolarCharging: availableModes.includes("hold") || availableModes.includes("limit"),
+    canPreventAutomaticSolarCharging: (
+      capabilities?.modes?.filter((mode) => availableModes.includes(mode.id))
+      ?? buildGenericBatteryControlCapabilities().modes
+    ).some((mode) => mode.allowsAutomaticSolarCharging === false),
   };
 }
 
@@ -309,24 +312,27 @@ export function createHoldModeDefinition(definition: {
 }): BatteryControlModeDefinition {
   return {
     id: "hold",
-    allowsAutomaticSolarCharging: false,
+    allowsAutomaticSolarCharging: true,
     floorSocRange: definition.floorSocRange,
     targetSocRange: definition.targetSocRange,
-    tieBreakPriority: 1,
+    tieBreakPriority: 2,
     enumerateParameters(scenario) {
       const targetPercent = clampScenarioPercent(scenario.startSocPercent, definition.targetSocRange);
       const floorPercent = clampScenarioPercent(Math.min(targetPercent, scenario.startSocPercent), definition.floorSocRange);
       return [{targetSocPercent: targetPercent, floorSocPercent: floorPercent}];
     },
     applySlotScenario(scenario, parameters) {
-      const targetPercent = clampScenarioPercent(
+      const minimumPercent = clampScenarioPercent(
         parameters.targetSocPercent ?? scenario.startSocPercent,
         definition.targetSocRange,
       );
-      const targetStep = clampStepFromPercent(targetPercent, scenario);
-      return buildStaticOutcome("hold", scenario, targetStep, {
-        targetSocPercent: targetPercent,
-        floorSocPercent: clampScenarioPercent(parameters.floorSocPercent ?? scenario.minAllowedSocPercent, definition.floorSocRange),
+      const floorPercent = clampScenarioPercent(
+        Math.max(parameters.floorSocPercent ?? scenario.minAllowedSocPercent, minimumPercent),
+        definition.floorSocRange,
+      );
+      return applyAutoScenario(scenario, floorPercent, "hold", {
+        targetSocPercent: minimumPercent,
+        floorSocPercent: floorPercent,
       });
     },
     buildCommandFromSnapshot(snapshot) {
@@ -348,15 +354,6 @@ export function createHoldModeDefinition(definition: {
         },
       };
     },
-    shouldRejectOutcome(context) {
-      return shouldRejectHeadroomPreservingMode(context);
-    },
-    resolveOracleStrategy(transition, availableModes) {
-      if (transition.deltaSoCSteps !== 0 && availableModes.has("auto")) {
-        return "auto";
-      }
-      return transition.mode;
-    },
   };
 }
 
@@ -369,17 +366,20 @@ export function createLimitModeDefinition(definition: {
     allowsAutomaticSolarCharging: false,
     floorSocRange: definition.floorSocRange,
     maxChargePowerRange: definition.maxChargePowerRange,
-    tieBreakPriority: 2,
+    tieBreakPriority: 1,
     enumerateParameters(scenario) {
       return [{
-        floorSocPercent: clampScenarioPercent(scenario.minAllowedSocPercent, definition.floorSocRange),
+        floorSocPercent: clampScenarioPercent(scenario.startSocPercent, definition.floorSocRange),
         maxChargePowerW: definition.maxChargePowerRange?.supportsZeroPower ? 0 : definition.maxChargePowerRange?.minPowerW ?? 0,
       }];
     },
     applySlotScenario(scenario, parameters) {
-      const targetStep = clampStepFromPercent(scenario.startSocPercent, scenario);
-      return buildStaticOutcome("limit", scenario, targetStep, {
-        floorSocPercent: clampScenarioPercent(parameters.floorSocPercent ?? scenario.minAllowedSocPercent, definition.floorSocRange),
+      const capPercent = clampScenarioPercent(
+        parameters.floorSocPercent ?? scenario.startSocPercent,
+        definition.floorSocRange,
+      );
+      return applyLimitScenario(scenario, capPercent, {
+        floorSocPercent: capPercent,
         maxChargePowerW: parameters.maxChargePowerW ?? 0,
       });
     },
@@ -517,6 +517,8 @@ function clampToPowerRange(
 function applyAutoScenario(
   scenario: BatteryControlSlotScenario,
   floorPercent: number,
+  mode: BatteryControlMode = "auto",
+  parameters: BatteryControlModeParameters = {floorSocPercent: floorPercent},
 ): BatteryControlSlotOutcome {
   const floorStep = clampStepFromPercent(floorPercent, scenario);
   const headroomSteps = Math.max(0, scenario.maxAllowedSoCStep - scenario.startSocStep);
@@ -525,9 +527,7 @@ function applyAutoScenario(
   const siteDeficitWh = Math.max(0, scenario.loadAfterDirectUseWh - scenario.availableSolarWh);
 
   if (solarSurplusWh > 0 && headroomSteps > 0) {
-    const outcome = findBestChargeOutcome("auto", scenario, {
-      floorSocPercent: floorPercent,
-    }, scenario.startSocStep + headroomSteps, scenario.solarChargeLimitWh, true);
+    const outcome = findBestChargeOutcome(mode, scenario, parameters, scenario.startSocStep + headroomSteps, scenario.solarChargeLimitWh, true);
     if (outcome) {
       return outcome;
     }
@@ -536,14 +536,29 @@ function applyAutoScenario(
   if (siteDeficitWh > 0 && dischargeSteps > 0) {
     const dischargeLimitWh = scenario.dischargeLimitWh == null ? siteDeficitWh : Math.min(siteDeficitWh, scenario.dischargeLimitWh);
     const chargeSteps = -clampStoredEnergyToSteps(dischargeLimitWh, scenario);
-    return buildChargeDischargeOutcome("auto", scenario, chargeSteps, {
-      floorSocPercent: floorPercent,
-    });
+    return buildChargeDischargeOutcome(mode, scenario, chargeSteps, parameters);
   }
 
-  return buildStaticOutcome("auto", scenario, scenario.startSocStep, {
-    floorSocPercent: floorPercent,
-  });
+  return buildStaticOutcome(mode, scenario, scenario.startSocStep, parameters);
+}
+
+function applyLimitScenario(
+  scenario: BatteryControlSlotScenario,
+  maxPercent: number,
+  parameters: BatteryControlModeParameters,
+): BatteryControlSlotOutcome {
+  const maxStep = clampStepFromPercent(maxPercent, scenario);
+  const effectiveMaxStep = Math.max(scenario.startSocStep, maxStep);
+  return applyAutoScenario(
+    {
+      ...scenario,
+      maxAllowedSocPercent: Math.max(scenario.startSocPercent, maxPercent),
+      maxAllowedSoCStep: effectiveMaxStep,
+    },
+    scenario.minAllowedSocPercent,
+    "limit",
+    parameters,
+  );
 }
 
 function applyChargeScenario(
