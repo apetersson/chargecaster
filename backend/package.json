@@ -26,10 +26,10 @@
     "@chargecaster/domain": "file:../packages/domain",
     "@fastify/cors": "11.2.0",
     "@fastify/static": "9.0.0",
-    "@nestjs/common": "11.1.17",
+    "@nestjs/common": "11.1.18",
     "@nestjs/config": "4.0.3",
-    "@nestjs/core": "11.1.17",
-    "@nestjs/platform-fastify": "11.1.17",
+    "@nestjs/core": "11.1.18",
+    "@nestjs/platform-fastify": "11.1.18",
     "@trpc/server": "11.12.0",
     "catboost": "1.27.0",
     "better-sqlite3": "11.10.0",
@@ -40,7 +40,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "@nestjs/testing": "11.1.17",
+    "@nestjs/testing": "11.1.18",
     "@trpc/client": "11.12.0",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.18.8",
@@ -57,6 +57,6 @@
     "ts-node": "10.9.2",
     "tsx": "4.20.6",
     "typescript": "5.9.3",
-    "vitest": "4.1.2"
+    "vitest": "4.1.3"
   }
 }
