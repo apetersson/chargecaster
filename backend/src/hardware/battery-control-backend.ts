@@ -39,12 +39,17 @@ export interface BatteryControlPowerRange {
 
 export interface BatteryControlModeDefinition {
   id: BatteryControlMode;
+  allowsAutomaticSolarCharging?: boolean;
   floorSocRange?: BatteryControlSocRange | null;
   targetSocRange?: BatteryControlSocRange | null;
   minChargePowerRange?: (BatteryControlPowerRange & {supportsWindows: boolean; fixedPowerW?: number | null}) | null;
   maxChargePowerRange?: (BatteryControlPowerRange & {supportsWindows: boolean}) | null;
+  tieBreakPriority?: number;
   enumerateParameters(scenario: BatteryControlSlotScenario): BatteryControlModeParameters[];
   applySlotScenario(scenario: BatteryControlSlotScenario, parameters: BatteryControlModeParameters): BatteryControlSlotOutcome | null;
+  buildCommandFromSnapshot?(snapshot: BatteryControlSnapshotLike): BatteryControlCommand | null;
+  shouldRejectOutcome?(context: BatteryControlModeRejectionContext): boolean;
+  resolveOracleStrategy?(transition: Pick<BatteryControlSlotOutcome, "mode" | "deltaSoCSteps">, availableModes: Set<BatteryControlMode>): BatteryControlMode;
   reverseApplySlotScenario?(scenario: BatteryControlSlotScenario, parameters: BatteryControlModeParameters): BatteryControlSlotOutcome[] | null;
 }
 
@@ -114,6 +119,44 @@ export interface BatteryOptimisationConstraints {
   allowGridChargeFromGrid: boolean;
   canPreventAutomaticSolarCharging: boolean;
 }
+
+export interface BatteryControlSnapshotOracleEntryLike {
+  era_id?: string | null;
+  strategy?: BatteryControlMode | null;
+  start_soc_percent?: number | null;
+  end_soc_percent?: number | null;
+  target_soc_percent?: number | null;
+  mode_params?: {
+    floor_soc_percent?: number | null;
+    target_soc_percent?: number | null;
+    min_charge_power_w?: number | null;
+    max_charge_power_w?: number | null;
+  } | null;
+}
+
+export interface BatteryControlSnapshotForecastEraLike {
+  era_id?: string | null;
+  end?: string | null;
+}
+
+export interface BatteryControlSnapshotLike {
+  current_mode?: BatteryControlMode | null;
+  current_soc_percent?: Percentage | number | null;
+  next_step_soc_percent?: Percentage | number | null;
+  oracle_entries?: BatteryControlSnapshotOracleEntryLike[] | null;
+  forecast_eras?: BatteryControlSnapshotForecastEraLike[] | null;
+}
+
+export interface BatteryControlModeRejectionContext {
+  scenario: BatteryControlSlotScenario;
+  outcome: BatteryControlSlotOutcome;
+  currentPriceEurPerKwh: number;
+  minFutureImportPriceEurPerKwh: number | null;
+}
+
+const EPSILON = 1e-9;
+const LIMIT_HEADROOM_FUTURE_PRICE_ADVANTAGE_EUR_PER_KWH = 0.05;
+const LIMIT_HEADROOM_MIN_SOC_FRACTION = 0.5;
 
 export function deriveBatteryOptimisationConstraints(
   capabilities?: BatteryControlCapabilities | null,
@@ -240,7 +283,9 @@ export function createAutoModeDefinition(definition: {
 }): BatteryControlModeDefinition {
   return {
     id: "auto",
+    allowsAutomaticSolarCharging: true,
     floorSocRange: definition.floorSocRange,
+    tieBreakPriority: 4,
     enumerateParameters(scenario) {
       return [{floorSocPercent: clampScenarioPercent(scenario.minAllowedSocPercent, definition.floorSocRange)}];
     },
@@ -251,6 +296,10 @@ export function createAutoModeDefinition(definition: {
       );
       return applyAutoScenario(scenario, floorPercent);
     },
+    buildCommandFromSnapshot(snapshot) {
+      const floor = clampToSocRange(extractAutoFloor(snapshot), definition.floorSocRange);
+      return floor != null ? {auto: {floorSocPercent: floor}} : "auto";
+    },
   };
 }
 
@@ -260,8 +309,10 @@ export function createHoldModeDefinition(definition: {
 }): BatteryControlModeDefinition {
   return {
     id: "hold",
+    allowsAutomaticSolarCharging: false,
     floorSocRange: definition.floorSocRange,
     targetSocRange: definition.targetSocRange,
+    tieBreakPriority: 1,
     enumerateParameters(scenario) {
       const targetPercent = clampScenarioPercent(scenario.startSocPercent, definition.targetSocRange);
       const floorPercent = clampScenarioPercent(Math.min(targetPercent, scenario.startSocPercent), definition.floorSocRange);
@@ -278,6 +329,34 @@ export function createHoldModeDefinition(definition: {
         floorSocPercent: clampScenarioPercent(parameters.floorSocPercent ?? scenario.minAllowedSocPercent, definition.floorSocRange),
       });
     },
+    buildCommandFromSnapshot(snapshot) {
+      const observedSoc = normalisePercent(snapshot.current_soc_percent);
+      const holdTarget = clampToSocRange(extractHoldTarget(snapshot), definition.targetSocRange);
+      const floor = clampToSocRange(
+        normalisePercent(snapshot.next_step_soc_percent) ?? holdTarget ?? observedSoc,
+        definition.floorSocRange,
+      );
+      const minSoc = clampToSocRange(holdTarget ?? observedSoc ?? floor, definition.targetSocRange);
+      if (minSoc == null) {
+        return null;
+      }
+      return {
+        hold: {
+          minSocPercent: minSoc,
+          observedSocPercent: observedSoc,
+          floorSocPercent: floor,
+        },
+      };
+    },
+    shouldRejectOutcome(context) {
+      return shouldRejectHeadroomPreservingMode(context);
+    },
+    resolveOracleStrategy(transition, availableModes) {
+      if (transition.deltaSoCSteps !== 0 && availableModes.has("auto")) {
+        return "auto";
+      }
+      return transition.mode;
+    },
   };
 }
 
@@ -287,8 +366,10 @@ export function createLimitModeDefinition(definition: {
 }): BatteryControlModeDefinition {
   return {
     id: "limit",
+    allowsAutomaticSolarCharging: false,
     floorSocRange: definition.floorSocRange,
     maxChargePowerRange: definition.maxChargePowerRange,
+    tieBreakPriority: 2,
     enumerateParameters(scenario) {
       return [{
         floorSocPercent: clampScenarioPercent(scenario.minAllowedSocPercent, definition.floorSocRange),
@@ -302,6 +383,19 @@ export function createLimitModeDefinition(definition: {
         maxChargePowerW: parameters.maxChargePowerW ?? 0,
       });
     },
+    buildCommandFromSnapshot(snapshot) {
+      return {
+        limit: {
+          floorSocPercent: clampToSocRange(extractLimitFloor(snapshot), definition.floorSocRange)
+            ?? normalisePercent(snapshot.current_soc_percent),
+          maxChargePowerW: extractLimitPower(snapshot) ?? resolveZeroCompatibleLimitPower(definition.maxChargePowerRange ?? null),
+          ...buildWindowFields(extractModeUntil(snapshot, "limit"), definition.maxChargePowerRange?.supportsWindows ?? false),
+        },
+      };
+    },
+    shouldRejectOutcome(context) {
+      return shouldRejectHeadroomPreservingMode(context);
+    },
   };
 }
 
@@ -311,8 +405,10 @@ export function createChargeModeDefinition(definition: {
 }): BatteryControlModeDefinition {
   return {
     id: "charge",
+    allowsAutomaticSolarCharging: false,
     targetSocRange: definition.targetSocRange,
     minChargePowerRange: definition.minChargePowerRange,
+    tieBreakPriority: 3,
     enumerateParameters(scenario) {
       const targetPercent = clampScenarioPercent(scenario.maxAllowedSocPercent, definition.targetSocRange);
       return [{
@@ -331,7 +427,65 @@ export function createChargeModeDefinition(definition: {
         minChargePowerW: parameters.minChargePowerW ?? resolveFixedChargePower(definition.minChargePowerRange),
       });
     },
+    buildCommandFromSnapshot(snapshot) {
+      const chargeTarget = clampToSocRange(extractChargeTarget(snapshot), definition.targetSocRange);
+      const minChargePowerW = extractChargePower(snapshot) ?? resolvePreferredBoostPower(definition.minChargePowerRange ?? null);
+      const untilTimestamp = extractModeUntil(snapshot, "charge");
+      if (untilTimestamp || chargeTarget != null || minChargePowerW != null) {
+        return {
+          charge: {
+            targetSocPercent: chargeTarget,
+            minChargePowerW,
+            ...buildWindowFields(untilTimestamp, definition.minChargePowerRange?.supportsWindows ?? false),
+          },
+        };
+      }
+      return "charge";
+    },
   };
+}
+
+export function resolvePlannedBatteryControlMode(snapshot: BatteryControlSnapshotLike): BatteryControlMode {
+  if (snapshot.current_mode) {
+    return snapshot.current_mode;
+  }
+
+  const entries = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries : [];
+  if (entries.length > 0 && entries[0]?.strategy) {
+    return entries[0].strategy;
+  }
+
+  const currentSoc = normalisePercent(snapshot.current_soc_percent);
+  const nextSoc = normalisePercent(snapshot.next_step_soc_percent);
+  if (currentSoc != null && nextSoc != null) {
+    if (nextSoc > currentSoc + 0.5) {
+      return "charge";
+    }
+    if (Math.abs(nextSoc - currentSoc) <= 0.5) {
+      return "hold";
+    }
+  }
+
+  return "auto";
+}
+
+export function compareModePreference(
+  modeDefinitions: BatteryControlModeDefinition[],
+  candidate: BatteryControlMode,
+  incumbent: BatteryControlMode | null,
+): boolean {
+  if (!incumbent) {
+    return true;
+  }
+  return resolveModePriority(modeDefinitions, candidate) > resolveModePriority(modeDefinitions, incumbent);
+}
+
+export function resolveOracleStrategyForTransition(
+  modeDefinitions: BatteryControlModeDefinition[],
+  transition: Pick<BatteryControlSlotOutcome, "mode" | "deltaSoCSteps">,
+): BatteryControlMode {
+  const definition = modeDefinitions.find((mode) => mode.id === transition.mode);
+  return definition?.resolveOracleStrategy?.(transition, new Set(modeDefinitions.map((mode) => mode.id))) ?? transition.mode;
 }
 
 function clampToSocRange(value: number | null, range: BatteryControlSocRange | null): number | null {
@@ -519,6 +673,156 @@ function resolveFixedChargePower(
     return range.maxPowerW;
   }
   return range.minPowerW > 0 ? range.minPowerW : null;
+}
+
+function resolveModePriority(modeDefinitions: BatteryControlModeDefinition[], mode: BatteryControlMode): number {
+  return modeDefinitions.find((definition) => definition.id === mode)?.tieBreakPriority ?? 0;
+}
+
+function normalisePercent(value: unknown): number | null {
+  if (value instanceof Percentage) {
+    return value.percent;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  if (value <= 0) {
+    return 0;
+  }
+  if (value >= 100) {
+    return 100;
+  }
+  return value;
+}
+
+function normalisePower(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, value);
+}
+
+function extractModeUntil(
+  snapshot: BatteryControlSnapshotLike,
+  strategy: "charge" | "limit",
+): string | null {
+  const entries = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries : [];
+  const eras = Array.isArray(snapshot.forecast_eras) ? snapshot.forecast_eras : [];
+  if (!entries.length || !eras.length) {
+    return null;
+  }
+  const eraEndById = new Map(
+    eras
+      .filter((era) => typeof era.era_id === "string" && era.era_id.length > 0 && typeof era.end === "string" && era.end.length > 0)
+      .map((era) => [era.era_id, era.end as string]),
+  );
+  let untilTimestamp: string | null = null;
+  for (const entry of entries) {
+    if (entry.strategy !== strategy) {
+      break;
+    }
+    const eraEnd = eraEndById.get(entry.era_id ?? "");
+    if (eraEnd) {
+      untilTimestamp = eraEnd;
+    }
+  }
+  return untilTimestamp;
+}
+
+function extractChargeTarget(snapshot: BatteryControlSnapshotLike): number | null {
+  const entries = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries : [];
+  let target: number | null = null;
+  for (const entry of entries) {
+    if (entry.strategy !== "charge") {
+      break;
+    }
+    const candidate = entry.mode_params?.target_soc_percent ?? entry.target_soc_percent ?? entry.end_soc_percent ?? entry.start_soc_percent ?? null;
+    const normalised = normalisePercent(candidate);
+    if (normalised != null) {
+      target = normalised;
+    }
+  }
+  return target ?? normalisePercent(snapshot.next_step_soc_percent) ?? normalisePercent(snapshot.current_soc_percent);
+}
+
+function extractHoldTarget(snapshot: BatteryControlSnapshotLike): number | null {
+  const entries = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries : [];
+  const holdEntry = entries.find((entry) => entry.strategy === "hold");
+  if (holdEntry) {
+    const candidate = holdEntry.target_soc_percent ?? holdEntry.end_soc_percent ?? holdEntry.start_soc_percent ?? null;
+    const explicitCandidate = holdEntry.mode_params?.target_soc_percent ?? candidate;
+    const normalised = normalisePercent(explicitCandidate);
+    if (normalised != null) {
+      return normalised;
+    }
+  }
+  return normalisePercent(snapshot.next_step_soc_percent) ?? normalisePercent(snapshot.current_soc_percent);
+}
+
+function extractChargePower(snapshot: BatteryControlSnapshotLike): number | null {
+  const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries.find((entry) => entry.strategy === "charge") : null;
+  return normalisePower(firstEntry?.mode_params?.min_charge_power_w ?? null);
+}
+
+function extractLimitPower(snapshot: BatteryControlSnapshotLike): number | null {
+  const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries.find((entry) => entry.strategy === "limit") : null;
+  return normalisePower(firstEntry?.mode_params?.max_charge_power_w ?? null);
+}
+
+function extractAutoFloor(snapshot: BatteryControlSnapshotLike): number | null {
+  const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries[0] : null;
+  return normalisePercent(firstEntry?.mode_params?.floor_soc_percent ?? snapshot.next_step_soc_percent);
+}
+
+function extractLimitFloor(snapshot: BatteryControlSnapshotLike): number | null {
+  const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries[0] : null;
+  return normalisePercent(firstEntry?.mode_params?.floor_soc_percent ?? snapshot.next_step_soc_percent)
+    ?? normalisePercent(snapshot.current_soc_percent);
+}
+
+function resolvePreferredBoostPower(
+  range: BatteryControlModeDefinition["minChargePowerRange"] | null,
+): number | null {
+  if (!range) {
+    return null;
+  }
+  if (typeof range.fixedPowerW === "number" && Number.isFinite(range.fixedPowerW)) {
+    return range.fixedPowerW;
+  }
+  if (typeof range.maxPowerW === "number" && Number.isFinite(range.maxPowerW)) {
+    return range.maxPowerW;
+  }
+  return range.minPowerW > 0 ? range.minPowerW : null;
+}
+
+function resolveZeroCompatibleLimitPower(
+  range: BatteryControlModeDefinition["maxChargePowerRange"] | null,
+): number | null {
+  if (!range || range.supportsZeroPower) {
+    return 0;
+  }
+  return range.minPowerW;
+}
+
+function buildWindowFields(untilTimestamp: string | null, supportsWindows: boolean): BatteryControlWindow {
+  if (!supportsWindows || !untilTimestamp) {
+    return {};
+  }
+  return {untilTimestamp};
+}
+
+function shouldRejectHeadroomPreservingMode(context: BatteryControlModeRejectionContext): boolean {
+  const solarSurplusWh = context.scenario.availableSolarWh - context.scenario.loadAfterDirectUseWh;
+  if (solarSurplusWh <= EPSILON) {
+    return false;
+  }
+  if (context.scenario.startSocStep >= Math.round(context.scenario.maxAllowedSoCStep * LIMIT_HEADROOM_MIN_SOC_FRACTION)) {
+    return false;
+  }
+  if (context.minFutureImportPriceEurPerKwh == null || !Number.isFinite(context.minFutureImportPriceEurPerKwh)) {
+    return true;
+  }
+  return context.currentPriceEurPerKwh - context.minFutureImportPriceEurPerKwh < LIMIT_HEADROOM_FUTURE_PRICE_ADVANTAGE_EUR_PER_KWH;
 }
 
 function energyAtBusFromStoredEnergyChange(

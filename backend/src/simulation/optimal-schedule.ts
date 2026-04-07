@@ -16,14 +16,16 @@ import type {
   BatteryControlSlotOutcome,
   BatteryControlSlotScenario,
 } from "../hardware/battery-control-backend";
-import { buildGenericBatteryControlCapabilities } from "../hardware/battery-control-backend";
+import {
+  buildGenericBatteryControlCapabilities,
+  compareModePreference,
+  resolveOracleStrategyForTransition,
+} from "../hardware/battery-control-backend";
 import { resolveTransitionEfficiencies } from "./battery-efficiency-curve";
 
 const SOC_STEPS = 100;
 const EPSILON = 1e-9;
 const GRID_CHARGE_STRATEGY_THRESHOLD_KWH = 0.05;
-const LIMIT_HEADROOM_FUTURE_PRICE_ADVANTAGE_EUR_PER_KWH = 0.05;
-const LIMIT_HEADROOM_MIN_SOC_FRACTION = 0.5;
 
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
@@ -432,7 +434,12 @@ function evaluateStateTransitions(
       if (!outcome) {
         continue;
       }
-      if (shouldRejectLimitUnderCurrentSolar(context, profile, currentSoCStep, outcome.mode)) {
+      if (modeDefinition.shouldRejectOutcome?.({
+        scenario,
+        outcome,
+        currentPriceEurPerKwh: profile.priceTotal.eurPerKwh,
+        minFutureImportPriceEurPerKwh: context.minFutureImportPriceBySlot[profile.index] ?? null,
+      })) {
         continue;
       }
       const {nextSoCStep} = outcome;
@@ -448,7 +455,7 @@ function evaluateStateTransitions(
 
       if (
         !canPreventAutomaticSolarCharging &&
-        outcome.mode !== "auto" &&
+        modeDefinition.allowsAutomaticSolarCharging !== true &&
         gridEnergy.wattHours < -EPSILON &&
         nextSoCStep < context.maxAllowedSoCStep
       ) {
@@ -466,6 +473,7 @@ function evaluateStateTransitions(
         || totalCost.eur < bestCost.eur - EPSILON
         || (Math.abs(totalCost.eur - bestCost.eur) <= EPSILON
           && shouldPreferTransition(
+            modeDefinitions,
             {
               mode: outcome.mode,
               nextSoCStep,
@@ -548,6 +556,7 @@ function buildSlotScenario(
 }
 
 function shouldPreferTransition(
+  modeDefinitions: BatteryControlModeDefinition[],
   candidate: Pick<PolicyTransition, "mode" | "nextSoCStep" | "additionalGridCharge">,
   incumbent: Pick<PolicyTransition, "mode" | "nextSoCStep" | "additionalGridCharge"> | null,
 ): boolean {
@@ -560,48 +569,7 @@ function shouldPreferTransition(
   if (Math.abs(candidate.additionalGridCharge.wattHours - incumbent.additionalGridCharge.wattHours) > EPSILON) {
     return candidate.additionalGridCharge.wattHours < incumbent.additionalGridCharge.wattHours;
   }
-  return shouldPreferMode(candidate.mode, incumbent.mode);
-}
-
-function shouldRejectLimitUnderCurrentSolar(
-  context: SimulationContext,
-  profile: SlotProfile,
-  currentSoCStep: number,
-  mode: OracleEntry["strategy"],
-): boolean {
-  if (mode !== "limit" && mode !== "hold") {
-    return false;
-  }
-
-  const solarSurplusWh = profile.availableSolar.subtract(profile.loadAfterDirectUse).wattHours;
-  if (solarSurplusWh <= EPSILON) {
-    return false;
-  }
-
-  if (currentSoCStep >= Math.round(context.maxAllowedSoCStep * LIMIT_HEADROOM_MIN_SOC_FRACTION)) {
-    return false;
-  }
-
-  const bestFuturePrice = context.minFutureImportPriceBySlot[profile.index] ?? Number.POSITIVE_INFINITY;
-  if (!Number.isFinite(bestFuturePrice)) {
-    return true;
-  }
-
-  const currentPrice = profile.priceTotal.eurPerKwh;
-  return currentPrice - bestFuturePrice < LIMIT_HEADROOM_FUTURE_PRICE_ADVANTAGE_EUR_PER_KWH;
-}
-
-function shouldPreferMode(candidate: OracleEntry["strategy"], incumbent: OracleEntry["strategy"] | null): boolean {
-  if (!incumbent) {
-    return true;
-  }
-  const rank = new Map<OracleEntry["strategy"], number>([
-    ["auto", 4],
-    ["charge", 3],
-    ["limit", 2],
-    ["hold", 1],
-  ]);
-  return (rank.get(candidate) ?? 0) > (rank.get(incumbent) ?? 0);
+  return compareModePreference(modeDefinitions, candidate.mode, incumbent.mode);
 }
 
 function normaliseModeParameters(parameters: BatteryControlModeParameters | null): OracleEntry["mode_params"] | undefined {
@@ -731,13 +699,10 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     const normalizedGridEnergyWh = Number.isFinite(gridEnergy.wattHours)
       ? gridEnergy.wattHours
       : null;
-    if (
-      strategy === "hold"
-      && Math.abs(deltaSoCSteps) > 0
-      && context.modeDefinitions.some((mode) => mode.id === "auto")
-    ) {
-      strategy = "auto";
-    }
+    strategy = resolveOracleStrategyForTransition(context.modeDefinitions, {
+      mode: transition.mode,
+      deltaSoCSteps,
+    });
     oracleEntries.push({
       era_id: eraId,
       start_soc_percent: Number.isFinite(startSocPercent) ? startSocPercent : null,
