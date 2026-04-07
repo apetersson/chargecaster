@@ -1,14 +1,14 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { Percentage } from "@chargecaster/domain";
+import { Percentage, type BatteryControlMode } from "@chargecaster/domain";
 
 import type { SimulationService } from "../simulation/simulation.service";
 import type {
   BatteryControlBackend,
   BatteryControlCapabilities,
   BatteryControlCommand,
+  BatteryControlModeDefinition,
 } from "./battery-control-backend";
-import { BATTERY_CONTROL_BACKEND } from "./battery-control-backend";
-import { deriveOperationalMode } from "./optimisation-mode";
+import { BATTERY_CONTROL_BACKEND, getBatteryControlModeDefinition } from "./battery-control-backend";
 
 type SimulationSnapshot = Awaited<ReturnType<SimulationService["runSimulation"]>>;
 
@@ -16,40 +16,40 @@ const DEFAULT_BATTERY_CONTROL_BACKEND: BatteryControlBackend = {
   getCapabilities(): BatteryControlCapabilities {
     return {
       backendId: "generic-test-backend",
-      modeSupport: {
-        auto: true,
-        holdTargetSoc: true,
-        chargeToTargetSoc: true,
-        chargeLimitPower: true,
-        chargeBoostPower: true,
-        absoluteChargeWindow: true,
-        recurringScheduleWindow: true,
-      },
-      autoFloorSocRange: {
-        minPercent: 0,
-        maxPercent: 100,
-        stepPercent: 1,
-      },
-      targetSocRange: {
-        minPercent: 0,
-        maxPercent: 100,
-        stepPercent: 1,
-      },
-      chargeLimitPowerRange: {
-        minPowerW: 0,
-        maxPowerW: null,
-        stepPowerW: 1,
-        supportsZeroPower: true,
-        supportsWindows: true,
-      },
-      chargeBoostPowerRange: {
-        minPowerW: 0,
-        maxPowerW: null,
-        stepPowerW: 1,
-        supportsZeroPower: true,
-        supportsWindows: true,
-        fixedPowerW: null,
-      },
+      modes: [
+        {
+          id: "auto",
+          floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+        },
+        {
+          id: "hold",
+          floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+          targetSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+        },
+        {
+          id: "limit",
+          floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+          maxChargePowerRange: {
+            minPowerW: 0,
+            maxPowerW: null,
+            stepPowerW: 1,
+            supportsZeroPower: true,
+            supportsWindows: true,
+          },
+        },
+        {
+          id: "charge",
+          targetSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+          minChargePowerRange: {
+            minPowerW: 0,
+            maxPowerW: null,
+            stepPowerW: 1,
+            supportsZeroPower: true,
+            supportsWindows: true,
+            fixedPowerW: null,
+          },
+        },
+      ],
       scheduleConstraints: {
         minWindowMinutes: null,
         maxWindows: null,
@@ -71,19 +71,16 @@ export class OptimisationCommandTranslator {
 
   fromSimulationSnapshot(snapshot: SimulationSnapshot): BatteryControlCommand {
     const capabilities = this.batteryControlBackend.getCapabilities();
-    const mode = deriveOperationalMode({
-      ...snapshot,
-      current_soc_percent: this.toPercentage(snapshot.current_soc_percent),
-      next_step_soc_percent: this.toPercentage(snapshot.next_step_soc_percent),
-    });
+    const mode = this.resolvePlannedMode(snapshot);
     if (mode === "charge") {
-      if (!capabilities.modeSupport.chargeToTargetSoc) {
-        this.logger.warn("Battery backend does not support charge-to-target mode; falling back to AUTO.");
+      const chargeMode = getBatteryControlModeDefinition(capabilities, "charge");
+      if (!chargeMode) {
+        this.logger.warn("Battery backend does not support charge mode; falling back to AUTO.");
         return this.buildAutoCommand(snapshot, capabilities);
       }
-      const chargeTarget = this.clampSocPercent(this.extractChargeTarget(snapshot), capabilities.targetSocRange);
-      const minChargePowerW = this.resolvePreferredBoostPower(capabilities.chargeBoostPowerRange);
-      const untilTimestamp = capabilities.modeSupport.absoluteChargeWindow ? this.extractChargeUntil(snapshot) : null;
+      const chargeTarget = this.clampSocPercent(this.extractChargeTarget(snapshot), chargeMode.targetSocRange ?? null);
+      const minChargePowerW = this.resolvePreferredBoostPower(chargeMode.minChargePowerRange ?? null);
+      const untilTimestamp = chargeMode.minChargePowerRange?.supportsWindows ? this.extractChargeUntil(snapshot) : null;
       if (untilTimestamp || chargeTarget != null || minChargePowerW != null) {
         return {
           charge: {
@@ -99,12 +96,13 @@ export class OptimisationCommandTranslator {
       return this.buildAutoCommand(snapshot, capabilities);
     }
     if (mode === "limit") {
-      if (!capabilities.modeSupport.chargeLimitPower) {
+      const limitMode = getBatteryControlModeDefinition(capabilities, "limit");
+      if (!limitMode) {
         this.logger.warn("Battery backend does not support charge limiting; falling back to AUTO.");
         return this.buildAutoCommand(snapshot, capabilities);
       }
-      const floor = this.clampSocPercent(this.extractLimitFloor(snapshot), capabilities.autoFloorSocRange);
-      const limitRange = capabilities.chargeLimitPowerRange;
+      const floor = this.clampSocPercent(this.extractLimitFloor(snapshot), limitMode.floorSocRange ?? null);
+      const limitRange = limitMode.maxChargePowerRange ?? null;
       const untilTimestamp = limitRange?.supportsWindows ? this.extractModeUntil(snapshot, "limit") : null;
       return {
         limit: {
@@ -114,17 +112,18 @@ export class OptimisationCommandTranslator {
         },
       };
     }
-    if (!capabilities.modeSupport.holdTargetSoc) {
+    const holdMode = getBatteryControlModeDefinition(capabilities, "hold");
+    if (!holdMode) {
       this.logger.warn("Battery backend does not support hold-target mode; falling back to AUTO.");
       return this.buildAutoCommand(snapshot, capabilities);
     }
     const observedSoc = this.normalisePercent(snapshot.current_soc_percent);
-    const holdTarget = this.clampSocPercent(this.extractHoldTarget(snapshot), capabilities.targetSocRange);
+    const holdTarget = this.clampSocPercent(this.extractHoldTarget(snapshot), holdMode.targetSocRange ?? null);
     const floor = this.clampSocPercent(
       this.normalisePercent(snapshot.next_step_soc_percent) ?? holdTarget ?? observedSoc,
-      capabilities.autoFloorSocRange,
+      holdMode.floorSocRange ?? null,
     );
-    const minSoc = this.clampSocPercent(holdTarget ?? observedSoc ?? floor, capabilities.targetSocRange);
+    const minSoc = this.clampSocPercent(holdTarget ?? observedSoc ?? floor, holdMode.targetSocRange ?? null);
     if (minSoc == null) {
       this.logger.warn("Hold strategy missing usable SoC reference; defaulting to AUTO command.");
       return this.buildAutoCommand(snapshot, capabilities);
@@ -142,13 +141,34 @@ export class OptimisationCommandTranslator {
     snapshot: SimulationSnapshot,
     capabilities: BatteryControlCapabilities,
   ): BatteryControlCommand {
-    if (!capabilities.modeSupport.auto) {
+    const autoMode = getBatteryControlModeDefinition(capabilities, "auto");
+    if (!autoMode) {
       this.logger.warn("Battery backend does not support auto mode; falling back to plain AUTO command.");
       return "auto";
     }
-    const floor = this.clampSocPercent(this.extractAutoFloor(snapshot), capabilities.autoFloorSocRange);
+    const floor = this.clampSocPercent(this.extractAutoFloor(snapshot), autoMode.floorSocRange ?? null);
     if (floor != null) {
       return {auto: {floorSocPercent: floor}};
+    }
+    return "auto";
+  }
+
+  private resolvePlannedMode(snapshot: SimulationSnapshot): BatteryControlMode {
+    if (snapshot.current_mode) {
+      return snapshot.current_mode;
+    }
+    if (Array.isArray(snapshot.oracle_entries) && snapshot.oracle_entries.length > 0) {
+      return snapshot.oracle_entries[0]?.strategy ?? "auto";
+    }
+    const currentSoc = this.normalisePercent(snapshot.current_soc_percent);
+    const nextSoc = this.normalisePercent(snapshot.next_step_soc_percent);
+    if (currentSoc != null && nextSoc != null) {
+      if (nextSoc > currentSoc + 0.5) {
+        return "charge";
+      }
+      if (Math.abs(nextSoc - currentSoc) <= 0.5) {
+        return "hold";
+      }
     }
     return "auto";
   }
@@ -191,8 +211,7 @@ export class OptimisationCommandTranslator {
       if (entry.strategy !== "charge") {
         break;
       }
-      const candidate =
-        entry.target_soc_percent ?? entry.end_soc_percent ?? entry.start_soc_percent ?? null;
+      const candidate = entry.target_soc_percent ?? entry.end_soc_percent ?? entry.start_soc_percent ?? null;
       const normalised = this.normalisePercent(candidate);
       if (normalised != null) {
         target = normalised;
@@ -207,8 +226,7 @@ export class OptimisationCommandTranslator {
     if (Array.isArray(snapshot.oracle_entries)) {
       const holdEntry = snapshot.oracle_entries.find((entry) => entry.strategy === "hold");
       if (holdEntry) {
-        const candidate =
-          holdEntry.target_soc_percent ?? holdEntry.end_soc_percent ?? holdEntry.start_soc_percent ?? null;
+        const candidate = holdEntry.target_soc_percent ?? holdEntry.end_soc_percent ?? holdEntry.start_soc_percent ?? null;
         const normalised = this.normalisePercent(candidate);
         if (normalised != null) {
           return normalised;
@@ -226,9 +244,12 @@ export class OptimisationCommandTranslator {
     return this.normalisePercent(snapshot.next_step_soc_percent) ?? this.normalisePercent(snapshot.current_soc_percent);
   }
 
-  private clampSocPercent(value: number | null, range: BatteryControlCapabilities["autoFloorSocRange"]): number | null {
-    if (value == null) {
-      return null;
+  private clampSocPercent(
+    value: number | null,
+    range: BatteryControlModeDefinition["floorSocRange"] | BatteryControlModeDefinition["targetSocRange"] | null,
+  ): number | null {
+    if (value == null || !range) {
+      return value;
     }
     const bounded = Math.min(range.maxPercent, Math.max(range.minPercent, value));
     if (range.stepPercent == null || range.stepPercent <= 0) {
@@ -238,7 +259,7 @@ export class OptimisationCommandTranslator {
   }
 
   private resolveZeroCompatibleLimitPower(
-    range: BatteryControlCapabilities["chargeLimitPowerRange"],
+    range: BatteryControlModeDefinition["maxChargePowerRange"] | null,
   ): number | null {
     if (!range) {
       return 0;
@@ -250,7 +271,7 @@ export class OptimisationCommandTranslator {
   }
 
   private resolvePreferredBoostPower(
-    range: BatteryControlCapabilities["chargeBoostPowerRange"],
+    range: BatteryControlModeDefinition["minChargePowerRange"] | null,
   ): number | null {
     if (!range) {
       return null;
@@ -278,10 +299,5 @@ export class OptimisationCommandTranslator {
       return 100;
     }
     return value;
-  }
-
-  private toPercentage(value: unknown): Percentage | null {
-    const normalised = this.normalisePercent(value);
-    return normalised == null ? null : Percentage.fromPercent(normalised);
   }
 }

@@ -4,7 +4,7 @@ import { Percentage } from "@chargecaster/domain";
 import { OptimisationCommandTranslator } from "../src/hardware/optimisation-command-translator.service";
 
 describe("OptimisationCommandTranslator", () => {
-  it("prefers auto for a live PV-assisted midday snapshot with only tiny immediate grid-charge energy", () => {
+  it("honors an explicit charge mode without reconstructing it from heuristics", () => {
     const translator = new OptimisationCommandTranslator();
 
     const command = translator.fromSimulationSnapshot({
@@ -93,13 +93,15 @@ describe("OptimisationCommandTranslator", () => {
     } as never);
 
     expect(command).toEqual({
-      auto: {
-        floorSocPercent: 19,
+      charge: {
+        untilTimestamp: "2026-03-31T12:00:00.000Z",
+        targetSocPercent: 38,
+        minChargePowerW: null,
       },
     });
   });
 
-  it("prefers auto for a transient sunny-hour hold before PV-led charging resumes", () => {
+  it("honors an explicit hold mode without relaxing it to auto", () => {
     const translator = new OptimisationCommandTranslator();
 
     const command = translator.fromSimulationSnapshot({
@@ -173,7 +175,9 @@ describe("OptimisationCommandTranslator", () => {
     } as never);
 
     expect(command).toEqual({
-      auto: {
+      hold: {
+        minSocPercent: 17,
+        observedSocPercent: 16.5,
         floorSocPercent: 17,
       },
     });

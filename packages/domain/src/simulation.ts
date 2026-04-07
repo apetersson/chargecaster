@@ -279,6 +279,9 @@ export const batteryConfigSchema = z.object({
 
 export type BatteryChemistry = z.infer<typeof batteryConfigSchema>["chemistry"];
 
+export const batteryControlModeSchema = z.enum(["charge", "auto", "hold", "limit"]);
+export type BatteryControlMode = z.infer<typeof batteryControlModeSchema>;
+
 export const priceConfigSchema = z.object({
   grid_fee_eur_per_kwh: nullableNumberSchema.optional(),
   feed_in_tariff_eur_per_kwh: nullableNumberSchema.optional(),
@@ -288,6 +291,7 @@ export const logicConfigSchema = z.object({
   interval_seconds: nullableNumberSchema.optional(),
   min_hold_minutes: nullableNumberSchema.optional(),
   allow_battery_export: optionalBooleanSchema.optional(),
+  optimizer_modes: z.array(batteryControlModeSchema).optional(),
 });
 
 export const simulationConfigSchema = z.object({

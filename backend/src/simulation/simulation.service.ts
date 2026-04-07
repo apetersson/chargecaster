@@ -23,7 +23,6 @@ import {
 } from "@chargecaster/domain";
 import { StorageService } from "../storage/storage.service";
 import { parseEvccState } from "../config/schemas";
-import { deriveOperationalMode } from "../hardware/optimisation-mode";
 import type { BatteryControlCapabilities } from "../hardware/battery-control-backend";
 import {
   clampSimulationConfigToBatteryCapabilities,
@@ -144,7 +143,10 @@ export class SimulationService {
     // Normalise live telemetry so downstream optimisers always receive a concrete SoC
     // Ensure the optimiser always receives a deterministic SoC input
     const effectiveConfig = clampSimulationConfigToBatteryCapabilities(input.config, input.batteryControlCapabilities);
-    const optimisationConstraints = deriveBatteryOptimisationConstraints(input.batteryControlCapabilities);
+    const optimisationConstraints = deriveBatteryOptimisationConstraints(
+      input.batteryControlCapabilities,
+      effectiveConfig.logic.optimizer_modes ?? null,
+    );
     const resolvedSoCPercent = this.resolveLiveSoCPercent(input.liveState.battery_soc);
     const liveState = {battery_soc: resolvedSoCPercent};
     const slots = normalizePriceSlots(input.forecast);
@@ -212,9 +214,8 @@ export class SimulationService {
       feedInTariffEurPerKwhBySlot: input.feedInTariffEurPerKwhBySlot,
       allowBatteryExport: effectiveConfig.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: optimisationConstraints.allowGridChargeFromGrid,
-      canHoldTargetSoc: optimisationConstraints.canHoldTargetSoc,
-      canLimitChargePower: optimisationConstraints.canLimitChargePower,
       canPreventAutomaticSolarCharging: optimisationConstraints.canPreventAutomaticSolarCharging,
+      optimizerModeAllowList: optimisationConstraints.availableModes,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
       dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
       chargeAverageCRate: batteryEfficiency.chargeAverageCRate,
@@ -236,14 +237,7 @@ export class SimulationService {
     );
     const firstEntry = result.oracle_entries.length > 0 ? result.oracle_entries[0] : null;
     const firstStrategy = firstEntry?.strategy ?? null;
-    const currentMode = deriveOperationalMode({
-      current_mode: firstStrategy,
-      current_soc_percent: Percentage.fromPercent(result.initial_soc_percent),
-      next_step_soc_percent:
-        result.next_step_soc_percent != null ? Percentage.fromPercent(result.next_step_soc_percent) : null,
-      oracle_entries: result.oracle_entries,
-      forecast_eras: forecastEras,
-    });
+    const currentMode = firstStrategy ?? "auto";
     this.logger.log(`Simulation result: ${currentMode.toUpperCase()}`);
     if (result.oracle_entries.length) {
       const strategyLog = result.oracle_entries

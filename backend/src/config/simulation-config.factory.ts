@@ -81,6 +81,7 @@ export class SimulationConfigFactory {
         interval_seconds: intervalSeconds,
         min_hold_minutes: minHoldMinutes ?? null,
         allow_battery_export: allowBatteryExport,
+        optimizer_modes: logic.optimizer_modes ?? undefined,
       },
     };
   }

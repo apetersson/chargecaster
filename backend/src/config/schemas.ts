@@ -173,6 +173,7 @@ const logicConfigSchema = z
     interval_seconds: optionalNumberSchema.optional(),
     min_hold_minutes: optionalNumberSchema.optional(),
     allow_battery_export: optionalBooleanSchema.optional(),
+    optimizer_modes: z.array(z.enum(["charge", "auto", "hold", "limit"])).optional(),
   })
   .strip();
 

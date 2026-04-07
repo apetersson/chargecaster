@@ -1,8 +1,8 @@
-import type { SimulationConfig } from "@chargecaster/domain";
+import type { BatteryControlMode, SimulationConfig } from "@chargecaster/domain";
 
 export const BATTERY_CONTROL_BACKEND = Symbol("BATTERY_CONTROL_BACKEND");
 
-export type BatteryControlMode = "charge" | "auto" | "hold" | "limit";
+export type { BatteryControlMode };
 
 export interface BatteryControlWindow {
   startTimestamp?: string | null;
@@ -35,21 +35,17 @@ export interface BatteryControlPowerRange {
   supportsZeroPower: boolean;
 }
 
+export interface BatteryControlModeDefinition {
+  id: BatteryControlMode;
+  floorSocRange?: BatteryControlSocRange | null;
+  targetSocRange?: BatteryControlSocRange | null;
+  minChargePowerRange?: (BatteryControlPowerRange & {supportsWindows: boolean; fixedPowerW?: number | null}) | null;
+  maxChargePowerRange?: (BatteryControlPowerRange & {supportsWindows: boolean}) | null;
+}
+
 export interface BatteryControlCapabilities {
   backendId: string;
-  modeSupport: {
-    auto: boolean;
-    holdTargetSoc: boolean;
-    chargeToTargetSoc: boolean;
-    chargeLimitPower: boolean;
-    chargeBoostPower: boolean;
-    absoluteChargeWindow: boolean;
-    recurringScheduleWindow: boolean;
-  };
-  autoFloorSocRange: BatteryControlSocRange;
-  targetSocRange: BatteryControlSocRange;
-  chargeLimitPowerRange: (BatteryControlPowerRange & {supportsWindows: boolean}) | null;
-  chargeBoostPowerRange: (BatteryControlPowerRange & {supportsWindows: boolean; fixedPowerW: number | null}) | null;
+  modes: BatteryControlModeDefinition[];
   scheduleConstraints: {
     minWindowMinutes: number | null;
     maxWindows: number | null;
@@ -62,32 +58,41 @@ export interface BatteryControlBackend {
 }
 
 export interface BatteryOptimisationConstraints {
+  availableModes: BatteryControlMode[];
   allowGridChargeFromGrid: boolean;
-  canHoldTargetSoc: boolean;
-  canLimitChargePower: boolean;
   canPreventAutomaticSolarCharging: boolean;
 }
 
 export function deriveBatteryOptimisationConstraints(
   capabilities?: BatteryControlCapabilities | null,
+  configuredModes?: BatteryControlMode[] | null,
 ): BatteryOptimisationConstraints {
-  if (!capabilities) {
-    return {
-      allowGridChargeFromGrid: true,
-      canHoldTargetSoc: true,
-      canLimitChargePower: true,
-      canPreventAutomaticSolarCharging: true,
-    };
-  }
+  const capabilityModeIds = new Set(
+    capabilities?.modes
+      ?.map((mode) => mode.id)
+      .filter((mode): mode is BatteryControlMode => typeof mode === "string" && mode.length > 0)
+      ?? [],
+  );
+  const configuredModeSet = new Set(
+    Array.isArray(configuredModes)
+      ? configuredModes.filter((mode): mode is BatteryControlMode => typeof mode === "string" && mode.length > 0)
+      : [],
+  );
 
-  const canHoldTargetSoc = capabilities.modeSupport.holdTargetSoc;
-  const canLimitChargePower = capabilities.modeSupport.chargeLimitPower;
+  const availableModes = (["charge", "auto", "hold", "limit"] as const).filter((mode) => {
+    if (capabilityModeIds.size > 0 && !capabilityModeIds.has(mode)) {
+      return false;
+    }
+    if (configuredModeSet.size > 0 && !configuredModeSet.has(mode)) {
+      return false;
+    }
+    return true;
+  });
 
   return {
-    allowGridChargeFromGrid: capabilities.modeSupport.chargeToTargetSoc,
-    canHoldTargetSoc,
-    canLimitChargePower,
-    canPreventAutomaticSolarCharging: canHoldTargetSoc || canLimitChargePower,
+    availableModes,
+    allowGridChargeFromGrid: availableModes.includes("charge"),
+    canPreventAutomaticSolarCharging: availableModes.includes("hold") || availableModes.includes("limit"),
   };
 }
 
@@ -99,8 +104,11 @@ export function clampSimulationConfigToBatteryCapabilities(
     return config;
   }
 
-  const floorSoc = clampToSocRange(config.battery.auto_mode_floor_soc ?? null, capabilities.autoFloorSocRange);
-  const maxChargeSocCandidate = clampToSocRange(config.battery.max_charge_soc_percent ?? null, capabilities.targetSocRange);
+  const autoMode = getBatteryControlModeDefinition(capabilities, "auto");
+  const chargeMode = getBatteryControlModeDefinition(capabilities, "charge");
+
+  const floorSoc = clampToSocRange(config.battery.auto_mode_floor_soc ?? null, autoMode?.floorSocRange ?? null);
+  const maxChargeSocCandidate = clampToSocRange(config.battery.max_charge_soc_percent ?? null, chargeMode?.targetSocRange ?? null);
   const maxChargeSoc = maxChargeSocCandidate == null
     ? floorSoc
     : floorSoc == null
@@ -109,7 +117,7 @@ export function clampSimulationConfigToBatteryCapabilities(
 
   const maxChargePowerCandidate = clampToPowerRange(
     config.battery.max_charge_power_w ?? null,
-    capabilities.chargeBoostPowerRange,
+    chargeMode?.minChargePowerRange ?? null,
   );
   const maxChargePower = maxChargePowerCandidate ?? config.battery.max_charge_power_w ?? null;
 
@@ -124,8 +132,18 @@ export function clampSimulationConfigToBatteryCapabilities(
   };
 }
 
-function clampToSocRange(value: number | null, range: BatteryControlSocRange): number | null {
-  if (value == null || !Number.isFinite(value)) {
+export function getBatteryControlModeDefinition(
+  capabilities: BatteryControlCapabilities | null | undefined,
+  id: BatteryControlMode,
+): BatteryControlModeDefinition | null {
+  if (!capabilities) {
+    return null;
+  }
+  return capabilities.modes.find((mode) => mode.id === id) ?? null;
+}
+
+function clampToSocRange(value: number | null, range: BatteryControlSocRange | null): number | null {
+  if (value == null || !Number.isFinite(value) || !range) {
     return null;
   }
   const bounded = Math.min(range.maxPercent, Math.max(range.minPercent, value));

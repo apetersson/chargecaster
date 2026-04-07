@@ -9,7 +9,9 @@ import type {
   BatteryControlBackend,
   BatteryControlCapabilities,
   BatteryControlCommand,
+  BatteryControlModeDefinition,
 } from "../hardware/battery-control-backend";
+import { getBatteryControlModeDefinition } from "../hardware/battery-control-backend";
 
 export interface FroniusConnectionConfig {
   host: string;
@@ -121,42 +123,62 @@ export class FroniusService implements BatteryControlBackend {
 
     return {
       backendId: "fronius",
-      modeSupport: {
-        auto: true,
-        holdTargetSoc: true,
-        chargeToTargetSoc: true,
-        chargeLimitPower: true,
-        chargeBoostPower: configuredChargePower != null,
-        absoluteChargeWindow: false,
-        recurringScheduleWindow: true,
-      },
-      autoFloorSocRange: {
-        minPercent: autoFloorMin,
-        maxPercent: targetSocMax,
-        stepPercent: 1,
-      },
-      targetSocRange: {
-        minPercent: autoFloorMin,
-        maxPercent: targetSocMax,
-        stepPercent: 1,
-      },
-      chargeLimitPowerRange: {
-        minPowerW: 0,
-        maxPowerW: configuredChargePower,
-        stepPowerW: 1,
-        supportsZeroPower: true,
-        supportsWindows: true,
-      },
-      chargeBoostPowerRange: configuredChargePower == null
-        ? null
-        : {
-            minPowerW: configuredChargePower,
-            maxPowerW: configuredChargePower,
-            stepPowerW: null,
-            supportsZeroPower: false,
-            supportsWindows: true,
-            fixedPowerW: configuredChargePower,
+      modes: [
+        {
+          id: "auto",
+          floorSocRange: {
+            minPercent: autoFloorMin,
+            maxPercent: targetSocMax,
+            stepPercent: 1,
           },
+        },
+        {
+          id: "hold",
+          floorSocRange: {
+            minPercent: autoFloorMin,
+            maxPercent: targetSocMax,
+            stepPercent: 1,
+          },
+          targetSocRange: {
+            minPercent: autoFloorMin,
+            maxPercent: targetSocMax,
+            stepPercent: 1,
+          },
+        },
+        {
+          id: "limit",
+          floorSocRange: {
+            minPercent: autoFloorMin,
+            maxPercent: targetSocMax,
+            stepPercent: 1,
+          },
+          maxChargePowerRange: {
+            minPowerW: 0,
+            maxPowerW: configuredChargePower,
+            stepPowerW: 1,
+            supportsZeroPower: true,
+            supportsWindows: false,
+          },
+        },
+        {
+          id: "charge",
+          targetSocRange: {
+            minPercent: autoFloorMin,
+            maxPercent: targetSocMax,
+            stepPercent: 1,
+          },
+          minChargePowerRange: configuredChargePower == null
+            ? null
+            : {
+                minPowerW: configuredChargePower,
+                maxPowerW: configuredChargePower,
+                stepPowerW: null,
+                supportsZeroPower: false,
+                supportsWindows: false,
+                fixedPowerW: configuredChargePower,
+              },
+        },
+      ],
       scheduleConstraints: {
         minWindowMinutes: 1,
         maxWindows: null,
@@ -814,6 +836,10 @@ export class FroniusService implements BatteryControlBackend {
 
   private assertCommandSupported(command: BatteryControlCommand): void {
     const capabilities = this.getCapabilities();
+    const chargeMode = getBatteryControlModeDefinition(capabilities, "charge");
+    const autoMode = getBatteryControlModeDefinition(capabilities, "auto");
+    const holdMode = getBatteryControlModeDefinition(capabilities, "hold");
+    const limitMode = getBatteryControlModeDefinition(capabilities, "limit");
 
     if (command === "charge" || command === "auto" || command === "limit") {
       return;
@@ -821,36 +847,36 @@ export class FroniusService implements BatteryControlBackend {
 
     if ("charge" in command) {
       const {startTimestamp, untilTimestamp, targetSocPercent, minChargePowerW} = command.charge;
-      if ((startTimestamp || untilTimestamp) && !capabilities.modeSupport.absoluteChargeWindow) {
+      if ((startTimestamp || untilTimestamp) && chargeMode?.minChargePowerRange?.supportsWindows !== true) {
         throw new Error("Fronius backend does not support bounded charge windows.");
       }
-      this.assertPercentInRange(targetSocPercent, capabilities.targetSocRange, "charge.targetSocPercent");
-      this.assertPowerInRange(minChargePowerW, capabilities.chargeBoostPowerRange, "charge.minChargePowerW");
+      this.assertPercentInRange(targetSocPercent, chargeMode?.targetSocRange ?? null, "charge.targetSocPercent");
+      this.assertPowerInRange(minChargePowerW, chargeMode?.minChargePowerRange ?? null, "charge.minChargePowerW");
       return;
     }
 
     if ("limit" in command) {
       const {startTimestamp, untilTimestamp, floorSocPercent, maxChargePowerW} = command.limit;
-      if (startTimestamp || untilTimestamp) {
+      if ((startTimestamp || untilTimestamp) && limitMode?.maxChargePowerRange?.supportsWindows !== true) {
         throw new Error("Fronius backend does not support bounded limit windows.");
       }
-      this.assertPercentInRange(floorSocPercent, capabilities.autoFloorSocRange, "limit.floorSocPercent");
-      this.assertPowerInRange(maxChargePowerW, capabilities.chargeLimitPowerRange, "limit.maxChargePowerW");
+      this.assertPercentInRange(floorSocPercent, limitMode?.floorSocRange ?? null, "limit.floorSocPercent");
+      this.assertPowerInRange(maxChargePowerW, limitMode?.maxChargePowerRange ?? null, "limit.maxChargePowerW");
       return;
     }
 
     if ("hold" in command) {
-      this.assertPercentInRange(command.hold.minSocPercent, capabilities.targetSocRange, "hold.minSocPercent");
-      this.assertPercentInRange(command.hold.floorSocPercent, capabilities.autoFloorSocRange, "hold.floorSocPercent");
+      this.assertPercentInRange(command.hold.minSocPercent, holdMode?.targetSocRange ?? null, "hold.minSocPercent");
+      this.assertPercentInRange(command.hold.floorSocPercent, holdMode?.floorSocRange ?? autoMode?.floorSocRange ?? null, "hold.floorSocPercent");
     }
   }
 
   private assertPercentInRange(
     value: number | null | undefined,
-    range: BatteryControlCapabilities["targetSocRange"],
+    range: BatteryControlModeDefinition["targetSocRange"] | BatteryControlModeDefinition["floorSocRange"] | null,
     label: string,
   ): void {
-    if (value == null) {
+    if (value == null || !range) {
       return;
     }
     if (!Number.isFinite(value) || value < range.minPercent || value > range.maxPercent) {
@@ -860,7 +886,7 @@ export class FroniusService implements BatteryControlBackend {
 
   private assertPowerInRange(
     value: number | null | undefined,
-    range: BatteryControlCapabilities["chargeBoostPowerRange"] | BatteryControlCapabilities["chargeLimitPowerRange"],
+    range: BatteryControlModeDefinition["minChargePowerRange"] | BatteryControlModeDefinition["maxChargePowerRange"] | null,
     label: string,
   ): void {
     if (value == null || !range) {

@@ -24,6 +24,7 @@ describe("limit mode regression", () => {
         interval_seconds: 300,
         min_hold_minutes: 0,
         allow_battery_export: true,
+        optimizer_modes: ["limit", "charge", "auto"],
       },
     };
 
@@ -58,7 +59,7 @@ describe("limit mode regression", () => {
     expect(result.oracle_entries[1]?.end_soc_percent).toBeGreaterThan(5);
   });
 
-  it("changes the optimizer search space when the backend cannot preserve headroom under excess solar", () => {
+  it("changes the optimizer search space when config disables the preserve-headroom modes", () => {
     const config: SimulationConfig = {
       battery: {
         capacity_kwh: 10,
@@ -76,6 +77,7 @@ describe("limit mode regression", () => {
         interval_seconds: 300,
         min_hold_minutes: 0,
         allow_battery_export: true,
+        optimizer_modes: ["auto", "charge"],
       },
     };
 
@@ -101,14 +103,10 @@ describe("limit mode regression", () => {
       {
         solarGenerationKwhPerSlot: [3.2, 0],
         houseLoadWattsPerSlot: [1200, 1200],
-        canHoldTargetSoc: false,
-        canLimitChargePower: false,
-        canPreventAutomaticSolarCharging: false,
       },
     );
 
-    expect(result.oracle_entries[0]?.strategy).not.toBe("limit");
-    expect(result.oracle_entries[0]?.strategy).not.toBe("hold");
+    expect(result.oracle_entries[0]?.strategy).toBe("auto");
     expect(result.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(5);
   });
 });
