@@ -54,7 +54,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --prod --shamefully-hoist
 
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:20-bookworm-slim AS runtime-ml-base
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 python3-pip \
@@ -73,13 +73,15 @@ ENV NODE_ENV=production \
 
 COPY --from=native-deps /app/backend/node_modules /app/backend/node_modules
 COPY --from=backend-builder /app/backend/ml/requirements.txt /tmp/chargecaster-ml-requirements.txt
-COPY config.yaml.sample /app/config.yaml.sample
 
 # Keep the heavy native and Python dependency layer stable so small app
 # changes only affect the lightweight runtime artifact copies below.
 RUN find /app/backend/node_modules -name libcatboostmodel.so -exec cp {} /usr/local/lib/libcatboostmodel.so \; \
   && ldconfig \
   && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/chargecaster-ml-requirements.txt
+
+ARG RUNTIME_ML_BASE_IMAGE=runtime-ml-base
+FROM ${RUNTIME_ML_BASE_IMAGE} AS runtime
 
 COPY --from=backend-builder /app/backend/dist-bundle/index.js /app/backend/dist-bundle/index.js
 COPY --from=backend-builder /app/backend/assets/load-forecast /app/backend/assets/load-forecast
