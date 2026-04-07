@@ -5,6 +5,16 @@ const FORECAST_API_URL = "https://api.open-meteo.com/v1/forecast";
 const HISTORICAL_FORECAST_API_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast";
 const HOURLY_FIELDS = ["temperature_2m", "cloud_cover", "wind_speed_10m", "precipitation"] as const;
 const SOLAR_HOURLY_FIELDS = ["global_tilted_irradiance"] as const;
+const OPEN_METEO_LOCAL_RATE_LIMITS = [
+  {windowMs: 60_000, maxRequests: 60, label: "minute"},
+  {windowMs: 3_600_000, maxRequests: 500, label: "hour"},
+  {windowMs: 86_400_000, maxRequests: 1000, label: "day"},
+  {windowMs: 30 * 86_400_000, maxRequests: 30_000, label: "30d"},
+] as const;
+const OPEN_METEO_PROVIDER = "open-meteo";
+const OPEN_METEO_GLOBAL_SCOPE = "global";
+const UPSTREAM_RATE_LIMIT_COOLDOWN_MS = 15 * 60_000;
+const LOCAL_SAFETY_LIMIT_COOLDOWN_MS = 10 * 60_000;
 
 export interface WeatherLocation {
   latitude: number;
@@ -32,9 +42,24 @@ interface OpenMeteoPayload {
   };
 }
 
+class OpenMeteoLocalRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OpenMeteoLocalRateLimitError";
+  }
+}
+
+class OpenMeteoCooldownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OpenMeteoCooldownError";
+  }
+}
+
 @Injectable()
 export class WeatherService {
   private readonly logger = new Logger(WeatherService.name);
+  private static requestTimestampsMs: number[] = [];
 
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
@@ -59,14 +84,25 @@ export class WeatherService {
       return cached;
     }
 
-    const nowHour = floorToUtcHour(new Date());
-    if (startHour.getTime() <= nowHour.getTime()) {
-      const historicalEnd = new Date(Math.min(endHour.getTime(), nowHour.getTime()));
-      await this.fetchAndCacheRange(location, startHour, historicalEnd, HISTORICAL_FORECAST_API_URL, "historical");
-    }
-    if (endHour.getTime() > nowHour.getTime()) {
-      const forecastStart = new Date(Math.max(startHour.getTime(), nowHour.getTime()));
-      await this.fetchAndCacheRange(location, forecastStart, endHour, FORECAST_API_URL, "forecast");
+    try {
+      const nowHour = floorToUtcHour(new Date());
+      if (startHour.getTime() <= nowHour.getTime()) {
+        const historicalEnd = new Date(Math.min(endHour.getTime(), nowHour.getTime()));
+        await this.fetchAndCacheRange(location, startHour, historicalEnd, HISTORICAL_FORECAST_API_URL, "historical");
+      }
+      if (endHour.getTime() > nowHour.getTime()) {
+        const forecastStart = new Date(Math.max(startHour.getTime(), nowHour.getTime()));
+        await this.fetchAndCacheRange(location, forecastStart, endHour, FORECAST_API_URL, "forecast");
+      }
+    } catch (error) {
+      const fallback = this.storage.listWeatherHours(location.latitude, location.longitude, startIso, endIso);
+      if (fallback.length > 0) {
+        this.logger.warn(
+          `Open-Meteo weather fetch failed; serving ${fallback.length}/${expectedHours.length} cached rows (${String(error)})`,
+        );
+        return fallback;
+      }
+      throw error;
     }
 
     return this.storage.listWeatherHours(location.latitude, location.longitude, startIso, endIso);
@@ -85,6 +121,7 @@ export class WeatherService {
 
     const expectedHours = enumerateHourIsos(startHour, endHour);
     const nowHour = floorToUtcHour(new Date());
+    const failures: string[] = [];
 
     for (const arrayConfig of arrays) {
       const cached = this.storage.listSolarProxyHours(
@@ -100,17 +137,37 @@ export class WeatherService {
         continue;
       }
 
-      if (startHour.getTime() <= nowHour.getTime()) {
-        const historicalEnd = new Date(Math.min(endHour.getTime(), nowHour.getTime()));
-        await this.fetchAndCacheSolarRange(arrayConfig, startHour, historicalEnd, HISTORICAL_FORECAST_API_URL, "historical");
-      }
-      if (endHour.getTime() > nowHour.getTime()) {
-        const forecastStart = new Date(Math.max(startHour.getTime(), nowHour.getTime()));
-        await this.fetchAndCacheSolarRange(arrayConfig, forecastStart, endHour, FORECAST_API_URL, "forecast");
+      try {
+        if (startHour.getTime() <= nowHour.getTime()) {
+          const historicalEnd = new Date(Math.min(endHour.getTime(), nowHour.getTime()));
+          await this.fetchAndCacheSolarRange(arrayConfig, startHour, historicalEnd, HISTORICAL_FORECAST_API_URL, "historical");
+        }
+        if (endHour.getTime() > nowHour.getTime()) {
+          const forecastStart = new Date(Math.max(startHour.getTime(), nowHour.getTime()));
+          await this.fetchAndCacheSolarRange(arrayConfig, forecastStart, endHour, FORECAST_API_URL, "forecast");
+        }
+      } catch (error) {
+        failures.push(String(error));
+        const fallback = this.storage.listSolarProxyHours(
+          arrayConfig.latitude,
+          arrayConfig.longitude,
+          arrayConfig.kwp,
+          arrayConfig.tilt,
+          arrayConfig.azimuth,
+          startHour.toISOString(),
+          endHour.toISOString(),
+        );
+        if (fallback.length > 0) {
+          this.logger.warn(
+            `Open-Meteo solar proxy fetch failed for tilt=${arrayConfig.tilt} az=${arrayConfig.azimuth}; ` +
+            `serving ${fallback.length}/${expectedHours.length} cached rows (${String(error)})`,
+          );
+          continue;
+        }
       }
     }
 
-    return arrays.flatMap((arrayConfig) =>
+    const combined = arrays.flatMap((arrayConfig) =>
       this.storage.listSolarProxyHours(
         arrayConfig.latitude,
         arrayConfig.longitude,
@@ -121,6 +178,10 @@ export class WeatherService {
         endHour.toISOString(),
       ),
     );
+    if (combined.length === 0 && failures.length > 0) {
+      throw new Error(failures[0] ?? "Open-Meteo solar proxy fetch failed.");
+    }
+    return combined;
   }
 
   private async fetchAndCacheRange(
@@ -145,10 +206,20 @@ export class WeatherService {
       `Fetching ${source} weather for ${location.latitude.toFixed(3)},${location.longitude.toFixed(3)} ${toDateOnly(startInclusive)}..${toDateOnly(endInclusive)}`,
     );
 
+    const requestLabel = `${source} weather ${toDateOnly(startInclusive)}..${toDateOnly(endInclusive)}`;
+    this.assertNoOpenMeteoCooldown(requestLabel);
+    this.consumeOpenMeteoBudget(requestLabel);
     const response = await fetch(url, {
       headers: { accept: "application/json" },
     });
     if (!response.ok) {
+      if (response.status === 429) {
+        this.recordOpenMeteoCooldown(
+          requestLabel,
+          UPSTREAM_RATE_LIMIT_COOLDOWN_MS,
+          `HTTP 429 ${response.statusText || "Too Many Requests"}`,
+        );
+      }
       throw new Error(`Open-Meteo ${source} weather failed: HTTP ${response.status} ${response.statusText}`);
     }
 
@@ -181,16 +252,74 @@ export class WeatherService {
       `Fetching ${source} solar proxy for ${arrayConfig.latitude.toFixed(3)},${arrayConfig.longitude.toFixed(3)} tilt=${arrayConfig.tilt} az=${arrayConfig.azimuth} ${toDateOnly(startInclusive)}..${toDateOnly(endInclusive)}`,
     );
 
+    const requestLabel = `${source} solar ${toDateOnly(startInclusive)}..${toDateOnly(endInclusive)}`;
+    this.assertNoOpenMeteoCooldown(requestLabel);
+    this.consumeOpenMeteoBudget(requestLabel);
     const response = await fetch(url, {
       headers: { accept: "application/json" },
     });
     if (!response.ok) {
+      if (response.status === 429) {
+        this.recordOpenMeteoCooldown(
+          requestLabel,
+          UPSTREAM_RATE_LIMIT_COOLDOWN_MS,
+          `HTTP 429 ${response.statusText || "Too Many Requests"}`,
+        );
+      }
       throw new Error(`Open-Meteo ${source} solar proxy failed: HTTP ${response.status} ${response.statusText}`);
     }
 
     const payload = (await response.json()) as OpenMeteoPayload;
     const rows = this.parseSolarProxyPayload(payload, arrayConfig, source, startInclusive, endInclusive);
     this.storage.upsertSolarProxyHours(rows);
+  }
+
+  private consumeOpenMeteoBudget(label: string): void {
+    const nowMs = Date.now();
+    const maxWindowMs = Math.max(...OPEN_METEO_LOCAL_RATE_LIMITS.map((limit) => limit.windowMs));
+    WeatherService.requestTimestampsMs = WeatherService.requestTimestampsMs.filter((timestampMs) =>
+      nowMs - timestampMs < maxWindowMs,
+    );
+
+    for (const limit of OPEN_METEO_LOCAL_RATE_LIMITS) {
+      const windowCount = WeatherService.requestTimestampsMs.filter((timestampMs) =>
+        nowMs - timestampMs < limit.windowMs,
+      ).length;
+      if (windowCount >= limit.maxRequests) {
+        const message =
+          `Open-Meteo local safety limit reached for the ${limit.label} budget ` +
+          `(${limit.maxRequests} requests/${limit.label}); skipping ${label}.`;
+        this.recordOpenMeteoCooldown(label, LOCAL_SAFETY_LIMIT_COOLDOWN_MS, message);
+        throw new OpenMeteoLocalRateLimitError(message);
+      }
+    }
+
+    WeatherService.requestTimestampsMs.push(nowMs);
+  }
+
+  private assertNoOpenMeteoCooldown(label: string): void {
+    const active = this.storage.getActiveProviderCooldown(
+      OPEN_METEO_PROVIDER,
+      OPEN_METEO_GLOBAL_SCOPE,
+      new Date().toISOString(),
+    );
+    if (!active) {
+      return;
+    }
+    throw new OpenMeteoCooldownError(
+      `Open-Meteo cooldown active until ${active.cooldownUntil}; skipping ${label}. Reason: ${active.reason}`,
+    );
+  }
+
+  private recordOpenMeteoCooldown(label: string, durationMs: number, reason: string): void {
+    const cooldownUntil = new Date(Date.now() + durationMs).toISOString();
+    this.logger.warn(`Applying Open-Meteo cooldown until ${cooldownUntil} after ${label}: ${reason}`);
+    this.storage.upsertProviderCooldown({
+      provider: OPEN_METEO_PROVIDER,
+      scope: OPEN_METEO_GLOBAL_SCOPE,
+      cooldownUntil,
+      reason,
+    });
   }
 
   private parseHourlyPayload(
@@ -312,4 +441,8 @@ function toDateOnly(date: Date): string {
 
 function toNullableNumber(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function resetOpenMeteoLocalRateLimitForTests(): void {
+  WeatherService["requestTimestampsMs"] = [];
 }

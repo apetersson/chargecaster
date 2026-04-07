@@ -72,6 +72,14 @@ export interface SolarProxyHourRecord {
   updatedAt: string;
 }
 
+export interface ProviderCooldownRecord {
+  provider: string;
+  scope: string;
+  cooldownUntil: string;
+  reason: string;
+  updatedAt: string;
+}
+
 export interface ConfigSnapshotRecord {
   id: number;
   fingerprint: string;
@@ -644,6 +652,67 @@ export class StorageService implements OnModuleDestroy {
     }));
   }
 
+  getActiveProviderCooldown(provider: string, scope: string, nowIso: string): ProviderCooldownRecord | null {
+    this.logger.verbose(`Looking up provider cooldown (${provider}/${scope} at ${nowIso})`);
+    const row = this.db.prepare(`
+      SELECT provider, scope, cooldown_until, reason, updated_at
+      FROM provider_cooldowns
+      WHERE provider = ?
+        AND scope = ?
+        AND cooldown_until > ?
+      LIMIT 1
+    `).get(provider, scope, nowIso) as {
+      provider: string;
+      scope: string;
+      cooldown_until: string;
+      reason: string;
+      updated_at: string;
+    } | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      provider: row.provider,
+      scope: row.scope,
+      cooldownUntil: row.cooldown_until,
+      reason: row.reason,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  upsertProviderCooldown(entry: {
+    provider: string;
+    scope: string;
+    cooldownUntil: string;
+    reason: string;
+  }): void {
+    this.logger.log(
+      `Recording provider cooldown ${entry.provider}/${entry.scope} until ${entry.cooldownUntil} (${entry.reason})`,
+    );
+    this.db.prepare(`
+      INSERT INTO provider_cooldowns (
+        provider,
+        scope,
+        cooldown_until,
+        reason,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(provider, scope) DO UPDATE SET
+        cooldown_until = excluded.cooldown_until,
+        reason = excluded.reason,
+        updated_at = excluded.updated_at
+    `).run(
+      entry.provider,
+      entry.scope,
+      entry.cooldownUntil,
+      entry.reason,
+      new Date().toISOString(),
+    );
+  }
+
   upsertSolarProxyHours(entries: Omit<SolarProxyHourRecord, "updatedAt">[]): void {
     if (!entries.length) {
       return;
@@ -888,6 +957,19 @@ export class StorageService implements OnModuleDestroy {
         );
         CREATE INDEX IF NOT EXISTS idx_solar_proxy_hourly_cache_lookup
           ON solar_proxy_hourly_cache (latitude, longitude, kwp, tilt, azimuth, hour_utc);
+    `);
+    this.db.exec(`
+        CREATE TABLE IF NOT EXISTS provider_cooldowns
+        (
+            provider       TEXT NOT NULL,
+            scope          TEXT NOT NULL,
+            cooldown_until TEXT NOT NULL,
+            reason         TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            PRIMARY KEY (provider, scope)
+        );
+        CREATE INDEX IF NOT EXISTS idx_provider_cooldowns_lookup
+          ON provider_cooldowns (provider, scope, cooldown_until);
     `);
 
     const hadStrategyColumn = this.tableHasColumn("daily_backtest_summaries", "strategy");
