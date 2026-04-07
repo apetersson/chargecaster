@@ -1,3 +1,5 @@
+ARG RUNTIME_ML_BASE_IMAGE=runtime-ml-base
+
 FROM node:20-bookworm-slim AS workspace-deps
 
 RUN apt-get update \
@@ -80,7 +82,6 @@ RUN find /app/backend/node_modules -name libcatboostmodel.so -exec cp {} /usr/lo
   && ldconfig \
   && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/chargecaster-ml-requirements.txt
 
-ARG RUNTIME_ML_BASE_IMAGE=runtime-ml-base
 FROM ${RUNTIME_ML_BASE_IMAGE} AS runtime
 
 COPY --from=backend-builder /app/backend/dist-bundle/index.js /app/backend/dist-bundle/index.js
