@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createChargeModeDefinition,
   createHoldModeDefinition,
   createLimitModeDefinition,
   type BatteryControlSlotScenario,
@@ -102,5 +103,46 @@ describe("battery control mode definitions", () => {
     expect(outcome).not.toBeNull();
     expect(outcome?.mode).toBe("limit");
     expect(outcome?.endSocPercent).toBeLessThan(57);
+  });
+
+  it("enumerates charge targets below the slot-local reachable maximum", () => {
+    const charge = createChargeModeDefinition({
+      targetSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+      minChargePowerRange: {
+        minPowerW: 0,
+        maxPowerW: 4_000,
+        stepPowerW: 1,
+        supportsZeroPower: true,
+        supportsWindows: true,
+        fixedPowerW: null,
+      },
+    });
+
+    const parameters = charge.enumerateParameters(buildScenario());
+
+    expect(parameters.map((parameter) => parameter.targetSocPercent)).toEqual([60, 55, 50]);
+  });
+
+  it("lets charge stop below the slot-local maximum when given a lower ceiling", () => {
+    const charge = createChargeModeDefinition({
+      targetSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+      minChargePowerRange: {
+        minPowerW: 0,
+        maxPowerW: 4_000,
+        stepPowerW: 1,
+        supportsZeroPower: true,
+        supportsWindows: true,
+        fixedPowerW: null,
+      },
+    });
+
+    const outcome = charge.applySlotScenario(buildScenario(), {
+      targetSocPercent: 55,
+      minChargePowerW: 4_000,
+    });
+
+    expect(outcome).not.toBeNull();
+    expect(outcome?.mode).toBe("charge");
+    expect(outcome?.endSocPercent).toBe(55);
   });
 });

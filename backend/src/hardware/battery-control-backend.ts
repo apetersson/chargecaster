@@ -162,6 +162,7 @@ export interface BatteryControlModeRejectionContext {
 const EPSILON = 1e-9;
 const LIMIT_HEADROOM_FUTURE_PRICE_ADVANTAGE_EUR_PER_KWH = 0.05;
 const LIMIT_HEADROOM_MIN_SOC_FRACTION = 0.5;
+const CHARGE_TARGET_OFFSETS_PERCENT = [0, 5, 10] as const;
 
 export function deriveBatteryOptimisationConstraints(
   capabilities?: BatteryControlCapabilities | null,
@@ -414,11 +415,24 @@ export function createChargeModeDefinition(definition: {
     minChargePowerRange: definition.minChargePowerRange,
     tieBreakPriority: 3,
     enumerateParameters(scenario) {
-      const targetPercent = clampScenarioPercent(scenario.maxAllowedSocPercent, definition.targetSocRange);
-      return [{
-        targetSocPercent: targetPercent,
-        minChargePowerW: resolveFixedChargePower(definition.minChargePowerRange),
-      }];
+      const reachableTargetPercent = resolveReachableChargeTargetPercent(scenario, definition.targetSocRange);
+      const minChargePowerW = resolveFixedChargePower(definition.minChargePowerRange);
+      const candidates = new Set<number>();
+      for (const offsetPercent of CHARGE_TARGET_OFFSETS_PERCENT) {
+        const candidate = clampScenarioPercent(
+          Math.max(scenario.startSocPercent, reachableTargetPercent - offsetPercent),
+          definition.targetSocRange,
+        );
+        if (candidate > scenario.startSocPercent + EPSILON) {
+          candidates.add(candidate);
+        }
+      }
+      if (candidates.size === 0) {
+        candidates.add(reachableTargetPercent);
+      }
+      return [...candidates]
+        .sort((left, right) => right - left)
+        .map((targetSocPercent) => ({targetSocPercent, minChargePowerW}));
     },
     applySlotScenario(scenario, parameters) {
       const targetPercent = clampScenarioPercent(
@@ -692,6 +706,26 @@ function resolveFixedChargePower(
     return range.maxPowerW;
   }
   return range.minPowerW > 0 ? range.minPowerW : null;
+}
+
+function resolveReachableChargeTargetPercent(
+  scenario: BatteryControlSlotScenario,
+  targetSocRange: BatteryControlSocRange,
+): number {
+  const reachableOutcome = findBestChargeOutcome(
+    "charge",
+    scenario,
+    {},
+    scenario.maxAllowedSoCStep,
+    scenario.gridChargeLimitWh,
+    false,
+  );
+  const fallbackPercent = clampScenarioPercent(scenario.maxAllowedSocPercent, targetSocRange);
+  const reachableTargetPercent = reachableOutcome?.endSocPercent ?? fallbackPercent;
+  return clampScenarioPercent(
+    Math.max(scenario.startSocPercent, reachableTargetPercent),
+    targetSocRange,
+  );
 }
 
 function resolveModePriority(modeDefinitions: BatteryControlModeDefinition[], mode: BatteryControlMode): number {
