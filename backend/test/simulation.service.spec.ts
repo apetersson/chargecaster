@@ -31,7 +31,15 @@ interface SunnySpotLimitFixture {
 }
 
 function loadSunnySpotLimitFixture(): SunnySpotLimitFixture {
-  const fixturePath = join(process.cwd(), "test", "fixtures", "sunny-spot-limit-scenario.json");
+  const projectRoot = process.cwd();
+  const candidatePaths = [
+    join(projectRoot, "test", "fixtures", "sunny-spot-limit-scenario.json"),
+    join(projectRoot, "backend", "test", "fixtures", "sunny-spot-limit-scenario.json"),
+  ];
+  const fixturePath = candidatePaths.find((path) => existsSync(path));
+  if (!fixturePath) {
+    throw new Error(`Fixture not found in ${candidatePaths.join(", ")}`);
+  }
   return JSON.parse(readFileSync(fixturePath, "utf-8")) as SunnySpotLimitFixture;
 }
 
@@ -122,7 +130,7 @@ describe("simulateOptimalSchedule oracle output", () => {
 
     expect(result.oracle_entries).toHaveLength(2);
     const first = result.oracle_entries[0];
-    expect(["auto", "hold"]).toContain(first.strategy);
+    expect(["auto", "hold", "limit"]).toContain(first.strategy);
     expect(result.expected_feed_in_kwh).toBeGreaterThan(0);
     expect(first.grid_energy_wh).not.toBeNull();
     if (first.grid_energy_wh !== null) {
@@ -375,7 +383,7 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(firstEntry.strategy).toBe("charge");
   });
 
-  it("discharges through the valuable morning export window and refills from later solar", () => {
+  it("preserves battery headroom through the valuable morning export window and refills from later solar", () => {
     const fixture = loadSunnySpotLimitFixture();
     const config: SimulationConfig = {
       battery: {
@@ -420,15 +428,16 @@ describe("simulateOptimalSchedule oracle output", () => {
     expect(result.oracle_entries).toHaveLength(fixture.slots.length);
     expect(result.expected_feed_in_kwh).toBeGreaterThan(0);
     expect(result.projected_grid_power_w).toBeLessThan(0);
-    expect(result.oracle_entries[0]?.end_soc_percent).toBeLessThan(result.oracle_entries[0]?.start_soc_percent ?? 100);
-    expect(result.oracle_entries[1]?.end_soc_percent).toBeLessThanOrEqual(
-      result.oracle_entries[0]?.end_soc_percent ?? 100,
-    );
-    expect(result.oracle_entries[1]?.end_soc_percent).toBe(5);
-    expect(result.oracle_entries[2]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[1]?.end_soc_percent ?? 0);
-    expect(result.oracle_entries[3]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[2]?.end_soc_percent ?? 0);
+    expect(result.oracle_entries[0]?.strategy).toBe("limit");
+    expect(result.oracle_entries[1]?.strategy).toBe("limit");
+    expect(result.oracle_entries[0]?.end_soc_percent).toBe(result.oracle_entries[0]?.start_soc_percent);
+    expect(result.oracle_entries[1]?.end_soc_percent).toBe(result.oracle_entries[0]?.end_soc_percent);
+    expect(result.oracle_entries[2]?.end_soc_percent).toBe(result.oracle_entries[1]?.end_soc_percent);
+    expect(result.oracle_entries[3]?.end_soc_percent).toBe(result.oracle_entries[2]?.end_soc_percent);
+    expect(result.oracle_entries[0]?.mode_params?.max_charge_power_w).toBe(0);
     expect(result.oracle_entries[4]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[3]?.end_soc_percent ?? 0);
-    expect(result.oracle_entries.slice(0, 5).every((entry) => (entry.grid_energy_wh ?? 0) <= 0)).toBe(true);
+    expect(result.oracle_entries[5]?.end_soc_percent).toBeGreaterThan(result.oracle_entries[4]?.end_soc_percent ?? 0);
+    expect(result.oracle_entries.slice(0, 6).every((entry) => (entry.grid_energy_wh ?? 0) <= 0)).toBe(true);
     expect(result.oracle_entries[5]?.end_soc_percent).toBe(100);
   });
 });

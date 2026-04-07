@@ -128,6 +128,13 @@ export const forecastEraSchema = z.object({
 
 export type ForecastEra = z.infer<typeof forecastEraSchema>;
 
+const oracleModeParamsSchema = z.object({
+  floor_soc_percent: nullableNumberSchema.optional(),
+  target_soc_percent: nullableNumberSchema.optional(),
+  min_charge_power_w: nullableNumberSchema.optional(),
+  max_charge_power_w: nullableNumberSchema.optional(),
+});
+
 const oracleEntrySchema = z.object({
   era_id: z.string(),
   start_soc_percent: nullableNumberSchema,
@@ -135,6 +142,7 @@ const oracleEntrySchema = z.object({
   target_soc_percent: nullableNumberSchema.optional(),
   grid_energy_wh: nullableNumberSchema,
   strategy: z.union([z.literal("charge"), z.literal("auto"), z.literal("hold"), z.literal("limit")]),
+  mode_params: oracleModeParamsSchema.optional(),
 });
 
 export type OracleEntry = z.infer<typeof oracleEntrySchema>;

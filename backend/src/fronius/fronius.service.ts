@@ -11,7 +11,13 @@ import type {
   BatteryControlCommand,
   BatteryControlModeDefinition,
 } from "../hardware/battery-control-backend";
-import { getBatteryControlModeDefinition } from "../hardware/battery-control-backend";
+import {
+  createAutoModeDefinition,
+  createChargeModeDefinition,
+  createHoldModeDefinition,
+  createLimitModeDefinition,
+  getBatteryControlModeDefinition,
+} from "../hardware/battery-control-backend";
 
 export interface FroniusConnectionConfig {
   host: string;
@@ -124,16 +130,14 @@ export class FroniusService implements BatteryControlBackend {
     return {
       backendId: "fronius",
       modes: [
-        {
-          id: "auto",
+        createAutoModeDefinition({
           floorSocRange: {
             minPercent: autoFloorMin,
             maxPercent: targetSocMax,
             stepPercent: 1,
           },
-        },
-        {
-          id: "hold",
+        }),
+        createHoldModeDefinition({
           floorSocRange: {
             minPercent: autoFloorMin,
             maxPercent: targetSocMax,
@@ -144,9 +148,8 @@ export class FroniusService implements BatteryControlBackend {
             maxPercent: targetSocMax,
             stepPercent: 1,
           },
-        },
-        {
-          id: "limit",
+        }),
+        createLimitModeDefinition({
           floorSocRange: {
             minPercent: autoFloorMin,
             maxPercent: targetSocMax,
@@ -159,9 +162,8 @@ export class FroniusService implements BatteryControlBackend {
             supportsZeroPower: true,
             supportsWindows: false,
           },
-        },
-        {
-          id: "charge",
+        }),
+        createChargeModeDefinition({
           targetSocRange: {
             minPercent: autoFloorMin,
             maxPercent: targetSocMax,
@@ -177,7 +179,7 @@ export class FroniusService implements BatteryControlBackend {
                 supportsWindows: false,
                 fixedPowerW: configuredChargePower,
               },
-        },
+        }),
       ],
       scheduleConstraints: {
         minWindowMinutes: 1,

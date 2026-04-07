@@ -8,53 +8,17 @@ import type {
   BatteryControlCommand,
   BatteryControlModeDefinition,
 } from "./battery-control-backend";
-import { BATTERY_CONTROL_BACKEND, getBatteryControlModeDefinition } from "./battery-control-backend";
+import {
+  BATTERY_CONTROL_BACKEND,
+  buildGenericBatteryControlCapabilities,
+  getBatteryControlModeDefinition,
+} from "./battery-control-backend";
 
 type SimulationSnapshot = Awaited<ReturnType<SimulationService["runSimulation"]>>;
 
 const DEFAULT_BATTERY_CONTROL_BACKEND: BatteryControlBackend = {
   getCapabilities(): BatteryControlCapabilities {
-    return {
-      backendId: "generic-test-backend",
-      modes: [
-        {
-          id: "auto",
-          floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
-        },
-        {
-          id: "hold",
-          floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
-          targetSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
-        },
-        {
-          id: "limit",
-          floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
-          maxChargePowerRange: {
-            minPowerW: 0,
-            maxPowerW: null,
-            stepPowerW: 1,
-            supportsZeroPower: true,
-            supportsWindows: true,
-          },
-        },
-        {
-          id: "charge",
-          targetSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
-          minChargePowerRange: {
-            minPowerW: 0,
-            maxPowerW: null,
-            stepPowerW: 1,
-            supportsZeroPower: true,
-            supportsWindows: true,
-            fixedPowerW: null,
-          },
-        },
-      ],
-      scheduleConstraints: {
-        minWindowMinutes: null,
-        maxWindows: null,
-      },
-    };
+    return buildGenericBatteryControlCapabilities();
   },
   async applyOptimization() {
     return {errorMessage: null};
@@ -79,7 +43,7 @@ export class OptimisationCommandTranslator {
         return this.buildAutoCommand(snapshot, capabilities);
       }
       const chargeTarget = this.clampSocPercent(this.extractChargeTarget(snapshot), chargeMode.targetSocRange ?? null);
-      const minChargePowerW = this.resolvePreferredBoostPower(chargeMode.minChargePowerRange ?? null);
+      const minChargePowerW = this.extractChargePower(snapshot) ?? this.resolvePreferredBoostPower(chargeMode.minChargePowerRange ?? null);
       const untilTimestamp = chargeMode.minChargePowerRange?.supportsWindows ? this.extractChargeUntil(snapshot) : null;
       if (untilTimestamp || chargeTarget != null || minChargePowerW != null) {
         return {
@@ -107,7 +71,7 @@ export class OptimisationCommandTranslator {
       return {
         limit: {
           floorSocPercent: floor,
-          maxChargePowerW: this.resolveZeroCompatibleLimitPower(limitRange),
+          maxChargePowerW: this.extractLimitPower(snapshot) ?? this.resolveZeroCompatibleLimitPower(limitRange),
           ...(untilTimestamp ? {untilTimestamp} : {}),
         },
       };
@@ -211,7 +175,7 @@ export class OptimisationCommandTranslator {
       if (entry.strategy !== "charge") {
         break;
       }
-      const candidate = entry.target_soc_percent ?? entry.end_soc_percent ?? entry.start_soc_percent ?? null;
+      const candidate = entry.mode_params?.target_soc_percent ?? entry.target_soc_percent ?? entry.end_soc_percent ?? entry.start_soc_percent ?? null;
       const normalised = this.normalisePercent(candidate);
       if (normalised != null) {
         target = normalised;
@@ -227,7 +191,8 @@ export class OptimisationCommandTranslator {
       const holdEntry = snapshot.oracle_entries.find((entry) => entry.strategy === "hold");
       if (holdEntry) {
         const candidate = holdEntry.target_soc_percent ?? holdEntry.end_soc_percent ?? holdEntry.start_soc_percent ?? null;
-        const normalised = this.normalisePercent(candidate);
+        const explicitCandidate = holdEntry.mode_params?.target_soc_percent ?? candidate;
+        const normalised = this.normalisePercent(explicitCandidate);
         if (normalised != null) {
           return normalised;
         }
@@ -236,12 +201,25 @@ export class OptimisationCommandTranslator {
     return this.normalisePercent(snapshot.next_step_soc_percent) ?? this.normalisePercent(snapshot.current_soc_percent);
   }
 
+  private extractChargePower(snapshot: SimulationSnapshot): number | null {
+    const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries.find((entry) => entry.strategy === "charge") : null;
+    return this.normalisePower(firstEntry?.mode_params?.min_charge_power_w ?? null);
+  }
+
+  private extractLimitPower(snapshot: SimulationSnapshot): number | null {
+    const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries.find((entry) => entry.strategy === "limit") : null;
+    return this.normalisePower(firstEntry?.mode_params?.max_charge_power_w ?? null);
+  }
+
   private extractAutoFloor(snapshot: SimulationSnapshot): number | null {
-    return this.normalisePercent(snapshot.next_step_soc_percent);
+    const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries[0] : null;
+    return this.normalisePercent(firstEntry?.mode_params?.floor_soc_percent ?? snapshot.next_step_soc_percent);
   }
 
   private extractLimitFloor(snapshot: SimulationSnapshot): number | null {
-    return this.normalisePercent(snapshot.next_step_soc_percent) ?? this.normalisePercent(snapshot.current_soc_percent);
+    const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries[0] : null;
+    return this.normalisePercent(firstEntry?.mode_params?.floor_soc_percent ?? snapshot.next_step_soc_percent)
+      ?? this.normalisePercent(snapshot.current_soc_percent);
   }
 
   private clampSocPercent(
@@ -299,5 +277,12 @@ export class OptimisationCommandTranslator {
       return 100;
     }
     return value;
+  }
+
+  private normalisePower(value: unknown): number | null {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return null;
+    }
+    return value < 0 ? 0 : value;
   }
 }

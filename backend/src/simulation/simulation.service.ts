@@ -215,7 +215,7 @@ export class SimulationService {
       allowBatteryExport: effectiveConfig.logic.allow_battery_export ?? true,
       allowGridChargeFromGrid: optimisationConstraints.allowGridChargeFromGrid,
       canPreventAutomaticSolarCharging: optimisationConstraints.canPreventAutomaticSolarCharging,
-      optimizerModeAllowList: optimisationConstraints.availableModes,
+      modeDefinitions: optimisationConstraints.availableModeDefinitions,
       chargeEfficiency: batteryEfficiency.chargeEfficiency,
       dischargeEfficiency: batteryEfficiency.dischargeEfficiency,
       chargeAverageCRate: batteryEfficiency.chargeAverageCRate,

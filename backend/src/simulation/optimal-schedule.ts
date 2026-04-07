@@ -10,11 +10,20 @@ import {
   energyFromPower,
   powerFromEnergy,
 } from "@chargecaster/domain";
+import type {
+  BatteryControlModeDefinition,
+  BatteryControlModeParameters,
+  BatteryControlSlotOutcome,
+  BatteryControlSlotScenario,
+} from "../hardware/battery-control-backend";
+import { buildGenericBatteryControlCapabilities } from "../hardware/battery-control-backend";
 import { resolveTransitionEfficiencies } from "./battery-efficiency-curve";
 
 const SOC_STEPS = 100;
 const EPSILON = 1e-9;
 const GRID_CHARGE_STRATEGY_THRESHOLD_KWH = 0.05;
+const LIMIT_HEADROOM_FUTURE_PRICE_ADVANTAGE_EUR_PER_KWH = 0.05;
+const LIMIT_HEADROOM_MIN_SOC_FRACTION = 0.5;
 
 export interface SimulationOptions {
   solarGenerationKwhPerSlot?: number[];
@@ -25,7 +34,7 @@ export interface SimulationOptions {
   allowBatteryExport?: boolean;
   allowGridChargeFromGrid?: boolean;
   canPreventAutomaticSolarCharging?: boolean;
-  optimizerModeAllowList?: OracleEntry["strategy"][];
+  modeDefinitions?: BatteryControlModeDefinition[];
   chargeEfficiency?: Percentage;
   dischargeEfficiency?: Percentage;
   chargeAverageCRate?: number;
@@ -58,8 +67,11 @@ export function gridFee(cfg: SimulationConfig): number {
 
 export interface PolicyTransition {
   mode: OracleEntry["strategy"];
+  modeParameters: BatteryControlModeParameters | null;
   nextSoCStep: number;
   deltaSoCSteps: number;
+  gridEnergy: Energy;
+  additionalGridCharge: Energy;
 }
 
 interface SlotProfile {
@@ -108,11 +120,12 @@ interface SimulationContext {
   allowBatteryExport: boolean;
   allowGridChargeFromGrid: boolean;
   canPreventAutomaticSolarCharging: boolean;
-  optimizerModeAllowList: Set<OracleEntry["strategy"]>;
+  modeDefinitions: BatteryControlModeDefinition[];
   chargeEfficiency: Percentage;
   dischargeEfficiency: Percentage;
   chargeAverageCRate: number;
   dischargeAverageCRate: number;
+  minFutureImportPriceBySlot: number[];
 }
 
 interface DynamicProgrammingResult {
@@ -184,12 +197,12 @@ function prepareSimulationContext(
       typeof options.allowGridChargeFromGrid === "boolean" ? options.allowGridChargeFromGrid : true,
     canPreventAutomaticSolarCharging:
       typeof options.canPreventAutomaticSolarCharging === "boolean" ? options.canPreventAutomaticSolarCharging : true,
-    optimizerModeAllowList:
-      options.optimizerModeAllowList?.length
-        ? options.optimizerModeAllowList
-        : cfg.logic.optimizer_modes?.length
-          ? cfg.logic.optimizer_modes
-          : (["charge", "auto", "hold", "limit"] as const),
+    modeDefinitions:
+      options.modeDefinitions?.length
+        ? options.modeDefinitions
+        : buildGenericBatteryControlCapabilities().modes.filter((mode) =>
+            cfg.logic.optimizer_modes?.length ? cfg.logic.optimizer_modes.includes(mode.id) : true,
+          ),
     chargeEfficiency: normalizeEfficiency(options.chargeEfficiency),
     dischargeEfficiency: normalizeEfficiency(options.dischargeEfficiency),
     chargeAverageCRate: normalizeAverageCRate(options.chargeAverageCRate),
@@ -298,11 +311,12 @@ function prepareSimulationContext(
     allowBatteryExport: normalizedOptions.allowBatteryExport,
     allowGridChargeFromGrid: normalizedOptions.allowGridChargeFromGrid,
     canPreventAutomaticSolarCharging: normalizedOptions.canPreventAutomaticSolarCharging,
-    optimizerModeAllowList: new Set(normalizedOptions.optimizerModeAllowList),
+    modeDefinitions: normalizedOptions.modeDefinitions,
     chargeEfficiency: normalizedOptions.chargeEfficiency,
     dischargeEfficiency: normalizedOptions.dischargeEfficiency,
     chargeAverageCRate: normalizedOptions.chargeAverageCRate,
     dischargeAverageCRate: normalizedOptions.dischargeAverageCRate,
+    minFutureImportPriceBySlot: buildMinFutureImportPriceBySlot(slotProfiles),
   };
 }
 
@@ -374,8 +388,11 @@ function runBackwardPass(context: SimulationContext): DynamicProgrammingResult {
   const policy: PolicyTransition[][] = Array.from({length: horizon}, () =>
     Array.from({length: numSoCStates}, () => ({
       mode: "hold",
+      modeParameters: null,
       nextSoCStep: 0,
       deltaSoCSteps: 0,
+      gridEnergy: Energy.zero(),
+      additionalGridCharge: Energy.zero(),
     })),
   );
 
@@ -403,116 +420,70 @@ function evaluateStateTransitions(
   currentSoCStep: number,
   costToGoNextRow: (Money | null)[],
 ): { cost: Money; transition: PolicyTransition } {
-  const {
-    energyPerStep,
-    numSoCStates,
-    maxAllowedSoCStep,
-    minAllowedSoCStep,
-    allowBatteryExport,
-    canPreventAutomaticSolarCharging,
-    optimizerModeAllowList,
-  } = context;
-
-  let maxChargeSteps = numSoCStates - 1 - currentSoCStep;
-  if (profile.totalChargeLimit.wattHours > 0) {
-    maxChargeSteps = Math.min(
-      maxChargeSteps,
-      Math.floor(profile.totalChargeLimit.kilowattHours * context.chargeEfficiency.ratio / energyPerStep.kilowattHours + EPSILON),
-    );
-  } else {
-    maxChargeSteps = Math.min(maxChargeSteps, 0);
-  }
-  const upLimit = Math.min(maxChargeSteps, numSoCStates - 1 - currentSoCStep);
-
-  let maxDischargeStepsByPower = currentSoCStep;
-  if (profile.dischargeLimit) {
-    maxDischargeStepsByPower = Math.min(
-      maxDischargeStepsByPower,
-      Math.floor(profile.dischargeLimit.kilowattHours / (context.dischargeEfficiency.ratio * energyPerStep.kilowattHours) + EPSILON),
-    );
-  }
-  const allowedDischargeSteps = Math.max(0, currentSoCStep - minAllowedSoCStep);
-  const downLimit = Math.max(0, Math.min(maxDischargeStepsByPower, allowedDischargeSteps));
-  const autoSignature = optimizerModeAllowList.has("auto")
-    ? selectAutoTransitionSignature(context, profile, currentSoCStep, downLimit, upLimit)
-    : null;
+  const {allowBatteryExport, canPreventAutomaticSolarCharging, modeDefinitions} = context;
+  const scenario = buildSlotScenario(context, profile, currentSoCStep);
 
   let bestCost: Money | null = null;
   let bestTransition: PolicyTransition | null = null;
 
-  for (let deltaSoCSteps = -downLimit; deltaSoCSteps <= upLimit; deltaSoCSteps += 1) {
-    const snapshot = buildStateTransitionSnapshot(context, profile, currentSoCStep, deltaSoCSteps);
-    const {nextSoCStep, storedEnergyChange, batteryEnergyAtBus, gridEnergy, additionalGridCharge} = snapshot;
-
-    if (nextSoCStep < minAllowedSoCStep) {
-      continue;
-    }
-
-    if (!allowBatteryExport) {
-      const minGridEnergy = profile.baselineGridEnergy.wattHours < 0 ? profile.baselineGridEnergy : Energy.zero();
-      if (gridEnergy.kilowattHours < minGridEnergy.kilowattHours - EPSILON) {
+  for (const modeDefinition of modeDefinitions) {
+    for (const parameters of modeDefinition.enumerateParameters(scenario)) {
+      const outcome = modeDefinition.applySlotScenario(scenario, parameters);
+      if (!outcome) {
         continue;
       }
-    }
-
-    if (
-      !canPreventAutomaticSolarCharging &&
-      deltaSoCSteps <= 0 &&
-      gridEnergy.wattHours < -EPSILON &&
-      nextSoCStep < maxAllowedSoCStep
-    ) {
-      continue;
-    }
-
-    if (storedEnergyChange.wattHours > 0) {
-      if (nextSoCStep > maxAllowedSoCStep && additionalGridCharge.kilowattHours > EPSILON) {
+      if (shouldRejectLimitUnderCurrentSolar(context, profile, currentSoCStep, outcome.mode)) {
         continue;
       }
+      const {nextSoCStep} = outcome;
+      const gridEnergy = Energy.fromWattHours(outcome.gridEnergyWh);
+      const additionalGridCharge = Energy.fromWattHours(outcome.additionalGridChargeWh);
 
-      if (additionalGridCharge.kilowattHours > profile.gridChargeLimit.kilowattHours + EPSILON) {
-        continue;
+      if (!allowBatteryExport) {
+        const minGridEnergy = profile.baselineGridEnergy.wattHours < 0 ? profile.baselineGridEnergy : Energy.zero();
+        if (gridEnergy.kilowattHours < minGridEnergy.kilowattHours - EPSILON) {
+          continue;
+        }
       }
-      const solarCharging = maxEnergy(batteryEnergyAtBus.subtract(additionalGridCharge), Energy.zero());
-      if (solarCharging.kilowattHours > profile.solarChargeLimit.kilowattHours + EPSILON) {
-        continue;
-      }
+
       if (
-        additionalGridCharge.kilowattHours > EPSILON &&
-        batteryEnergyAtBus.kilowattHours > profile.gridChargeLimit.kilowattHours + EPSILON
+        !canPreventAutomaticSolarCharging &&
+        outcome.mode !== "auto" &&
+        gridEnergy.wattHours < -EPSILON &&
+        nextSoCStep < context.maxAllowedSoCStep
       ) {
         continue;
       }
-    }
 
-    const explicitMode = resolveExplicitModeForTransition(
-      context,
-      profile,
-      currentSoCStep,
-      snapshot,
-      autoSignature,
-    );
-    if (!explicitMode) {
-      continue;
-    }
-
-    const futureCost = costToGoNextRow[nextSoCStep];
-    if (!futureCost) {
-      continue;
-    }
-    const slotCost = computeGridCost(gridEnergy, profile.priceTotal, profile.feedInTariff);
-    const totalCost = slotCost.add(futureCost);
-    if (
-      !bestCost
-      || totalCost.eur < bestCost.eur - EPSILON
-      || (Math.abs(totalCost.eur - bestCost.eur) <= EPSILON
-        && shouldPreferMode(explicitMode, bestTransition?.mode ?? null))
-    ) {
-      bestCost = totalCost;
-      bestTransition = {
-        mode: explicitMode,
-        nextSoCStep,
-        deltaSoCSteps,
-      };
+      const futureCost = costToGoNextRow[nextSoCStep];
+      if (!futureCost) {
+        continue;
+      }
+      const slotCost = computeGridCost(gridEnergy, profile.priceTotal, profile.feedInTariff);
+      const totalCost = slotCost.add(futureCost);
+      if (
+        !bestCost
+        || totalCost.eur < bestCost.eur - EPSILON
+        || (Math.abs(totalCost.eur - bestCost.eur) <= EPSILON
+          && shouldPreferTransition(
+            {
+              mode: outcome.mode,
+              nextSoCStep,
+              additionalGridCharge,
+            },
+            bestTransition,
+          ))
+      ) {
+        bestCost = totalCost;
+        bestTransition = {
+          mode: outcome.mode,
+          modeParameters: outcome.parameters,
+          nextSoCStep,
+          deltaSoCSteps: outcome.deltaSoCSteps,
+          gridEnergy,
+          additionalGridCharge,
+        };
+      }
     }
   }
 
@@ -520,9 +491,12 @@ function evaluateStateTransitions(
     return {
       cost: costToGoNextRow[currentSoCStep] ?? Money.zero(),
       transition: {
-        mode: optimizerModeAllowList.has("auto") ? "auto" : "hold",
+        mode: "auto",
+        modeParameters: null,
         nextSoCStep: currentSoCStep,
         deltaSoCSteps: 0,
+        gridEnergy: Energy.zero(),
+        additionalGridCharge: Energy.zero(),
       },
     };
   }
@@ -530,139 +504,91 @@ function evaluateStateTransitions(
   return {cost: bestCost, transition: bestTransition};
 }
 
-function buildStateTransitionSnapshot(
+function buildMinFutureImportPriceBySlot(slotProfiles: SlotProfile[]): number[] {
+  const result = Array.from({length: slotProfiles.length}, () => Number.POSITIVE_INFINITY);
+  let runningMin = Number.POSITIVE_INFINITY;
+  for (let index = slotProfiles.length - 1; index >= 0; index -= 1) {
+    result[index] = runningMin;
+    runningMin = Math.min(runningMin, slotProfiles[index]?.priceTotal.eurPerKwh ?? Number.POSITIVE_INFINITY);
+  }
+  return result;
+}
+
+function buildSlotScenario(
   context: SimulationContext,
   profile: SlotProfile,
   currentSoCStep: number,
-  deltaSoCSteps: number,
-): StateTransitionSnapshot {
-  const nextSoCStep = currentSoCStep + deltaSoCSteps;
-  const storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-  const transitionEfficiencies = resolveTransitionEfficiencies(
-    context.chemistry,
-    storedEnergyChange,
-    profile.duration,
-    context.capacity,
-    context.chargeEfficiency,
-    context.dischargeEfficiency,
-    context.chargeAverageCRate,
-    context.dischargeAverageCRate,
-  );
-  const batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
-    storedEnergyChange,
-    transitionEfficiencies.chargeEfficiency,
-    transitionEfficiencies.dischargeEfficiency,
-  );
-  const gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
-  const gridImport = maxEnergy(gridEnergy, Energy.zero());
-  const additionalGridCharge = storedEnergyChange.wattHours > 0
-    ? maxEnergy(gridImport.subtract(profile.baselineGridImport), Energy.zero())
-    : Energy.zero();
-
+): BatteryControlSlotScenario {
   return {
-    nextSoCStep,
-    deltaSoCSteps,
-    storedEnergyChange,
-    batteryEnergyAtBus,
-    gridEnergy,
-    additionalGridCharge,
+    startSocPercent: currentSoCStep * context.socPercentStep,
+    startSocStep: currentSoCStep,
+    socPercentStep: context.socPercentStep,
+    energyPerStepWh: context.energyPerStep.wattHours,
+    capacityWh: context.capacity.wattHours,
+    minAllowedSocPercent: context.minAllowedSoc.percent,
+    minAllowedSoCStep: context.minAllowedSoCStep,
+    maxAllowedSocPercent: context.maxChargeSoC.percent,
+    maxAllowedSoCStep: context.maxAllowedSoCStep,
+    durationHours: profile.duration.hours,
+    chemistry: context.chemistry,
+    chargeEfficiencyRatio: context.chargeEfficiency.ratio,
+    dischargeEfficiencyRatio: context.dischargeEfficiency.ratio,
+    chargeAverageCRate: context.chargeAverageCRate,
+    dischargeAverageCRate: context.dischargeAverageCRate,
+    loadAfterDirectUseWh: profile.loadAfterDirectUse.wattHours,
+    availableSolarWh: profile.availableSolar.wattHours,
+    baselineGridEnergyWh: profile.baselineGridEnergy.wattHours,
+    baselineGridImportWh: profile.baselineGridImport.wattHours,
+    gridChargeLimitWh: profile.gridChargeLimit.wattHours,
+    solarChargeLimitWh: profile.solarChargeLimit.wattHours,
+    totalChargeLimitWh: profile.totalChargeLimit.wattHours,
+    dischargeLimitWh: profile.dischargeLimit?.wattHours ?? null,
+    allowBatteryExport: context.allowBatteryExport,
   };
 }
 
-function selectAutoTransitionSignature(
-  context: SimulationContext,
-  profile: SlotProfile,
-  currentSoCStep: number,
-  downLimit: number,
-  upLimit: number,
-): StateTransitionSnapshot | null {
-  let best: StateTransitionSnapshot | null = null;
-
-  for (let deltaSoCSteps = -downLimit; deltaSoCSteps <= upLimit; deltaSoCSteps += 1) {
-    const candidate = buildStateTransitionSnapshot(context, profile, currentSoCStep, deltaSoCSteps);
-    if (candidate.additionalGridCharge.wattHours > EPSILON) {
-      continue;
-    }
-    if (candidate.nextSoCStep < context.minAllowedSoCStep || candidate.nextSoCStep > context.maxAllowedSoCStep) {
-      continue;
-    }
-    if (
-      !context.allowBatteryExport
-      && candidate.gridEnergy.kilowattHours
-        < (profile.baselineGridEnergy.wattHours < 0 ? profile.baselineGridEnergy : Energy.zero()).kilowattHours - EPSILON
-    ) {
-      continue;
-    }
-    if (!best || isBetterAutoCandidate(candidate, best, profile)) {
-      best = candidate;
-    }
-  }
-
-  return best;
-}
-
-function isBetterAutoCandidate(
-  candidate: StateTransitionSnapshot,
-  incumbent: StateTransitionSnapshot,
-  profile: SlotProfile,
+function shouldPreferTransition(
+  candidate: Pick<PolicyTransition, "mode" | "nextSoCStep" | "additionalGridCharge">,
+  incumbent: Pick<PolicyTransition, "mode" | "nextSoCStep" | "additionalGridCharge"> | null,
 ): boolean {
-  const candidateAbsGrid = Math.abs(candidate.gridEnergy.wattHours);
-  const incumbentAbsGrid = Math.abs(incumbent.gridEnergy.wattHours);
-  if (candidateAbsGrid < incumbentAbsGrid - EPSILON) {
+  if (!incumbent) {
     return true;
   }
-  if (Math.abs(candidateAbsGrid - incumbentAbsGrid) > EPSILON) {
-    return false;
+  if (candidate.nextSoCStep !== incumbent.nextSoCStep) {
+    return candidate.nextSoCStep > incumbent.nextSoCStep;
   }
-  if (profile.availableSolar.wattHours > profile.loadAfterDirectUse.wattHours + EPSILON) {
-    return candidate.deltaSoCSteps > incumbent.deltaSoCSteps;
+  if (Math.abs(candidate.additionalGridCharge.wattHours - incumbent.additionalGridCharge.wattHours) > EPSILON) {
+    return candidate.additionalGridCharge.wattHours < incumbent.additionalGridCharge.wattHours;
   }
-  if (profile.loadAfterDirectUse.wattHours > profile.availableSolar.wattHours + EPSILON) {
-    return candidate.deltaSoCSteps < incumbent.deltaSoCSteps;
-  }
-  return Math.abs(candidate.deltaSoCSteps) > Math.abs(incumbent.deltaSoCSteps);
+  return shouldPreferMode(candidate.mode, incumbent.mode);
 }
 
-function resolveExplicitModeForTransition(
+function shouldRejectLimitUnderCurrentSolar(
   context: SimulationContext,
   profile: SlotProfile,
   currentSoCStep: number,
-  snapshot: StateTransitionSnapshot,
-  autoSignature: StateTransitionSnapshot | null,
-): OracleEntry["strategy"] | null {
-  const allowedModes = context.optimizerModeAllowList;
-
-  if (
-    autoSignature
-    && snapshot.deltaSoCSteps === autoSignature.deltaSoCSteps
-    && snapshot.nextSoCStep === autoSignature.nextSoCStep
-    && allowedModes.has("auto")
-  ) {
-    return "auto";
+  mode: OracleEntry["strategy"],
+): boolean {
+  if (mode !== "limit" && mode !== "hold") {
+    return false;
   }
 
-  if (snapshot.additionalGridCharge.wattHours > GRID_CHARGE_STRATEGY_THRESHOLD_KWH * 1000) {
-    return allowedModes.has("charge") ? "charge" : null;
+  const solarSurplusWh = profile.availableSolar.subtract(profile.loadAfterDirectUse).wattHours;
+  if (solarSurplusWh <= EPSILON) {
+    return false;
   }
 
-  if (snapshot.deltaSoCSteps === 0) {
-    if (
-      allowedModes.has("limit")
-      && currentSoCStep === context.minAllowedSoCStep
-      && profile.availableSolar.wattHours > EPSILON
-    ) {
-      return "limit";
-    }
-    if (allowedModes.has("hold")) {
-      return "hold";
-    }
+  if (currentSoCStep >= Math.round(context.maxAllowedSoCStep * LIMIT_HEADROOM_MIN_SOC_FRACTION)) {
+    return false;
   }
 
-  if (allowedModes.has("auto")) {
-    return "auto";
+  const bestFuturePrice = context.minFutureImportPriceBySlot[profile.index] ?? Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(bestFuturePrice)) {
+    return true;
   }
 
-  return null;
+  const currentPrice = profile.priceTotal.eurPerKwh;
+  return currentPrice - bestFuturePrice < LIMIT_HEADROOM_FUTURE_PRICE_ADVANTAGE_EUR_PER_KWH;
 }
 
 function shouldPreferMode(candidate: OracleEntry["strategy"], incumbent: OracleEntry["strategy"] | null): boolean {
@@ -670,12 +596,32 @@ function shouldPreferMode(candidate: OracleEntry["strategy"], incumbent: OracleE
     return true;
   }
   const rank = new Map<OracleEntry["strategy"], number>([
-    ["limit", 4],
-    ["hold", 3],
-    ["auto", 2],
-    ["charge", 1],
+    ["auto", 4],
+    ["charge", 3],
+    ["limit", 2],
+    ["hold", 1],
   ]);
   return (rank.get(candidate) ?? 0) > (rank.get(incumbent) ?? 0);
+}
+
+function normaliseModeParameters(parameters: BatteryControlModeParameters | null): OracleEntry["mode_params"] | undefined {
+  if (!parameters) {
+    return undefined;
+  }
+  const modeParams: NonNullable<OracleEntry["mode_params"]> = {};
+  if (typeof parameters.floorSocPercent === "number" && Number.isFinite(parameters.floorSocPercent)) {
+    modeParams.floor_soc_percent = parameters.floorSocPercent;
+  }
+  if (typeof parameters.targetSocPercent === "number" && Number.isFinite(parameters.targetSocPercent)) {
+    modeParams.target_soc_percent = parameters.targetSocPercent;
+  }
+  if (typeof parameters.minChargePowerW === "number" && Number.isFinite(parameters.minChargePowerW)) {
+    modeParams.min_charge_power_w = parameters.minChargePowerW;
+  }
+  if (typeof parameters.maxChargePowerW === "number" && Number.isFinite(parameters.maxChargePowerW)) {
+    modeParams.max_charge_power_w = parameters.maxChargePowerW;
+  }
+  return Object.keys(modeParams).length > 0 ? modeParams : undefined;
 }
 
 function buildSimulationOutput(
@@ -749,50 +695,13 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
   for (let index = 0; index < context.horizon; index += 1) {
     const profile = context.slotProfiles[index];
     const transition = policy[index][socStepIter];
-    let nextSoCStep = transition.nextSoCStep;
-    let deltaSoCSteps = transition.deltaSoCSteps;
+    const nextSoCStep = transition.nextSoCStep;
+    const deltaSoCSteps = transition.deltaSoCSteps;
     let strategy = transition.mode;
-    let storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-    let transitionEfficiencies = resolveTransitionEfficiencies(
-      context.chemistry,
-      storedEnergyChange,
-      profile.duration,
-      context.capacity,
-      context.chargeEfficiency,
-      context.dischargeEfficiency,
-      context.chargeAverageCRate,
-      context.dischargeAverageCRate,
-    );
-    let batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
-      storedEnergyChange,
-      transitionEfficiencies.chargeEfficiency,
-      transitionEfficiencies.dischargeEfficiency,
-    );
+    const storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
     const importPrice = profile.priceTotal;
     baselineCost = baselineCost.add(computeGridCost(profile.baselineGridEnergy, importPrice, profile.feedInTariff));
-    let gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
-
-    if (nextSoCStep < context.minAllowedSoCStep) {
-      nextSoCStep = context.minAllowedSoCStep;
-      deltaSoCSteps = nextSoCStep - socStepIter;
-      storedEnergyChange = context.energyPerStep.multiply(deltaSoCSteps);
-      transitionEfficiencies = resolveTransitionEfficiencies(
-        context.chemistry,
-        storedEnergyChange,
-        profile.duration,
-        context.capacity,
-        context.chargeEfficiency,
-        context.dischargeEfficiency,
-        context.chargeAverageCRate,
-        context.dischargeAverageCRate,
-      );
-      batteryEnergyAtBus = energyAtBusFromStoredEnergyChange(
-        storedEnergyChange,
-        transitionEfficiencies.chargeEfficiency,
-        transitionEfficiencies.dischargeEfficiency,
-      );
-      gridEnergy = profile.loadAfterDirectUse.add(batteryEnergyAtBus).subtract(profile.availableSolar);
-    }
+    let gridEnergy = transition.gridEnergy;
 
     if (Math.abs(gridEnergy.kilowattHours) < GRID_CHARGE_STRATEGY_THRESHOLD_KWH) {
       gridEnergy = Energy.zero();
@@ -804,13 +713,9 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       feedInTotal = feedInTotal.add(Energy.fromWattHours(Math.abs(gridEnergy.wattHours)));
       feedInProfitTotal = feedInProfitTotal.add(computeGridCost(gridEnergy, importPrice, profile.feedInTariff).negate());
     }
-    const gridImport = maxEnergy(gridEnergy, Energy.zero());
-    const additionalGridChargeRaw = storedEnergyChange.wattHours > 0
-      ? maxEnergy(gridImport.subtract(profile.baselineGridImport), Energy.zero())
-      : Energy.zero();
     const additionalGridCharge =
-      additionalGridChargeRaw.kilowattHours > GRID_CHARGE_STRATEGY_THRESHOLD_KWH
-        ? additionalGridChargeRaw
+      transition.additionalGridCharge.kilowattHours > GRID_CHARGE_STRATEGY_THRESHOLD_KWH
+        ? transition.additionalGridCharge
         : Energy.zero();
     if (additionalGridCharge.wattHours > 0) {
       gridChargeTotal = gridChargeTotal.add(additionalGridCharge);
@@ -829,7 +734,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
     if (
       strategy === "hold"
       && Math.abs(deltaSoCSteps) > 0
-      && context.optimizerModeAllowList.has("auto")
+      && context.modeDefinitions.some((mode) => mode.id === "auto")
     ) {
       strategy = "auto";
     }
@@ -840,6 +745,7 @@ function runForwardPass(context: SimulationContext, policy: PolicyTransition[][]
       target_soc_percent: Number.isFinite(endSocPercent) ? endSocPercent : null,
       grid_energy_wh: normalizedGridEnergyWh,
       strategy,
+      mode_params: normaliseModeParameters(transition.modeParameters),
     });
 
     socStepIter = nextSoCStep;

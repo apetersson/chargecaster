@@ -109,4 +109,62 @@ describe("limit mode regression", () => {
     expect(result.oracle_entries[0]?.strategy).toBe("auto");
     expect(result.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(5);
   });
+
+  it("prefers charging earlier under auto when later sunny slots are economically equivalent", () => {
+    const config: SimulationConfig = {
+      battery: {
+        capacity_kwh: 10,
+        max_charge_power_w: 4000,
+        auto_mode_floor_soc: 5,
+        max_charge_power_solar_w: 4000,
+        max_discharge_power_w: 4000,
+        max_charge_soc_percent: 100,
+      },
+      price: {
+        grid_fee_eur_per_kwh: 0,
+        feed_in_tariff_eur_per_kwh: 0.08,
+      },
+      logic: {
+        interval_seconds: 300,
+        min_hold_minutes: 0,
+        allow_battery_export: true,
+        optimizer_modes: ["auto", "limit"],
+      },
+    };
+
+    const slots: PriceSlot[] = [
+      TariffSlot.fromDates(
+        new Date("2026-04-06T10:00:00+02:00"),
+        new Date("2026-04-06T11:00:00+02:00"),
+        EnergyPrice.fromEurPerKwh(0.20),
+        "slot-1",
+      ),
+      TariffSlot.fromDates(
+        new Date("2026-04-06T11:00:00+02:00"),
+        new Date("2026-04-06T12:00:00+02:00"),
+        EnergyPrice.fromEurPerKwh(0.20),
+        "slot-2",
+      ),
+      TariffSlot.fromDates(
+        new Date("2026-04-06T12:00:00+02:00"),
+        new Date("2026-04-06T13:00:00+02:00"),
+        EnergyPrice.fromEurPerKwh(0.20),
+        "slot-3",
+      ),
+    ];
+
+    const result = simulateOptimalSchedule(
+      config,
+      {battery_soc: 20},
+      slots,
+      {
+        solarGenerationKwhPerSlot: [3, 3, 3],
+        houseLoadWattsPerSlot: [500, 500, 500],
+      },
+    );
+
+    expect(result.oracle_entries[0]?.strategy).toBe("auto");
+    expect(result.oracle_entries[0]?.end_soc_percent).toBeGreaterThan(20);
+    expect(result.oracle_entries.some((entry) => entry.strategy === "limit")).toBe(false);
+  });
 });
