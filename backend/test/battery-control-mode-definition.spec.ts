@@ -55,7 +55,7 @@ describe("battery control mode definitions", () => {
 
   it("treats limit as a charge ceiling during solar surplus", () => {
     const limit = createLimitModeDefinition({
-      floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+      maxSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
       maxChargePowerRange: {
         minPowerW: 0,
         maxPowerW: 4_000,
@@ -66,7 +66,7 @@ describe("battery control mode definitions", () => {
     });
 
     const outcome = limit.applySlotScenario(buildScenario(), {
-      floorSocPercent: 20,
+      maxSocPercent: 20,
       maxChargePowerW: 0,
     });
 
@@ -77,7 +77,7 @@ describe("battery control mode definitions", () => {
 
   it("still allows limit to discharge below its ceiling when the site needs energy", () => {
     const limit = createLimitModeDefinition({
-      floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+      maxSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
       maxChargePowerRange: {
         minPowerW: 0,
         maxPowerW: 4_000,
@@ -95,7 +95,7 @@ describe("battery control mode definitions", () => {
       baselineGridEnergyWh: 1_200,
       baselineGridImportWh: 1_200,
     }), {
-      floorSocPercent: 57,
+      maxSocPercent: 57,
       maxChargePowerW: 0,
     });
 

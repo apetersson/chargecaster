@@ -583,6 +583,12 @@ function normaliseModeParameters(parameters: BatteryControlModeParameters | null
   if (typeof parameters.targetSocPercent === "number" && Number.isFinite(parameters.targetSocPercent)) {
     modeParams.target_soc_percent = parameters.targetSocPercent;
   }
+  if (typeof parameters.minSocPercent === "number" && Number.isFinite(parameters.minSocPercent)) {
+    modeParams.min_soc_percent = parameters.minSocPercent;
+  }
+  if (typeof parameters.maxSocPercent === "number" && Number.isFinite(parameters.maxSocPercent)) {
+    modeParams.max_soc_percent = parameters.maxSocPercent;
+  }
   if (typeof parameters.minChargePowerW === "number" && Number.isFinite(parameters.minChargePowerW)) {
     modeParams.min_charge_power_w = parameters.minChargePowerW;
   }

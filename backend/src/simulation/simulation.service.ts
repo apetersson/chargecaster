@@ -246,8 +246,10 @@ export class SimulationService {
           if (entry.strategy !== "hold" && entry.strategy !== "limit") {
             return `${strategyLabel}@${entry.era_id}`;
           }
-          const holdLevel = normalizeSocLabel(entry.target_soc_percent ?? entry.start_soc_percent ?? entry.end_soc_percent);
-          return holdLevel ? `${strategyLabel}@${entry.era_id} (SoC ${holdLevel})` : `${strategyLabel}@${entry.era_id}`;
+          const boundLevel = entry.strategy === "hold"
+            ? normalizeSocLabel(entry.mode_params?.min_soc_percent ?? entry.target_soc_percent ?? entry.start_soc_percent ?? entry.end_soc_percent)
+            : normalizeSocLabel(entry.mode_params?.max_soc_percent ?? entry.target_soc_percent ?? entry.start_soc_percent ?? entry.end_soc_percent);
+          return boundLevel ? `${strategyLabel}@${entry.era_id} (SoC ${boundLevel})` : `${strategyLabel}@${entry.era_id}`;
         })
         .join("\n");
       this.logger.verbose(`Era strategies:\n${strategyLog}`);

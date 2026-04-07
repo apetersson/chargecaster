@@ -17,8 +17,8 @@ export type BatteryControlCommand =
   | "auto"
   | "limit"
   | {auto: {floorSocPercent?: number | null}}
-  | {limit: BatteryControlWindow & {floorSocPercent?: number | null; maxChargePowerW?: number | null}}
-  | {hold: {minSocPercent: number; observedSocPercent?: number | null; floorSocPercent?: number | null}};
+  | {limit: BatteryControlWindow & {maxSocPercent?: number | null; maxChargePowerW?: number | null}}
+  | {hold: {minSocPercent: number; observedSocPercent?: number | null}};
 
 export interface BatteryControlApplyResult {
   errorMessage: string | null;
@@ -42,6 +42,7 @@ export interface BatteryControlModeDefinition {
   allowsAutomaticSolarCharging?: boolean;
   floorSocRange?: BatteryControlSocRange | null;
   targetSocRange?: BatteryControlSocRange | null;
+  maxSocRange?: BatteryControlSocRange | null;
   minChargePowerRange?: (BatteryControlPowerRange & {supportsWindows: boolean; fixedPowerW?: number | null}) | null;
   maxChargePowerRange?: (BatteryControlPowerRange & {supportsWindows: boolean}) | null;
   tieBreakPriority?: number;
@@ -56,6 +57,8 @@ export interface BatteryControlModeDefinition {
 export interface BatteryControlModeParameters {
   floorSocPercent?: number | null;
   targetSocPercent?: number | null;
+  minSocPercent?: number | null;
+  maxSocPercent?: number | null;
   minChargePowerW?: number | null;
   maxChargePowerW?: number | null;
 }
@@ -129,6 +132,8 @@ export interface BatteryControlSnapshotOracleEntryLike {
   mode_params?: {
     floor_soc_percent?: number | null;
     target_soc_percent?: number | null;
+    min_soc_percent?: number | null;
+    max_soc_percent?: number | null;
     min_charge_power_w?: number | null;
     max_charge_power_w?: number | null;
   } | null;
@@ -253,7 +258,7 @@ export function buildGenericBatteryControlCapabilities(): BatteryControlCapabili
         targetSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
       }),
       createLimitModeDefinition({
-        floorSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
+        maxSocRange: {minPercent: 0, maxPercent: 100, stepPercent: 1},
         maxChargePowerRange: {
           minPowerW: 0,
           maxPowerW: null,
@@ -331,18 +336,18 @@ export function createHoldModeDefinition(definition: {
         definition.floorSocRange,
       );
       return applyAutoScenario(scenario, floorPercent, "hold", {
-        targetSocPercent: minimumPercent,
+        minSocPercent: minimumPercent,
         floorSocPercent: floorPercent,
       });
     },
     buildCommandFromSnapshot(snapshot) {
       const observedSoc = normalisePercent(snapshot.current_soc_percent);
-      const holdTarget = clampToSocRange(extractHoldTarget(snapshot), definition.targetSocRange);
+      const holdMinimum = clampToSocRange(extractHoldMinimum(snapshot), definition.targetSocRange);
       const floor = clampToSocRange(
-        normalisePercent(snapshot.next_step_soc_percent) ?? holdTarget ?? observedSoc,
+        normalisePercent(snapshot.next_step_soc_percent) ?? holdMinimum ?? observedSoc,
         definition.floorSocRange,
       );
-      const minSoc = clampToSocRange(holdTarget ?? observedSoc ?? floor, definition.targetSocRange);
+      const minSoc = clampToSocRange(holdMinimum ?? observedSoc ?? floor, definition.targetSocRange);
       if (minSoc == null) {
         return null;
       }
@@ -350,7 +355,6 @@ export function createHoldModeDefinition(definition: {
         hold: {
           minSocPercent: minSoc,
           observedSocPercent: observedSoc,
-          floorSocPercent: floor,
         },
       };
     },
@@ -358,35 +362,35 @@ export function createHoldModeDefinition(definition: {
 }
 
 export function createLimitModeDefinition(definition: {
-  floorSocRange: BatteryControlSocRange;
+  maxSocRange: BatteryControlSocRange;
   maxChargePowerRange: BatteryControlModeDefinition["maxChargePowerRange"];
 }): BatteryControlModeDefinition {
   return {
     id: "limit",
     allowsAutomaticSolarCharging: false,
-    floorSocRange: definition.floorSocRange,
+    maxSocRange: definition.maxSocRange,
     maxChargePowerRange: definition.maxChargePowerRange,
     tieBreakPriority: 1,
     enumerateParameters(scenario) {
       return [{
-        floorSocPercent: clampScenarioPercent(scenario.startSocPercent, definition.floorSocRange),
+        maxSocPercent: clampScenarioPercent(scenario.startSocPercent, definition.maxSocRange),
         maxChargePowerW: definition.maxChargePowerRange?.supportsZeroPower ? 0 : definition.maxChargePowerRange?.minPowerW ?? 0,
       }];
     },
     applySlotScenario(scenario, parameters) {
       const capPercent = clampScenarioPercent(
-        parameters.floorSocPercent ?? scenario.startSocPercent,
-        definition.floorSocRange,
+        parameters.maxSocPercent ?? scenario.startSocPercent,
+        definition.maxSocRange,
       );
       return applyLimitScenario(scenario, capPercent, {
-        floorSocPercent: capPercent,
+        maxSocPercent: capPercent,
         maxChargePowerW: parameters.maxChargePowerW ?? 0,
       });
     },
     buildCommandFromSnapshot(snapshot) {
       return {
         limit: {
-          floorSocPercent: clampToSocRange(extractLimitFloor(snapshot), definition.floorSocRange)
+          maxSocPercent: clampToSocRange(extractLimitMaximum(snapshot), definition.maxSocRange)
             ?? normalisePercent(snapshot.current_soc_percent),
           maxChargePowerW: extractLimitPower(snapshot) ?? resolveZeroCompatibleLimitPower(definition.maxChargePowerRange ?? null),
           ...buildWindowFields(extractModeUntil(snapshot, "limit"), definition.maxChargePowerRange?.supportsWindows ?? false),
@@ -760,12 +764,12 @@ function extractChargeTarget(snapshot: BatteryControlSnapshotLike): number | nul
   return target ?? normalisePercent(snapshot.next_step_soc_percent) ?? normalisePercent(snapshot.current_soc_percent);
 }
 
-function extractHoldTarget(snapshot: BatteryControlSnapshotLike): number | null {
+function extractHoldMinimum(snapshot: BatteryControlSnapshotLike): number | null {
   const entries = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries : [];
   const holdEntry = entries.find((entry) => entry.strategy === "hold");
   if (holdEntry) {
     const candidate = holdEntry.target_soc_percent ?? holdEntry.end_soc_percent ?? holdEntry.start_soc_percent ?? null;
-    const explicitCandidate = holdEntry.mode_params?.target_soc_percent ?? candidate;
+    const explicitCandidate = holdEntry.mode_params?.min_soc_percent ?? candidate;
     const normalised = normalisePercent(explicitCandidate);
     if (normalised != null) {
       return normalised;
@@ -789,9 +793,9 @@ function extractAutoFloor(snapshot: BatteryControlSnapshotLike): number | null {
   return normalisePercent(firstEntry?.mode_params?.floor_soc_percent ?? snapshot.next_step_soc_percent);
 }
 
-function extractLimitFloor(snapshot: BatteryControlSnapshotLike): number | null {
+function extractLimitMaximum(snapshot: BatteryControlSnapshotLike): number | null {
   const firstEntry = Array.isArray(snapshot.oracle_entries) ? snapshot.oracle_entries[0] : null;
-  return normalisePercent(firstEntry?.mode_params?.floor_soc_percent ?? snapshot.next_step_soc_percent)
+  return normalisePercent(firstEntry?.mode_params?.max_soc_percent ?? firstEntry?.end_soc_percent ?? snapshot.next_step_soc_percent)
     ?? normalisePercent(snapshot.current_soc_percent);
 }
 

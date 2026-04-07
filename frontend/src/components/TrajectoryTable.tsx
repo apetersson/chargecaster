@@ -41,16 +41,17 @@ function buildProposedActionDetail(
   if (!oracle?.strategy) {
     return "n/a";
   }
-  const targetPercent = oracle.target_soc_percent ?? oracle.end_soc_percent ?? oracle.start_soc_percent ?? null;
-  const targetLabel = targetPercent != null ? formatPercent(targetPercent) : null;
+  const chargeTargetPercent = oracle.mode_params?.target_soc_percent ?? oracle.target_soc_percent ?? oracle.end_soc_percent ?? oracle.start_soc_percent ?? null;
+  const holdMinimumPercent = oracle.mode_params?.min_soc_percent ?? oracle.target_soc_percent ?? oracle.start_soc_percent ?? oracle.end_soc_percent ?? null;
+  const limitMaximumPercent = oracle.mode_params?.max_soc_percent ?? oracle.target_soc_percent ?? oracle.start_soc_percent ?? oracle.end_soc_percent ?? null;
 
   switch (oracle.strategy) {
     case "charge":
-      return targetLabel ? `Charge to ${targetLabel}` : "Charge";
+      return chargeTargetPercent != null ? `Charge to ${formatPercent(chargeTargetPercent)}` : "Charge";
     case "hold":
-      return targetLabel ? `Hold at ${targetLabel}` : "Hold";
+      return holdMinimumPercent != null ? `Hold at ${formatPercent(holdMinimumPercent)}` : "Hold";
     case "limit":
-      return targetLabel ? `Limit to ${targetLabel}` : "Limit";
+      return limitMaximumPercent != null ? `Limit to ${formatPercent(limitMaximumPercent)}` : "Limit";
     case "auto":
       return "Auto";
     default:

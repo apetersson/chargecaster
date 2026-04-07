@@ -178,7 +178,6 @@ describe("OptimisationCommandTranslator", () => {
       hold: {
         minSocPercent: 17,
         observedSocPercent: 16.5,
-        floorSocPercent: 17,
       },
     });
   });
@@ -245,7 +244,7 @@ describe("OptimisationCommandTranslator", () => {
 
     expect(command).toEqual({
       limit: {
-        floorSocPercent: 30,
+        maxSocPercent: 30,
         maxChargePowerW: 0,
       },
     });

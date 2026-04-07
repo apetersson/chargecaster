@@ -46,6 +46,7 @@ interface NormalisedStrategy {
   manualTarget: Percentage | null;
   observedSocPercent: number | null;
   floorTarget: Percentage | null;
+  ceilingTarget: Percentage | null;
   maxChargePower: Power | null;
   minChargePower: Power | null;
 }
@@ -150,7 +151,7 @@ export class FroniusService implements BatteryControlBackend {
           },
         }),
         createLimitModeDefinition({
-          floorSocRange: {
+          maxSocRange: {
             minPercent: autoFloorMin,
             maxPercent: targetSocMax,
             stepPercent: 1,
@@ -292,6 +293,7 @@ export class FroniusService implements BatteryControlBackend {
         manualTarget: null,
         observedSocPercent: null,
         floorTarget: null,
+        ceilingTarget: null,
         maxChargePower: null,
         minChargePower: null,
       };
@@ -302,6 +304,7 @@ export class FroniusService implements BatteryControlBackend {
         manualTarget: null,
         observedSocPercent: null,
         floorTarget: null,
+        ceilingTarget: null,
         maxChargePower: null,
         minChargePower: null,
       };
@@ -312,6 +315,7 @@ export class FroniusService implements BatteryControlBackend {
         manualTarget: null,
         observedSocPercent: null,
         floorTarget: null,
+        ceilingTarget: null,
         maxChargePower: Power.zero(),
         minChargePower: null,
       };
@@ -323,6 +327,7 @@ export class FroniusService implements BatteryControlBackend {
         manualTarget: this.parsePercentage(chargeConfig.targetSocPercent ?? null),
         observedSocPercent: null,
         floorTarget: null,
+        ceilingTarget: null,
         maxChargePower: null,
         minChargePower: this.parsePositivePower(chargeConfig.minChargePowerW ?? null),
       };
@@ -333,13 +338,13 @@ export class FroniusService implements BatteryControlBackend {
       if (!manualTarget) {
         throw new Error("Hold strategy requires a finite minSoC percentage.");
       }
-      const floorTarget = this.parsePercentage(holdConfig.floorSocPercent ?? holdConfig.minSocPercent);
       const observedSocPercent = this.normaliseObservedSoc(holdConfig.observedSocPercent);
       return {
         mode: "hold",
         manualTarget,
         observedSocPercent,
-        floorTarget,
+        floorTarget: manualTarget,
+        ceilingTarget: null,
         maxChargePower: null,
         minChargePower: null,
       };
@@ -352,19 +357,21 @@ export class FroniusService implements BatteryControlBackend {
         manualTarget: null,
         observedSocPercent: null,
         floorTarget,
+        ceilingTarget: null,
         maxChargePower: null,
         minChargePower: null,
       };
     }
     if ("limit" in input) {
       const limitConfig = input.limit;
-      const floorTarget = this.parsePercentage(limitConfig.floorSocPercent ?? null);
+      const ceilingTarget = this.parsePercentage(limitConfig.maxSocPercent ?? null);
       const maxChargePower = this.parseNonNegativePower(limitConfig.maxChargePowerW ?? 0);
       return {
         mode: "limit",
         manualTarget: null,
         observedSocPercent: null,
-        floorTarget,
+        floorTarget: this.resolveAutoFloor(null),
+        ceilingTarget,
         maxChargePower,
         minChargePower: null,
       };
@@ -527,7 +534,7 @@ export class FroniusService implements BatteryControlBackend {
     }
 
     if (strategy.mode === "limit") {
-      const floorSoc = this.resolveAutoFloor(strategy.floorTarget);
+      const floorSoc = this.resolveAutoFloor(null);
       return {
         body: {
           BAT_M0_SOC_MIN: this.toPercentInteger(floorSoc),
@@ -858,24 +865,23 @@ export class FroniusService implements BatteryControlBackend {
     }
 
     if ("limit" in command) {
-      const {startTimestamp, untilTimestamp, floorSocPercent, maxChargePowerW} = command.limit;
+      const {startTimestamp, untilTimestamp, maxSocPercent, maxChargePowerW} = command.limit;
       if ((startTimestamp || untilTimestamp) && limitMode?.maxChargePowerRange?.supportsWindows !== true) {
         throw new Error("Fronius backend does not support bounded limit windows.");
       }
-      this.assertPercentInRange(floorSocPercent, limitMode?.floorSocRange ?? null, "limit.floorSocPercent");
+      this.assertPercentInRange(maxSocPercent, limitMode?.maxSocRange ?? null, "limit.maxSocPercent");
       this.assertPowerInRange(maxChargePowerW, limitMode?.maxChargePowerRange ?? null, "limit.maxChargePowerW");
       return;
     }
 
     if ("hold" in command) {
       this.assertPercentInRange(command.hold.minSocPercent, holdMode?.targetSocRange ?? null, "hold.minSocPercent");
-      this.assertPercentInRange(command.hold.floorSocPercent, holdMode?.floorSocRange ?? autoMode?.floorSocRange ?? null, "hold.floorSocPercent");
     }
   }
 
   private assertPercentInRange(
     value: number | null | undefined,
-    range: BatteryControlModeDefinition["targetSocRange"] | BatteryControlModeDefinition["floorSocRange"] | null,
+    range: BatteryControlModeDefinition["targetSocRange"] | BatteryControlModeDefinition["floorSocRange"] | BatteryControlModeDefinition["maxSocRange"] | null,
     label: string,
   ): void {
     if (value == null || !range) {

@@ -263,7 +263,7 @@ describe("FroniusService", () => {
     const service = createService();
     const result = await service.applyOptimization({
       limit: {
-        floorSocPercent: 25,
+        maxSocPercent: 25,
         maxChargePowerW: 0,
       },
     });
@@ -274,7 +274,7 @@ describe("FroniusService", () => {
       request.method === "POST" && request.url.endsWith("/api/config/batteries")
     );
     expect(batteryPost?.body).toBe(JSON.stringify({
-      BAT_M0_SOC_MIN: 25,
+      BAT_M0_SOC_MIN: 5,
       BAT_M0_SOC_MODE: "auto",
     }));
 

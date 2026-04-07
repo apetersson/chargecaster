@@ -131,6 +131,8 @@ export type ForecastEra = z.infer<typeof forecastEraSchema>;
 const oracleModeParamsSchema = z.object({
   floor_soc_percent: nullableNumberSchema.optional(),
   target_soc_percent: nullableNumberSchema.optional(),
+  min_soc_percent: nullableNumberSchema.optional(),
+  max_soc_percent: nullableNumberSchema.optional(),
   min_charge_power_w: nullableNumberSchema.optional(),
   max_charge_power_w: nullableNumberSchema.optional(),
 });
