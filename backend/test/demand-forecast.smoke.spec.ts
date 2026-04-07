@@ -56,6 +56,7 @@ describe("Demand forecast smoke", () => {
       listAllHistoryAsc: () => history,
       listWeatherHours: (_lat: number, _lon: number, startInclusive: string, endInclusive: string) =>
         weatherCache.filter((entry) => entry.hourUtc >= startInclusive && entry.hourUtc <= endInclusive),
+      getActiveProviderCooldown: () => null,
       upsertWeatherHours: (entries: Omit<WeatherHourRecord, "updatedAt">[]) => {
         const updatedAt = new Date().toISOString();
         for (const entry of entries) {
@@ -72,6 +73,7 @@ describe("Demand forecast smoke", () => {
           }
         }
       },
+      upsertProviderCooldown: () => undefined,
     } as unknown as StorageService;
     const weatherService = new WeatherService(storage);
     const inferenceService = {

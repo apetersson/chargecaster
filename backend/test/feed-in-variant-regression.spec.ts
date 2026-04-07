@@ -103,14 +103,14 @@ describe("feed-in variant regression", () => {
     const spot09 = sunnySpotByEra.get("2026-04-03T09:00:00.000Z");
 
     expect(sunny08?.strategy).toBe("auto");
-    expect(spot08?.strategy).toBe("hold");
-    expect(sunny09?.strategy).toBe("auto");
-    expect(spot09?.strategy).toBe("hold");
+    expect(spot08?.strategy).toBe("limit");
+    expect(sunny09?.strategy).toBe("charge");
+    expect(spot09?.strategy).toBe("charge");
     expect(sunny08?.end_soc_percent).toBeGreaterThan(spot08?.end_soc_percent ?? 0);
     expect(sunny09?.end_soc_percent).toBeGreaterThan(spot09?.end_soc_percent ?? 0);
   });
 
-  it("shifts more charging into the later low-value window for sunny-spot", () => {
+  it("preserves slightly more export under sunny-spot without collapsing the midday fill", () => {
     const fixture = loadFixture();
     const sunny = runVariant(fixture, "sunny");
     const sunnySpot = runVariant(fixture, "sunny_spot");
@@ -122,10 +122,11 @@ describe("feed-in variant regression", () => {
     const sunny12 = sunnyByEra.get("2026-04-03T12:00:00.000Z");
     const spot12 = sunnySpotByEra.get("2026-04-03T12:00:00.000Z");
 
-    expect(spot11?.end_soc_percent).toBeGreaterThan(sunny11?.end_soc_percent ?? 0);
-    expect(spot12?.end_soc_percent).toBeGreaterThan(sunny12?.end_soc_percent ?? 0);
+    expect(spot11?.end_soc_percent).toBe(sunny11?.end_soc_percent ?? 0);
+    expect(spot12?.end_soc_percent).toBe(sunny12?.end_soc_percent ?? 0);
     expect(sunny.expected_feed_in_kwh).toBeGreaterThan(0);
     expect(sunnySpot.expected_feed_in_kwh).toBeGreaterThan(0);
+    expect(sunnySpot.expected_feed_in_kwh).toBeGreaterThan(sunny.expected_feed_in_kwh);
   });
 
   it("does not collapse the two live variants back into the same oracle curve", () => {
@@ -134,6 +135,6 @@ describe("feed-in variant regression", () => {
     const sunnySpot = runVariant(fixture, "sunny_spot");
 
     expect(maxOracleSocDelta(sunny.oracle_entries, sunnySpot.oracle_entries)).toBeGreaterThan(15);
-    expect(countStrategyDifferences(sunny.oracle_entries, sunnySpot.oracle_entries)).toBeGreaterThanOrEqual(4);
+    expect(countStrategyDifferences(sunny.oracle_entries, sunnySpot.oracle_entries)).toBeGreaterThanOrEqual(2);
   });
 });

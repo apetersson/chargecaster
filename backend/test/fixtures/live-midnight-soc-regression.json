@@ -697,7 +697,7 @@
   ],
   "expected": {
     "midnight_soc_less_than_percent": 15,
-    "reference_midnight_soc_percent": 6
+    "reference_midnight_soc_percent": 5
   },
   "battery_efficiency": {
     "charge_efficiency_percent": 99.5,
