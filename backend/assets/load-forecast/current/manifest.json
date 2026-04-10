@@ -1,21 +1,71 @@
 {
   "model_type": "catboost",
-  "model_version": "manual-20260315",
-  "feature_schema_version": "v2_house_load_1",
-  "trained_at": "2026-03-15T17:05:12.531867Z",
+  "model_version": "20260410T153206610Z",
+  "feature_schema_version": "v3_house_load_forward_features_1",
+  "feature_count": 24,
+  "feature_names": [
+    "local_hour",
+    "weekday_monday0",
+    "is_weekend",
+    "week_of_year",
+    "month",
+    "season",
+    "temperature",
+    "cloud_cover",
+    "wind_speed",
+    "precipitation",
+    "forecast_solar_now",
+    "forecast_solar_next3h_mean",
+    "forecast_solar_next6h_mean",
+    "price_now",
+    "price_next6h_mean",
+    "price_next24h_percentile",
+    "price_next24h_top_quartile",
+    "lag_prev_hour",
+    "lag_mean_3",
+    "lag_mean_6",
+    "same_hour_prev_day",
+    "same_hour_prev_week",
+    "same_hour_prev_day_missing",
+    "same_hour_prev_week_missing"
+  ],
+  "target_mode": "baseline_ratio_v1",
+  "trained_at": "2026-04-10T15:33:01.030207Z",
   "training_window": {
     "start": "2025-10-16T17:00:00Z",
-    "end": "2026-03-12T23:00:00Z"
+    "end": "2026-04-10T15:00:00Z"
   },
-  "history_row_count": 3442,
-  "hourly_row_count": 3435,
+  "history_row_count": 4129,
+  "hourly_row_count": 4122,
   "metrics_summary": {
-    "mae": 826.2722540638301,
-    "rmse": 1184.6465367791359,
-    "p50_absolute_error": 483.0177309339524,
-    "p90_absolute_error": 2058.4498230629015,
-    "p90_economic_hours_absolute_error": 2210.7783697710847,
-    "mae_vs_hybrid_improvement_ratio": -0.347028666225306
+    "mae": 619.8221746441538,
+    "rmse": 848.2901150452677,
+    "p50_absolute_error": 455.86146590909107,
+    "p90_absolute_error": 1357.7049772727273,
+    "mae_vs_hybrid_improvement_ratio": -0.000904735995459287,
+    "p90_economic_hours_absolute_error": 1502.8321190476183
   },
+  "training_data_summary": {
+    "forward_feature_coverage": {
+      "history_forecast_solar_ratio": 0.16396221845483167,
+      "solar_proxy_ratio": 0,
+      "realized_solar_fallback_ratio": 0.8360377815451683
+    }
+  },
+  "walk_forward_metrics": {
+    "model_mae": 619.8221746441538,
+    "model_rmse": 848.2901150452677,
+    "model_p90_absolute_error": 1357.7049772727273,
+    "hybrid_mae": 619.261906107082,
+    "hybrid_p90_economic_hours_absolute_error": 1498.0684495042556
+  },
+  "replay_metrics": {
+    "cost_delta_eur": -0.013711437707544889,
+    "mae": 628.1002964060244,
+    "p90_economic_hours_absolute_error": 1302.8490217532467,
+    "mode_switch_count": 4.714285714285714,
+    "mode_switch_delta": -0.6428571428571429
+  },
+  "promotion_decision": "replay_evaluated",
   "catboost_version": "1.2.10"
 }

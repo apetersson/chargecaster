@@ -1,6 +1,33 @@
 {
-  "history_row_count": 3442,
-  "hourly_row_count": 3435,
-  "fold_count": 101,
-  "trained_at": "2026-03-15T17:05:12.531867Z"
+  "history_row_count": 4129,
+  "hourly_row_count": 4122,
+  "fold_count": 129,
+  "trained_at": "2026-04-10T15:33:01.030207Z",
+  "feature_schema_version": "v3_house_load_forward_features_1",
+  "feature_names": [
+    "local_hour",
+    "weekday_monday0",
+    "is_weekend",
+    "week_of_year",
+    "month",
+    "season",
+    "temperature",
+    "cloud_cover",
+    "wind_speed",
+    "precipitation",
+    "forecast_solar_now",
+    "forecast_solar_next3h_mean",
+    "forecast_solar_next6h_mean",
+    "price_now",
+    "price_next6h_mean",
+    "price_next24h_percentile",
+    "price_next24h_top_quartile",
+    "lag_prev_hour",
+    "lag_mean_3",
+    "lag_mean_6",
+    "same_hour_prev_day",
+    "same_hour_prev_week",
+    "same_hour_prev_day_missing",
+    "same_hour_prev_week_missing"
+  ]
 }

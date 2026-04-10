@@ -1,31 +1,45 @@
 {
   "model": {
-    "mae": 826.2722540638301,
-    "rmse": 1184.6465367791359,
-    "p50_absolute_error": 483.0177309339524,
-    "p90_absolute_error": 2058.4498230629015,
-    "p90_economic_hours_absolute_error": 2210.7783697710847,
-    "mae_vs_hybrid_improvement_ratio": -0.347028666225306
+    "mae": 619.8221746441538,
+    "rmse": 848.2901150452677,
+    "p50_absolute_error": 455.86146590909107,
+    "p90_absolute_error": 1357.7049772727273,
+    "p90_economic_hours_absolute_error": 1502.8321190476183,
+    "mae_vs_hybrid_improvement_ratio": -0.000904735995459287
   },
   "flat_2200": {
-    "mae": 787.9151338355775,
-    "rmse": 983.6074404861362,
-    "p50_absolute_error": 676.1000000000001,
-    "p90_absolute_error": 1485.7916666666665
+    "mae": 797.5535939840695,
+    "rmse": 980.7549899416491,
+    "p50_absolute_error": 713.8185454545455,
+    "p90_absolute_error": 1464.0500000000006
   },
   "hour_of_week": {
-    "mae": 631.0884885883353,
-    "rmse": 868.2473298899606,
-    "p50_absolute_error": 472.6335432860378,
-    "p90_absolute_error": 1335.146915738167
+    "mae": 628.5977731164849,
+    "rmse": 857.6972353287958,
+    "p50_absolute_error": 479.27952825028524,
+    "p90_absolute_error": 1332.3067187965182
   },
   "hybrid": {
-    "mae": 613.403615514168,
-    "rmse": 845.4347435637001,
-    "p50_absolute_error": 447.48977482258397,
-    "p90_absolute_error": 1352.300638401919,
-    "p90_economic_hours_absolute_error": 1438.3623838772487
+    "mae": 619.261906107082,
+    "rmse": 851.9594715417699,
+    "p50_absolute_error": 450.19308606279765,
+    "p90_absolute_error": 1358.6062566361375,
+    "p90_economic_hours_absolute_error": 1498.0684495042556
   },
-  "active_model": null,
-  "fold_count": 101
+  "active_model": {
+    "mae": 634.0835371348415,
+    "rmse": 865.7919126394962,
+    "p50_absolute_error": 464.39908333333324,
+    "p90_absolute_error": 1402.255771645022,
+    "p90_economic_hours_absolute_error": 1536.4124166666666
+  },
+  "fold_count": 129,
+  "replay": {
+    "window_count": 14,
+    "cost_delta_eur": -0.013711437707544889,
+    "mae": 628.1002964060244,
+    "p90_economic_hours_absolute_error": 1302.8490217532467,
+    "mode_switch_count": 4.714285714285714,
+    "mode_switch_delta": -0.6428571428571429
+  }
 }
