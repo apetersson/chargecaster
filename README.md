@@ -85,13 +85,27 @@ For the fallback logic, see [docs/hybrid_simple_forecast.md](./docs/hybrid_simpl
 └── Dockerfile                          # monolith image: backend + frontend + ML runtime
 ```
 
+## What You Need For A Meaningful Deployment
+
+Chargecaster can start in partial or degraded modes, but a meaningful real-world installation currently assumes the following:
+
+- A Fronius-compatible inverter/battery setup that Chargecaster can read and control.
+- A home battery that is actually connected to that inverter and exposed through the Fronius API.
+- EVCC installed and reachable.
+  - In the current codebase, EVCC is more than an optional extra feed.
+  - It supplies important live site telemetry such as battery SOC, home power, grid power, solar power, EV charging power, and EV state.
+  - It can also act as a fallback price source.
+- Internet access for external forecast and price data.
+  - tariff providers such as aWATTar or ENTSO-E
+  - weather / solar forecast inputs via the Open-Meteo-based solar path
+- A correctly configured site model.
+  - battery capacity and limits
+  - latitude / longitude / timezone
+  - solar array orientation and capacity
+
+Without those pieces, Chargecaster can still run in dry-run, fallback, or partially simulated modes, but it is much less representative of how the project is intended to be used today.
+
 ## Local Development
-
-If you are starting from the parent workspace, enter this directory first:
-
-```bash
-cd main-chargecaster
-```
 
 ### Prerequisites
 
@@ -114,11 +128,25 @@ Start with `dry_run: true` until you are comfortable with the planning output.
 Important config areas:
 
 - `fronius`: inverter/battery control endpoint
-- `evcc`: optional EVCC integration
+- `evcc`: practically essential for a useful live deployment today, even though the code can still run without it
 - `price`: market price, grid-fee, and feed-in providers
 - `location` and `solar`: required for weather and solar context
 - `battery`: capacity, power limits, and SOC bounds
 - `load_forecast`: model directory and self-training behavior
+
+### Local dev vs. meaningful runtime
+
+For UI work, simulation work, or dry-run experimentation, you do not need the full hardware stack online all the time.
+
+For a meaningful end-to-end runtime, you should assume you need:
+
+- Fronius inverter access
+- a real battery configuration
+- EVCC reachable from Chargecaster
+- working tariff data sources
+- working weather / solar inputs
+
+The current system can degrade gracefully when some of these are missing, but the intended operating mode still assumes all of them are available.
 
 ### 2. Install dependencies
 
