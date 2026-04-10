@@ -9,6 +9,11 @@ workflow:
     - if: $CI_COMMIT_TAG
     # Merge requests get their own verification pipeline.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Skip duplicate default-branch push pipelines. The release tag pipeline is
+    # the authoritative post-merge publish path, and feature branches still get
+    # verified through MR pipelines before they land here.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
     # When a branch already has an open MR, skip the duplicate push pipeline.
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
