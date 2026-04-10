@@ -10,6 +10,9 @@ import { AwattarSunnySpotFeedInPriceProvider } from "../src/config/price-provide
 import { EControlGridFeePriceProvider } from "../src/config/price-providers/e-control-grid-fee-price.provider";
 import { StorageService } from "../src/storage/storage.service";
 
+const liveSmokeEnabled = process.env.CHARGECASTER_ENABLE_LIVE_SMOKE_TESTS === "1";
+const liveSmokeIt = liveSmokeEnabled ? it : it.skip;
+
 describe("E-Control grid fee smoke", () => {
   let tempDir: string | null = null;
   let storage: StorageService | null = null;
@@ -26,7 +29,7 @@ describe("E-Control grid fee smoke", () => {
     delete process.env.CHARGECASTER_STORAGE_PATH;
   });
 
-  it("reads the official 2026 Wien values and sees SNAP reduce the midday fee", async () => {
+  liveSmokeIt("reads the official 2026 Wien values and sees SNAP reduce the midday fee", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "chargecaster-econtrol-smoke-"));
     process.env.CHARGECASTER_STORAGE_PATH = join(tempDir, "backend.sqlite");
     storage = new StorageService();
