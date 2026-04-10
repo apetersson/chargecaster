@@ -227,8 +227,10 @@ export class LoadForecastArtifactService {
   }
 
   private seedBundledStarterArtifact(config: ConfigDocument): void {
+    const baseDir = this.ensureBaseDir(config);
     const currentDir = this.resolveCurrentDir(config);
-    if (existsSync(join(currentDir, "manifest.json")) && existsSync(join(currentDir, "model.cbm"))) {
+    const currentInspection = this.inspectArtifactDir(currentDir, baseDir);
+    if (currentInspection.artifact) {
       return;
     }
 
@@ -255,7 +257,11 @@ export class LoadForecastArtifactService {
         this.logger.warn(`Ignoring bundled load-forecast artifact ${manifest.model_version}: feature contract mismatch`);
         return;
       }
-      const baseDir = this.ensureBaseDir(config);
+      if (currentInspection.reason !== "no_artifact") {
+        this.logger.warn(
+          `Replacing ${currentDir} with bundled load-forecast starter artifact because the runtime artifact is invalid (${currentInspection.detail ?? currentInspection.reason})`,
+        );
+      }
       const nextDir = join(baseDir, "current.next");
       rmSync(nextDir, { recursive: true, force: true });
       cpSync(bundledCurrentDir, nextDir, { recursive: true });

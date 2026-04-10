@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -69,6 +69,80 @@ describe("LoadForecastArtifactService", () => {
     expect(artifact?.manifest.model_version).toBe("starter-load-model");
     expect(existsSync(join(runtimeBaseDir, "current", "model.cbm"))).toBe(true);
     expect(existsSync(join(runtimeBaseDir, "current", "manifest.json"))).toBe(true);
+
+    rmSync(runtimeBaseDir, { recursive: true, force: true });
+    rmSync(bundledBaseDir, { recursive: true, force: true });
+  });
+
+  it("replaces an invalid runtime artifact with the bundled starter model", () => {
+    const runtimeBaseDir = mkdtempSync(join(tmpdir(), "chargecaster-load-runtime-"));
+    const bundledBaseDir = mkdtempSync(join(tmpdir(), "chargecaster-load-bundled-"));
+    const runtimeCurrentDir = join(runtimeBaseDir, "current");
+    const bundledCurrentDir = join(bundledBaseDir, "current");
+    mkdirSync(runtimeCurrentDir, { recursive: true });
+    mkdirSync(bundledCurrentDir, { recursive: true });
+
+    writeFileSync(join(runtimeCurrentDir, "manifest.json"), JSON.stringify({
+      model_type: "catboost",
+      model_version: "stale-runtime-model",
+      feature_schema_version: LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+      trained_at: "2026-03-01T00:00:00.000Z",
+      training_window: { start: "2026-01-01T00:00:00.000Z", end: "2026-02-28T00:00:00.000Z" },
+      history_row_count: 100,
+      hourly_row_count: 100,
+      metrics_summary: {
+        mae: 100,
+        rmse: 150,
+        p50_absolute_error: 90,
+        p90_absolute_error: 200,
+      },
+      replay_metrics: {},
+      promotion_decision: "promoted",
+      catboost_version: "1.2.10",
+    }));
+    writeFileSync(join(runtimeCurrentDir, "model.cbm"), "stale-model");
+
+    writeFileSync(join(bundledCurrentDir, "manifest.json"), JSON.stringify({
+      model_type: "catboost",
+      model_version: "starter-load-model",
+      feature_schema_version: LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+      feature_count: LOAD_FORECAST_FEATURE_COUNT,
+      feature_names: LOAD_FORECAST_FEATURE_NAMES,
+      trained_at: "2026-03-20T00:00:00.000Z",
+      training_window: { start: "2026-01-01T00:00:00.000Z", end: "2026-03-19T00:00:00.000Z" },
+      history_row_count: 100,
+      hourly_row_count: 100,
+      metrics_summary: {
+        mae: 100,
+        rmse: 150,
+        p50_absolute_error: 90,
+        p90_absolute_error: 200,
+      },
+      replay_metrics: {},
+      promotion_decision: "seeded",
+      catboost_version: "1.2.10",
+    }));
+    writeFileSync(join(bundledCurrentDir, "model.cbm"), "starter-model");
+    writeFileSync(join(bundledCurrentDir, "metrics.json"), JSON.stringify({ model: { mae: 100 } }));
+    writeFileSync(join(bundledCurrentDir, "training.log"), "seeded\n");
+
+    process.env.CHARGECASTER_LOAD_FORECAST_MODEL_DIR = runtimeBaseDir;
+    process.env.CHARGECASTER_BUNDLED_LOAD_FORECAST_DIR = bundledBaseDir;
+
+    const service = new LoadForecastArtifactService();
+    const config = { dry_run: true } as ConfigDocument;
+
+    const artifact = service.readActiveArtifact(config);
+
+    expect(artifact?.manifest.model_version).toBe("starter-load-model");
+    expect(existsSync(join(runtimeCurrentDir, ".bundled-seeded"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(runtimeCurrentDir, "manifest.json"), "utf-8"))).toEqual(
+      expect.objectContaining({
+        model_version: "starter-load-model",
+        feature_count: LOAD_FORECAST_FEATURE_COUNT,
+        feature_names: LOAD_FORECAST_FEATURE_NAMES,
+      }),
+    );
 
     rmSync(runtimeBaseDir, { recursive: true, force: true });
     rmSync(bundledBaseDir, { recursive: true, force: true });
