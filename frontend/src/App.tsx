@@ -9,6 +9,7 @@ import { useDashboardData } from "./hooks/useDashboardData";
 import { useBacktestHistory } from "./hooks/useBacktestHistory";
 import { useProjectionChart } from "./hooks/useProjectionChart/useProjectionChart";
 import { useIsMobile } from "./hooks/useIsMobile";
+import { reloadApplication } from "./utils/reloadApp";
 
 const PREVIEW_HOURS_OPTIONS = [12, 24, 48, 72, 96, 120] as const;
 
@@ -35,6 +36,10 @@ function App(): JSX.Element {
   const backtestState = useBacktestHistory();
   const [showPowerAxisLabels, setShowPowerAxisLabels] = useState<boolean>(() => !isMobile);
   const [showPriceAxisLabels, setShowPriceAxisLabels] = useState<boolean>(() => !isMobile);
+
+  useEffect(() => {
+    window.__CHARGECASTER_BOOT_READY__?.();
+  }, []);
 
   useEffect(() => {
     setShowPowerAxisLabels(!isMobile);
@@ -91,6 +96,24 @@ function App(): JSX.Element {
       {error ? (
         <section className="card">
           <p className="status err">{error}</p>
+        </section>
+      ) : null}
+
+      {hasBuildMismatch ? (
+        <section className="card banner">
+          <div>
+            <h2>New version available</h2>
+            <p>This tab is still running build {normalisedFrontendBuildVersion} while the backend is already on {normalisedBackendBuildVersion}. Reload the app to pick up the latest bundle.</p>
+          </div>
+          <button
+            type="button"
+            className="refresh-button"
+            onClick={() => {
+              void reloadApplication();
+            }}
+          >
+            Reload app
+          </button>
         </section>
       ) : null}
 

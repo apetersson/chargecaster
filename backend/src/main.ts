@@ -79,10 +79,12 @@ async function bootstrap(): Promise<NestFastifyApplication> {
       wildcard: false,
       setHeaders(res, filePath) {
         const relPath = relative(publicRoot, normalize(filePath)).replace(/\\/g, "/");
-        if (relPath.startsWith("assets/")) {
+        if (relPath === "index.html" || relPath === "build-info.json" || relPath.endsWith(".webmanifest")) {
+          res.setHeader("Cache-Control", "no-store, max-age=0");
+        } else if (relPath.startsWith("assets/")) {
           res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         } else {
-          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
         }
       },
     });
@@ -96,7 +98,10 @@ async function bootstrap(): Promise<NestFastifyApplication> {
         return reply.callNotFound();
       }
 
-      return reply.type("text/html").sendFile("index.html");
+      return reply
+        .header("Cache-Control", "no-store, max-age=0")
+        .type("text/html")
+        .sendFile("index.html");
     });
   }
 

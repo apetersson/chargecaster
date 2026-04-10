@@ -5,9 +5,220 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chargecaster Energy Projection</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background-color: #0f172a;
+        color: #f8fafc;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at top, rgba(37, 99, 235, 0.35), transparent 55%),
+          radial-gradient(circle at bottom, rgba(14, 116, 144, 0.3), transparent 60%), #0f172a;
+      }
+
+      .boot-shell {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+      }
+
+      .boot-panel {
+        width: min(28rem, 100%);
+        padding: 1.5rem;
+        border-radius: 18px;
+        background: rgba(15, 23, 42, 0.78);
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.35);
+        backdrop-filter: blur(10px);
+      }
+
+      .boot-eyebrow {
+        margin: 0 0 0.5rem;
+        color: rgba(191, 219, 254, 0.92);
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .boot-title {
+        margin: 0 0 0.75rem;
+        font-size: clamp(1.35rem, 3.4vw, 1.8rem);
+      }
+
+      .boot-copy,
+      .boot-detail {
+        margin: 0;
+        color: rgba(226, 232, 240, 0.84);
+        line-height: 1.5;
+      }
+
+      .boot-detail {
+        margin-top: 0.75rem;
+        color: rgba(248, 113, 113, 0.92);
+      }
+
+      .boot-actions {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+      }
+
+      .boot-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.65rem 1rem;
+        border-radius: 999px;
+        border: 1px solid rgba(96, 165, 250, 0.5);
+        background: rgba(59, 130, 246, 0.22);
+        color: #bfdbfe;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      .boot-button.secondary {
+        border-color: rgba(148, 163, 184, 0.34);
+        background: rgba(148, 163, 184, 0.12);
+        color: #e2e8f0;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+    </style>
   </head>
   <body>
+    <div id="boot-shell" class="boot-shell" aria-live="polite">
+      <div class="boot-panel">
+        <p class="boot-eyebrow">Chargecaster</p>
+        <h1 class="boot-title">Loading dashboard</h1>
+        <p id="boot-copy" class="boot-copy">Checking the latest application bundle.</p>
+        <p id="boot-detail" class="boot-detail" hidden></p>
+        <div id="boot-actions" class="boot-actions" hidden>
+          <button id="boot-reload" class="boot-button" type="button">Reload app</button>
+          <button id="boot-reset" class="boot-button secondary" type="button">Reset app cache</button>
+        </div>
+      </div>
+    </div>
     <div id="root"></div>
+    <script>
+      (() => {
+        const shell = document.getElementById("boot-shell");
+        const copy = document.getElementById("boot-copy");
+        const detail = document.getElementById("boot-detail");
+        const actions = document.getElementById("boot-actions");
+        const reloadButton = document.getElementById("boot-reload");
+        const resetButton = document.getElementById("boot-reset");
+        const timeoutMs = 8000;
+
+        const setRecoveryState = (message, extraDetail) => {
+          if (copy) {
+            copy.textContent = message;
+          }
+          if (detail) {
+            detail.textContent = extraDetail;
+            detail.hidden = !extraDetail;
+          }
+          if (actions) {
+            actions.hidden = false;
+          }
+        };
+
+        const buildReloadUrl = () => {
+          const url = new URL(window.location.href);
+          url.searchParams.set("_reload", String(Date.now()));
+          return url.toString();
+        };
+
+        const clearAppCaches = async () => {
+          if ("serviceWorker" in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+          }
+          if ("caches" in window) {
+            const cacheNames = await caches.keys();
+            await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+          }
+        };
+
+        const reloadApp = async (resetCaches) => {
+          if (resetCaches) {
+            try {
+              await clearAppCaches();
+            } catch (error) {
+              console.warn("Failed to clear cached app state before reload.", error);
+            }
+          }
+          window.location.replace(buildReloadUrl());
+        };
+
+        if (reloadButton) {
+          reloadButton.addEventListener("click", () => {
+            void reloadApp(false);
+          });
+        }
+
+        if (resetButton) {
+          resetButton.addEventListener("click", () => {
+            void reloadApp(true);
+          });
+        }
+
+        window.__CHARGECASTER_BOOT_READY__ = () => {
+          document.documentElement.dataset.appReady = "true";
+          if (shell) {
+            shell.remove();
+          }
+        };
+
+        const reportBootFailure = (reason) => {
+          setRecoveryState(
+            "This copy of Chargecaster did not finish loading. Reload to fetch the latest version.",
+            typeof reason === "string" ? reason : "",
+          );
+        };
+
+        window.addEventListener("error", (event) => {
+          const target = event.target;
+          if (target instanceof HTMLScriptElement || target instanceof HTMLLinkElement) {
+            reportBootFailure("A cached page referenced a bundle that is no longer available.");
+            return;
+          }
+          if (typeof event.message === "string" && event.message.length > 0) {
+            reportBootFailure(event.message);
+          }
+        }, true);
+
+        window.addEventListener("unhandledrejection", (event) => {
+          const reason = event.reason;
+          if (reason instanceof Error) {
+            reportBootFailure(reason.message);
+            return;
+          }
+          if (typeof reason === "string") {
+            reportBootFailure(reason);
+          }
+        });
+
+        window.setTimeout(() => {
+          if (document.documentElement.dataset.appReady === "true") {
+            return;
+          }
+          setRecoveryState(
+            "Still loading. If the app stays on the background, reload it from here.",
+            "Installed Chrome apps and stale tabs can hold on to an older HTML shell after a deployment.",
+          );
+        }, timeoutMs);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
