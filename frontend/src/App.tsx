@@ -18,6 +18,7 @@ function App(): JSX.Element {
     frontendBuildVersion,
     backendBuildVersion,
     summary,
+    systemContext,
     history,
     forecast,
     demandForecast,
@@ -161,7 +162,7 @@ function App(): JSX.Element {
         </div>
       </section>
 
-      <SummaryCards data={summary} backtestState={backtestState} />
+      <SummaryCards data={summary} systemContext={systemContext} backtestState={backtestState} />
 
       <DailyHistoryCard backtestState={backtestState} />
 

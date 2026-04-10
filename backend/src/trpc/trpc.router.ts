@@ -13,6 +13,7 @@ import { RuntimeConfigService } from "../config/runtime-config.service";
 import { PLANNING_VARIANTS } from "../config/runtime-config.service";
 import { SimulationConfigFactory } from "../config/simulation-config.factory";
 import { SimulationSeedService } from "../config/simulation-seed.service";
+import { ForecastSystemContextService } from "../forecasting/forecast-system-context.service";
 import { getBuildVersion } from "../build-info";
 
 interface TrpcContext {
@@ -94,6 +95,7 @@ export class TrpcRouter {
     @Inject(RuntimeConfigService) private readonly runtimeConfig: RuntimeConfigService,
     @Inject(SimulationConfigFactory) private readonly configFactory: SimulationConfigFactory,
     @Inject(SimulationSeedService) private readonly simulationSeedService: SimulationSeedService,
+    @Inject(ForecastSystemContextService) private readonly forecastSystemContextService: ForecastSystemContextService,
   ) {
     this.router = t.router({
       health: t.procedure.query(() => {
@@ -126,6 +128,10 @@ export class TrpcRouter {
             generated_at: snap.timestamp,
             entries: Array.isArray(snap.demand_forecast) ? snap.demand_forecast : [],
           };
+        }),
+        systemContext: t.procedure.query(() => {
+          this.logger.log("tRPC.dashboard.systemContext requested");
+          return this.forecastSystemContextService.getContext();
         }),
         oracle: t.procedure.query(() => {
           this.logger.log("tRPC.dashboard.oracle requested");

@@ -29,6 +29,7 @@ function createRouter({
     runtimeConfig as never,
     {} as never,
     simulationSeedService as never,
+    { getContext: vi.fn(() => ({ backend_build_version: "test-build" })) } as never,
   );
 
   return {
@@ -98,6 +99,7 @@ describe("TrpcRouter planning variant", () => {
       } as never,
       {} as never,
       { seedFromConfig: vi.fn() } as never,
+      { getContext: vi.fn(() => ({ backend_build_version: "test-build" })) } as never,
     );
 
     const result = await router.router.createCaller({}).dashboard.summary();
@@ -139,5 +141,57 @@ describe("TrpcRouter planning variant", () => {
 
     expect(runtimeConfig.setPlanningVariant).not.toHaveBeenCalled();
     expect(simulationSeedService.seedFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("exposes system context through a dedicated dashboard procedure", async () => {
+    const systemContext = {
+      backend_build_version: "build-123",
+      load_forecast: {
+        method: "catboost_model",
+        active_source: "runtime_current",
+        model_version: "load-v3",
+        feature_schema_version: "v3_house_load_forward_features_1",
+        trained_at: "2026-04-10T10:00:00.000Z",
+        training_window_end: "2026-04-09T23:00:00.000Z",
+        runtime_status: "serving",
+        last_promotion_decision: "promoted",
+        training_active: false,
+        last_training_attempt_at: "2026-04-10T10:05:00.000Z",
+        last_training_result: "promoted",
+        last_training_message: "Promoted load-v3",
+      },
+      price_forecast: {
+        method: "catboost_model",
+        model_version: "price-v1",
+        feature_schema_version: "v1",
+        trained_at: "2026-04-10T09:00:00.000Z",
+        training_window_end: "2026-04-09T23:00:00.000Z",
+        training_active: false,
+        last_training_attempt_at: null,
+        last_training_result: null,
+        last_training_message: null,
+      },
+    };
+    const router = new TrpcRouter(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        getPlanningVariant: vi.fn(() => "awattar-sunny"),
+        isDryRunEnabled: vi.fn(() => true),
+        shouldShowFeedInPriceBars: vi.fn(() => false),
+        setPlanningVariant: vi.fn(),
+      } as never,
+      {} as never,
+      { seedFromConfig: vi.fn() } as never,
+      { getContext: vi.fn(() => systemContext) } as never,
+    );
+
+    const result = await router.router.createCaller({}).dashboard.systemContext();
+
+    expect(result).toEqual(systemContext);
   });
 });

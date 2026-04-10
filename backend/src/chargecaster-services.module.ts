@@ -31,6 +31,7 @@ import { LoadForecastArtifactService } from "./forecasting/load-forecast-artifac
 import { LoadForecastInferenceService } from "./forecasting/load-forecast-inference.service";
 import { PriceForecastArtifactService } from "./forecasting/price-forecast-artifact.service";
 import { PriceForecastInferenceService } from "./forecasting/price-forecast-inference.service";
+import { ForecastSystemContextService } from "./forecasting/forecast-system-context.service";
 import { ModelTrainingCoordinator } from "./forecasting/model-training-coordinator.service";
 import { FroniusService } from "./fronius/fronius.service";
 import { BATTERY_CONTROL_BACKEND } from "./hardware/battery-control-backend";
@@ -74,6 +75,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     LoadForecastInferenceService,
     PriceForecastArtifactService,
     PriceForecastInferenceService,
+    ForecastSystemContextService,
     ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,
@@ -112,6 +114,7 @@ import { RuntimeConfigService } from "./config/runtime-config.service";
     LoadForecastInferenceService,
     PriceForecastArtifactService,
     PriceForecastInferenceService,
+    ForecastSystemContextService,
     ModelTrainingCoordinator,
     DemandForecastService,
     FroniusService,

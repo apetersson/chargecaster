@@ -40,6 +40,7 @@ type DashboardDataState = {
   frontendBuildVersion: string | null;
   backendBuildVersion: string | null;
   summary: DashboardOutputs["summary"] | null;
+  systemContext: DashboardOutputs["systemContext"] | null;
   history: HistoryPoint[];
   forecast: ForecastEra[];
   demandForecast: DemandForecastEntry[];
@@ -57,6 +58,7 @@ export function useDashboardData(previewHours: number): DashboardDataState {
   const [frontendBuildVersion, setFrontendBuildVersion] = useState<string | null>(null);
   const [backendBuildVersion, setBackendBuildVersion] = useState<string | null>(null);
   const [summary, setSummary] = useState<DashboardOutputs["summary"] | null>(null);
+  const [systemContext, setSystemContext] = useState<DashboardOutputs["systemContext"] | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastEra[]>([]);
   const [demandForecast, setDemandForecast] = useState<DemandForecastEntry[]>([]);
@@ -71,7 +73,7 @@ export function useDashboardData(previewHours: number): DashboardDataState {
     const execute = async () => {
       try {
         setLoading(true);
-        const [frontendBuildInfo, healthData, summaryData, historyData, forecastData, demandForecastData, oracleData, planningVariantData] = await Promise.all([
+        const [frontendBuildInfo, healthData, summaryData, systemContextData, historyData, forecastData, demandForecastData, oracleData, planningVariantData] = await Promise.all([
           // Read the frontend version from a tiny runtime-sidecar file so a new
           // release tag does not force a full Vite rebuild just to change text.
           fetch("/build-info.json", {cache: "no-store"})
@@ -84,6 +86,7 @@ export function useDashboardData(previewHours: number): DashboardDataState {
             .catch(() => ({version: null})),
           trpcClient.health.query(),
           trpcClient.dashboard.summary.query({previewHours}),
+          trpcClient.dashboard.systemContext.query(),
           trpcClient.dashboard.history.query(),
           trpcClient.dashboard.forecast.query(),
           trpcClient.dashboard.demandForecast.query(),
@@ -94,6 +97,7 @@ export function useDashboardData(previewHours: number): DashboardDataState {
         setFrontendBuildVersion(typeof frontendBuildInfo.version === "string" ? frontendBuildInfo.version : null);
         setBackendBuildVersion(healthData.version);
         setSummary(summaryData);
+        setSystemContext(systemContextData);
         setHistory(
           historyData.entries.map((entry) => ({
             ...entry,
@@ -153,6 +157,7 @@ export function useDashboardData(previewHours: number): DashboardDataState {
     frontendBuildVersion,
     backendBuildVersion,
     summary,
+    systemContext,
     history,
     forecast,
     demandForecast,

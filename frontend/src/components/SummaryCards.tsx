@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 
-import type { SnapshotSummary } from "../types";
+import type { DashboardOutputs, SnapshotSummary } from "../types";
 import { formatDate, formatNumber, formatPercent, formatSignedNumber, formatTimeRange, statusClass } from "../utils/format";
 import type { UseBacktestHistoryState } from "../hooks/useBacktestHistory";
 import SectionCardHeader from "./common/SectionCardHeader";
@@ -10,9 +10,11 @@ import MetricTile from "./metrics/MetricTile";
 
 function SummaryCards({
   data,
+  systemContext,
   backtestState,
 }: {
   data: SnapshotSummary | null;
+  systemContext: DashboardOutputs["systemContext"] | null;
   backtestState: UseBacktestHistoryState;
 }): JSX.Element | null {
   if (!data) {
@@ -61,6 +63,7 @@ function SummaryCards({
   const projectedSavingsTone = (data.projected_savings_eur ?? 0) >= 0 ? "positive" : "negative";
   const activeControlSavingsTone = (data.active_control_savings_eur ?? 0) >= 0 ? "positive" : "negative";
   const expectedFeedInProfitTone = (data.expected_feed_in_profit_eur ?? 0) >= 0 ? "positive" : "negative";
+  const loadForecastStatus = systemContext?.load_forecast ?? null;
 
   return (
     <section className="card">
@@ -115,6 +118,13 @@ function SummaryCards({
         </MetricGroupCard>
 
         <MetricGroupCard title="Live System Context">
+          <MetricTile label="Demand Method" value={loadForecastStatus?.method ?? "n/a"} />
+          <MetricTile label="Demand Source" value={loadForecastStatus?.active_source ?? "n/a"} />
+          <MetricTile label="Load Model Version" value={loadForecastStatus?.model_version ?? "n/a"} />
+          <MetricTile label="Feature Schema" value={loadForecastStatus?.feature_schema_version ?? "n/a"} />
+          <MetricTile label="Training Status" value={loadForecastStatus?.runtime_status ?? "n/a"} />
+          <MetricTile label="Last Train Result" value={loadForecastStatus?.last_training_result ?? "n/a"} />
+          <MetricTile label="Model Trained At" value={formatDate(loadForecastStatus?.trained_at ?? null)} />
           <MetricTile label="Charge/Discharge Eff." value={batteryEfficiencyLabel} />
           <MetricTile label="Projected Grid Power" value={formatNumber(data.projected_grid_power_w, " W")} />
           <MetricTile
