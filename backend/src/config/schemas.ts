@@ -195,7 +195,14 @@ const solarArrayConfigSchema = z
 
 const loadForecastConfigSchema = z
   .object({
+    model_dir: optionalStringSchema.optional(),
+    python_executable: optionalStringSchema.optional(),
     self_training_enabled: optionalBooleanSchema.optional(),
+    min_history_days: optionalNumberSchema.optional(),
+    min_new_history_days: optionalNumberSchema.optional(),
+    retrain_window_start_hour: optionalNumberSchema.optional(),
+    retrain_window_end_hour: optionalNumberSchema.optional(),
+    auto_promote_mode: z.enum(["strict", "manual"]).optional(),
   })
   .strip();
 
@@ -253,6 +260,34 @@ export function isPriceForecastTrainingEnabled(config: ConfigDocument): boolean 
     return config.forecast.includes("price");
   }
   return config.price_forecast?.self_training_enabled ?? false;
+}
+
+export function resolveLoadForecastPythonExecutable(config: ConfigDocument): string {
+  const candidate = config.load_forecast?.python_executable?.trim();
+  return candidate && candidate.length > 0 ? candidate : "python3";
+}
+
+export function resolveLoadForecastMinHistoryDays(config: ConfigDocument): number {
+  const candidate = config.load_forecast?.min_history_days;
+  return typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0 ? Math.floor(candidate) : 56;
+}
+
+export function resolveLoadForecastMinNewHistoryDays(config: ConfigDocument): number {
+  const candidate = config.load_forecast?.min_new_history_days;
+  return typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0 ? Math.floor(candidate) : 14;
+}
+
+export function resolveLoadForecastRetrainWindow(config: ConfigDocument): { startHour: number; endHour: number } {
+  const startHour = config.load_forecast?.retrain_window_start_hour;
+  const endHour = config.load_forecast?.retrain_window_end_hour;
+  return {
+    startHour: typeof startHour === "number" && Number.isFinite(startHour) ? Math.max(0, Math.min(23, Math.floor(startHour))) : 1,
+    endHour: typeof endHour === "number" && Number.isFinite(endHour) ? Math.max(1, Math.min(24, Math.floor(endHour))) : 5,
+  };
+}
+
+export function resolveLoadForecastAutoPromoteMode(config: ConfigDocument): "strict" | "manual" {
+  return config.load_forecast?.auto_promote_mode === "manual" ? "manual" : "strict";
 }
 
 function parseScalarPriceValue(value: PriceScalarConfigValue): number | null {

@@ -82,10 +82,11 @@ RUN find /app/backend/node_modules -name libcatboostmodel.so -exec cp {} /usr/lo
   && ldconfig \
   && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/chargecaster-ml-requirements.txt
 
+COPY --from=backend-builder /app/backend/assets/load-forecast /app/backend/assets/load-forecast
+
 FROM ${RUNTIME_ML_BASE_IMAGE} AS runtime
 
 COPY --from=backend-builder /app/backend/dist-bundle/index.js /app/backend/dist-bundle/index.js
-COPY --from=backend-builder /app/backend/assets/load-forecast /app/backend/assets/load-forecast
 COPY --from=backend-builder /app/backend/ml /app/backend/ml
 COPY --from=frontend-builder /app/frontend/dist /public
 

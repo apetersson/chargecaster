@@ -108,6 +108,7 @@ publish:runtime-ml-base:
         - Dockerfile
         - backend/package.json
         - backend/ml/requirements.txt
+        - backend/assets/load-forecast/**/*
 
 publish:tag:
   stage: publish

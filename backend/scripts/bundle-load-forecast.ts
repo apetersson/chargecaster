@@ -1,5 +1,5 @@
+import { cpSync, existsSync, rmSync } from "node:fs";
 import { readFileSync } from "node:fs";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import YAML from "yaml";
@@ -15,19 +15,27 @@ function resolveVersionArg(args: string[]): string | null {
 function main(): void {
   const version = resolveVersionArg(process.argv.slice(2));
   if (!version) {
-    throw new Error("Usage: tsx scripts/promote-load-forecast.ts <version-dir-name>");
+    throw new Error("Usage: tsx scripts/bundle-load-forecast.ts <version-dir-name>");
   }
+
   const configService = new ConfigFileService();
   const configPath = process.env.CHARGECASTER_CONFIG?.trim() || configService.resolvePath();
   const config = parseConfigDocument(YAML.parse(readFileSync(configPath, "utf-8")));
   const artifactService = new LoadForecastArtifactService();
-  const baseDir = artifactService.ensureBaseDir(config);
-  const versionDir = join(baseDir, version);
+  const versionDir = join(artifactService.ensureBaseDir(config), version);
   if (!existsSync(versionDir)) {
     throw new Error(`Load-forecast artifact directory not found: ${versionDir}`);
   }
-  artifactService.promoteVersion(config, versionDir);
-  artifactService.writePromotionMarker(versionDir);
+
+  const inspection = artifactService.inspectVersionArtifact(config, versionDir);
+  if (!inspection.artifact) {
+    throw new Error(`Load-forecast artifact ${versionDir} is not bundleable (${inspection.reason})`);
+  }
+
+  const bundledDir = join(process.cwd(), "assets", "load-forecast", "current");
+  rmSync(bundledDir, { recursive: true, force: true });
+  cpSync(versionDir, bundledDir, { recursive: true });
+  console.log(`Bundled load-forecast artifact ${inspection.artifact.manifest.model_version} into ${bundledDir}`);
 }
 
 main();

@@ -77,3 +77,8 @@ load_forecast:
   model_dir: "../data/models/load-forecast"
   self_training_enabled: false
   python_executable: "python3"
+  min_history_days: 56
+  min_new_history_days: 14
+  retrain_window_start_hour: 1
+  retrain_window_end_hour: 5
+  auto_promote_mode: "strict"

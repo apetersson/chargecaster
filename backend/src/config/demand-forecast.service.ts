@@ -11,6 +11,20 @@ const DEFAULT_HOUSE_LOAD_W = 2200;
 const MIN_HOUSE_LOAD_W = 150;
 const MAX_HOUSE_LOAD_W = 15000;
 const MAX_NEIGHBORS = 24;
+const MIN_BASELINE_RATIO = 0.2;
+const MAX_BASELINE_RATIO = 3.0;
+const SHAPE_CALIBRATION_BLEND = 1.0;
+const MAX_SHAPE_STD_RATIO = 1.095;
+
+export type LoadForecastMethod = "catboost_model" | "hybrid_history_weather" | "cold_start";
+export type LoadForecastActiveSource =
+  | "runtime_current"
+  | "bundled_seeded"
+  | "candidate_not_promoted"
+  | "fallback_no_artifact"
+  | "fallback_schema_mismatch"
+  | "fallback_runtime_unavailable";
+export type LoadForecastRuntimeStatus = "serving" | "fallback" | "training" | "blocked";
 
 interface HistoricalHour {
   hourUtc: string;
@@ -26,6 +40,7 @@ interface HistoricalHour {
   cloudCover: number | null;
   windSpeed10m: number | null;
   precipitationMm: number | null;
+  validTarget: boolean;
 }
 
 interface ForecastHourContext {
@@ -51,6 +66,16 @@ interface BaselineBundle {
   hourOnly: Map<number, number>;
 }
 
+export interface LoadForecastRuntimeMetadata {
+  method: LoadForecastMethod;
+  activeSource: LoadForecastActiveSource;
+  modelVersion: string | null;
+  featureSchemaVersion: string | null;
+  trainedAt: string | null;
+  trainingWindowEnd: string | null;
+  runtimeStatus: LoadForecastRuntimeStatus;
+}
+
 export interface DemandForecastBuildInput {
   config: ConfigDocument;
   forecastEras: ForecastEra[];
@@ -60,6 +85,7 @@ export interface DemandForecastBuildInput {
 @Injectable()
 export class DemandForecastService {
   private readonly logger = new Logger(DemandForecastService.name);
+  private lastRuntimeMetadata: LoadForecastRuntimeMetadata | null = null;
 
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
@@ -108,13 +134,22 @@ export class DemandForecastService {
 
     if (historicalHours.length > 0) {
       const fallback = buildHybridFallbackForecast(futureContexts, historicalHours, baselines, input.liveHomePowerW ?? null);
+      this.lastRuntimeMetadata = this.buildFallbackMetadata("hybrid_history_weather");
       this.logger.log(`Built ${fallback.length} demand forecast entries from hybrid fallback`);
       return fallback;
     }
 
     const coldStart = buildColdStartForecast(futureContexts);
+    this.lastRuntimeMetadata = this.buildFallbackMetadata("cold_start");
     this.logger.log(`Built ${coldStart.length} demand forecast entries from cold start`);
     return coldStart;
+  }
+
+  getRuntimeMetadata(config: ConfigDocument): LoadForecastRuntimeMetadata {
+    if (this.lastRuntimeMetadata) {
+      return this.lastRuntimeMetadata;
+    }
+    return this.metadataFromInspection(this.inspectActiveArtifact(config));
   }
 
   private async buildModelForecast(
@@ -124,8 +159,10 @@ export class DemandForecastService {
     baselines: BaselineBundle,
     liveHomePowerW: number | null,
   ): Promise<DemandForecastEntry[] | null> {
-    const activeArtifact = this.inferenceService.getActiveArtifact(config);
+    const inspection = this.inspectActiveArtifact(config);
+    const activeArtifact = inspection.artifact;
     if (!activeArtifact) {
+      this.lastRuntimeMetadata = this.metadataFromInspection(inspection);
       return null;
     }
 
@@ -150,10 +187,28 @@ export class DemandForecastService {
       });
       const predictionResult = await this.inferenceService.predict(config, [features]);
       if (!predictionResult) {
+        this.lastRuntimeMetadata = {
+          method: "hybrid_history_weather",
+          activeSource: "fallback_runtime_unavailable",
+          modelVersion: activeArtifact.manifest.model_version,
+          featureSchemaVersion: activeArtifact.manifest.feature_schema_version,
+          trainedAt: activeArtifact.manifest.trained_at,
+          trainingWindowEnd: activeArtifact.manifest.training_window.end,
+          runtimeStatus: "blocked",
+        };
         return null;
       }
 
-      let housePowerW = clamp(predictionResult.predictions[0] ?? baselineHousePowerW, MIN_HOUSE_LOAD_W, MAX_HOUSE_LOAD_W);
+      const rawPrediction = predictionResult.predictions[0];
+      const targetMode = activeArtifact.manifest.target_mode ?? "absolute_house_power_v1";
+      let housePowerW = rawPrediction ?? baselineHousePowerW;
+      if (targetMode === "baseline_delta_v1") {
+        housePowerW = baselineHousePowerW + (rawPrediction ?? 0);
+      } else if (targetMode === "baseline_ratio_v1") {
+        const boundedRatio = clamp(rawPrediction ?? 1, MIN_BASELINE_RATIO, MAX_BASELINE_RATIO);
+        housePowerW = baselineHousePowerW * boundedRatio;
+      }
+      housePowerW = clamp(housePowerW, MIN_HOUSE_LOAD_W, MAX_HOUSE_LOAD_W);
       if (index === 0 && typeof liveHomePowerW === "number" && Number.isFinite(liveHomePowerW)) {
         housePowerW = clamp(housePowerW * 0.7 + liveHomePowerW * 0.3, MIN_HOUSE_LOAD_W, MAX_HOUSE_LOAD_W);
       }
@@ -174,7 +229,17 @@ export class DemandForecastService {
       }
     }
 
-    return forecast;
+    const calibratedForecast = calibrateForecastShape(forecast, contexts, historicalHours, liveHomePowerW);
+    this.lastRuntimeMetadata = {
+      method: "catboost_model",
+      activeSource: activeArtifact.activeSource,
+      modelVersion: activeArtifact.manifest.model_version,
+      featureSchemaVersion: activeArtifact.manifest.feature_schema_version,
+      trainedAt: activeArtifact.manifest.trained_at,
+      trainingWindowEnd: activeArtifact.manifest.training_window.end,
+      runtimeStatus: "serving",
+    };
+    return calibratedForecast;
   }
 
   private async buildHistoricalHours(
@@ -208,6 +273,7 @@ export class DemandForecastService {
         cloudCover: weather?.cloudCover ?? null,
         windSpeed10m: weather?.windSpeed10m ?? null,
         precipitationMm: weather?.precipitationMm ?? null,
+        validTarget: entry.validTarget,
       };
     });
   }
@@ -223,6 +289,65 @@ export class DemandForecastService {
       map.set(entry.hourUtc, entry);
     }
     return map;
+  }
+
+  private metadataFromInspection(
+    inspection: ReturnType<LoadForecastInferenceService["inspectActiveArtifact"]>,
+  ): LoadForecastRuntimeMetadata {
+    if (inspection.artifact) {
+      return {
+        method: "catboost_model",
+        activeSource: inspection.artifact.activeSource,
+        modelVersion: inspection.artifact.manifest.model_version,
+        featureSchemaVersion: inspection.artifact.manifest.feature_schema_version,
+        trainedAt: inspection.artifact.manifest.trained_at,
+        trainingWindowEnd: inspection.artifact.manifest.training_window.end,
+        runtimeStatus: "serving",
+      };
+    }
+    if (inspection.reason === "schema_mismatch" || inspection.reason === "invalid_manifest") {
+      return {
+        method: "hybrid_history_weather",
+        activeSource: "fallback_schema_mismatch",
+        modelVersion: null,
+        featureSchemaVersion: null,
+        trainedAt: null,
+        trainingWindowEnd: null,
+        runtimeStatus: "blocked",
+      };
+    }
+    return {
+      method: "hybrid_history_weather",
+      activeSource: "fallback_no_artifact",
+      modelVersion: null,
+      featureSchemaVersion: null,
+      trainedAt: null,
+      trainingWindowEnd: null,
+      runtimeStatus: "fallback",
+    };
+  }
+
+  private buildFallbackMetadata(method: "hybrid_history_weather" | "cold_start"): LoadForecastRuntimeMetadata {
+    const previous = this.lastRuntimeMetadata;
+    return {
+      method,
+      activeSource: previous?.activeSource ?? "fallback_no_artifact",
+      modelVersion: previous?.modelVersion ?? null,
+      featureSchemaVersion: previous?.featureSchemaVersion ?? null,
+      trainedAt: previous?.trainedAt ?? null,
+      trainingWindowEnd: previous?.trainingWindowEnd ?? null,
+      runtimeStatus: previous?.runtimeStatus ?? "fallback",
+    };
+  }
+
+  private inspectActiveArtifact(config: ConfigDocument): ReturnType<LoadForecastInferenceService["inspectActiveArtifact"]> {
+    if ("inspectActiveArtifact" in this.inferenceService && typeof this.inferenceService.inspectActiveArtifact === "function") {
+      return this.inferenceService.inspectActiveArtifact(config);
+    }
+    const artifact = this.inferenceService.getActiveArtifact(config);
+    return artifact
+      ? { artifact, reason: "ok" }
+      : { artifact: null, reason: "no_artifact" };
   }
 }
 
@@ -264,6 +389,103 @@ function buildHybridFallbackForecast(
       model_version: undefined,
     } satisfies DemandForecastEntry;
   });
+}
+
+function calibrateForecastShape(
+  forecast: DemandForecastEntry[],
+  contexts: ForecastHourContext[],
+  historicalHours: HistoricalHour[],
+  liveHomePowerW: number | null,
+): DemandForecastEntry[] {
+  const calibrationIndices = selectCalibrationIndices(contexts);
+  if (calibrationIndices.length < 4) {
+    return forecast;
+  }
+  const calibrationContexts = calibrationIndices.map((index) => contexts[index]!).filter(Boolean);
+  const referenceValues = buildRecentShapeReference(calibrationContexts, historicalHours);
+  if (!referenceValues || referenceValues.length !== calibrationIndices.length) {
+    return forecast;
+  }
+  const orderedIndices = calibrationIndices
+    .map((index) => ({ index, value: forecast[index]?.house_power_w ?? DEFAULT_HOUSE_LOAD_W }))
+    .sort((left, right) => left.value - right.value)
+    .map((entry) => entry.index);
+  const sortedReference = [...referenceValues].sort((left, right) => left - right);
+  const calibrated = forecast.map((entry) => ({ ...entry }));
+  for (const [rank, index] of orderedIndices.entries()) {
+    const mapped = sortedReference[rank] ?? calibrated[index]!.house_power_w;
+    calibrated[index]!.house_power_w = roundNumber(
+      clamp(
+        calibrated[index]!.house_power_w * (1 - SHAPE_CALIBRATION_BLEND) + mapped * SHAPE_CALIBRATION_BLEND,
+        MIN_HOUSE_LOAD_W,
+        MAX_HOUSE_LOAD_W,
+      ),
+      3,
+    );
+  }
+  if (typeof liveHomePowerW === "number" && Number.isFinite(liveHomePowerW) && calibrated[0]) {
+    calibrated[0].house_power_w = roundNumber(
+      clamp(calibrated[0].house_power_w * 0.7 + liveHomePowerW * 0.3, MIN_HOUSE_LOAD_W, MAX_HOUSE_LOAD_W),
+      3,
+    );
+  }
+  const referenceStd = populationStd(referenceValues);
+  const calibratedValues = calibrationIndices.map((index) => calibrated[index]!.house_power_w);
+  const calibratedStd = populationStd(calibratedValues);
+  if (referenceStd > 0 && calibratedStd > referenceStd * MAX_SHAPE_STD_RATIO) {
+    const targetStd = referenceStd * MAX_SHAPE_STD_RATIO;
+    const center = average(calibratedValues) ?? DEFAULT_HOUSE_LOAD_W;
+    const scale = targetStd / calibratedStd;
+    for (const index of calibrationIndices) {
+      calibrated[index]!.house_power_w = roundNumber(
+        clamp(center + (calibrated[index]!.house_power_w - center) * scale, MIN_HOUSE_LOAD_W, MAX_HOUSE_LOAD_W),
+        3,
+      );
+    }
+  }
+  return calibrated;
+}
+
+function selectCalibrationIndices(contexts: ForecastHourContext[]): number[] {
+  const first = contexts[0];
+  if (!first) {
+    return [];
+  }
+  const cutoffMs = first.start.getTime() + 24 * 3_600_000;
+  return contexts
+    .map((context, index) => ({ context, index }))
+    .filter(({ context }) => context.start.getTime() < cutoffMs)
+    .map(({ index }) => index);
+}
+
+function buildRecentShapeReference(
+  contexts: ForecastHourContext[],
+  historicalHours: HistoricalHour[],
+): number[] | null {
+  const latest = historicalHours.at(-1);
+  if (!latest) {
+    return null;
+  }
+  const cutoffMs = new Date(latest.hourUtc).getTime() - 7 * 24 * 3_600_000;
+  const recent = historicalHours.filter((row) => row.validTarget && new Date(row.hourUtc).getTime() > cutoffMs);
+  if (recent.length < 24 * 3) {
+    return null;
+  }
+  const byHour = new Map<number, number[]>();
+  for (const row of recent) {
+    const bucket = byHour.get(row.localHour) ?? [];
+    bucket.push(row.homePowerW);
+    byHour.set(row.localHour, bucket);
+  }
+  const reference: number[] = [];
+  for (const context of contexts) {
+    const samples = byHour.get(context.localHour);
+    if (!samples?.length) {
+      return null;
+    }
+    reference.push(average(samples) ?? DEFAULT_HOUSE_LOAD_W);
+  }
+  return reference;
 }
 
 function buildColdStartForecast(contexts: ForecastHourContext[]): DemandForecastEntry[] {
@@ -350,6 +572,7 @@ export function aggregateHistoryByHour(historyPoints: HistoryPoint[]): {
   homePowerW: number;
   solarPowerW: number;
   priceEurPerKwh: number;
+  validTarget: boolean;
 }[] {
   const grouped = new Map<string, {
     homeSum: number;
@@ -393,6 +616,7 @@ export function aggregateHistoryByHour(historyPoints: HistoryPoint[]): {
       homePowerW: bucket.homeCount >= 6 ? bucket.homeSum / bucket.homeCount : DEFAULT_HOUSE_LOAD_W,
       solarPowerW: bucket.solarCount > 0 ? bucket.solarSum / bucket.solarCount : 0,
       priceEurPerKwh: bucket.priceCount > 0 ? bucket.priceSum / bucket.priceCount : 0,
+      validTarget: bucket.homeCount >= 6,
     }))
     .sort((left, right) => left.hourUtc.localeCompare(right.hourUtc));
 }
@@ -594,22 +818,22 @@ function toTemporalParts(date: Date, timeZone: string): { weekday: number; hour:
 
 function weekdayLabelToIndex(value: string): number {
   switch (value.slice(0, 3).toLowerCase()) {
-    case "sun":
-      return 0;
     case "mon":
-      return 1;
+      return 0;
     case "tue":
-      return 2;
+      return 1;
     case "wed":
-      return 3;
+      return 2;
     case "thu":
-      return 4;
+      return 3;
     case "fri":
-      return 5;
+      return 4;
     case "sat":
+      return 5;
+    case "sun":
       return 6;
     default:
-      return 1;
+      return 0;
   }
 }
 
@@ -651,7 +875,7 @@ function circularHourDistance(left: number, right: number): number {
 }
 
 function isWeekend(weekday: number): boolean {
-  return weekday === 0 || weekday === 6;
+  return weekday === 5 || weekday === 6;
 }
 
 function isoWeekNumber(year: number, month: number, day: number): number {
@@ -669,6 +893,14 @@ function average(values: number[]): number | null {
     return null;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function populationStd(values: number[]): number {
+  if (!values.length) {
+    return 0;
+  }
+  const avg = average(values) ?? 0;
+  return Math.sqrt(values.reduce((sum, value) => sum + (value - avg) ** 2, 0) / values.length);
 }
 
 function roundNumber(value: number, digits: number): number {

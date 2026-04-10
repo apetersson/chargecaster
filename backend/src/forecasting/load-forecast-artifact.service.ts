@@ -4,9 +4,24 @@ import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 
 import type { ConfigDocument } from "../config/schemas";
+import { LOAD_FORECAST_FEATURE_COUNT, LOAD_FORECAST_FEATURE_NAMES, LOAD_FORECAST_FEATURE_SCHEMA_VERSION } from "./load-forecast-feature-contract";
 import { resolveBundledLoadForecastCurrentDir, resolveLoadForecastBaseDir } from "./model-paths";
 
-export const LOAD_FORECAST_FEATURE_SCHEMA_VERSION = "v2_house_load_1";
+const BUNDLED_SEEDED_MARKER = ".bundled-seeded";
+
+const forwardFeatureCoverageSchema = z.object({
+  history_forecast_solar_ratio: z.number().min(0).max(1),
+  solar_proxy_ratio: z.number().min(0).max(1),
+  realized_solar_fallback_ratio: z.number().min(0).max(1),
+});
+
+const replayMetricsSchema = z.object({
+  cost_delta_eur: z.number().optional(),
+  mae: z.number().optional(),
+  p90_economic_hours_absolute_error: z.number().optional(),
+  mode_switch_count: z.number().optional(),
+  mode_switch_delta: z.number().optional(),
+}).partial();
 
 const metricsSummarySchema = z.object({
   mae: z.number(),
@@ -26,11 +41,20 @@ export const loadForecastManifestSchema = z.object({
   model_type: z.literal("catboost"),
   model_version: z.string(),
   feature_schema_version: z.string(),
+  feature_count: z.number().int().positive(),
+  feature_names: z.array(z.string()),
+  target_mode: z.enum(["absolute_house_power_v1", "baseline_delta_v1", "baseline_ratio_v1"]).optional(),
   trained_at: z.string(),
   training_window: trainingWindowSchema,
   history_row_count: z.number().int().nonnegative(),
   hourly_row_count: z.number().int().nonnegative(),
   metrics_summary: metricsSummarySchema,
+  training_data_summary: z.object({
+    forward_feature_coverage: forwardFeatureCoverageSchema,
+  }).optional(),
+  walk_forward_metrics: z.record(z.string(), z.number()).optional(),
+  replay_metrics: replayMetricsSchema.optional(),
+  promotion_decision: z.string().optional(),
   catboost_version: z.string(),
 });
 
@@ -43,7 +67,20 @@ export interface ActiveLoadForecastArtifact {
   manifestPath: string;
   metricsPath: string;
   trainingLogPath: string;
+  activeSource: "runtime_current" | "bundled_seeded";
   manifest: LoadForecastManifest;
+}
+
+export type LoadForecastArtifactInspectionReason =
+  | "ok"
+  | "no_artifact"
+  | "schema_mismatch"
+  | "invalid_manifest";
+
+export interface LoadForecastArtifactInspection {
+  artifact: ActiveLoadForecastArtifact | null;
+  reason: LoadForecastArtifactInspectionReason;
+  detail?: string;
 }
 
 @Injectable()
@@ -51,8 +88,7 @@ export class LoadForecastArtifactService {
   private readonly logger = new Logger(LoadForecastArtifactService.name);
 
   resolveBaseDir(config: ConfigDocument): string {
-    void config;
-    return resolveLoadForecastBaseDir();
+    return resolveLoadForecastBaseDir(config);
   }
 
   resolveCurrentDir(config: ConfigDocument): string {
@@ -66,15 +102,73 @@ export class LoadForecastArtifactService {
   }
 
   readActiveArtifact(config: ConfigDocument): ActiveLoadForecastArtifact | null {
-    this.seedBundledStarterArtifact(config);
+    return this.inspectActiveArtifact(config).artifact;
+  }
 
-    const currentDir = this.resolveCurrentDir(config);
+  inspectActiveArtifact(config: ConfigDocument): LoadForecastArtifactInspection {
+    this.seedBundledStarterArtifact(config);
+    return this.inspectArtifactDir(this.resolveCurrentDir(config), this.resolveBaseDir(config));
+  }
+
+  inspectVersionArtifact(config: ConfigDocument, versionDir: string): LoadForecastArtifactInspection {
+    return this.inspectArtifactDir(versionDir, this.resolveBaseDir(config));
+  }
+
+  updateReplayMetrics(
+    versionDir: string,
+    replayMetrics: z.infer<typeof replayMetricsSchema> & { window_count?: number },
+  ): void {
+    const manifestPath = join(versionDir, "manifest.json");
+    const metricsPath = join(versionDir, "metrics.json");
+    if (!existsSync(manifestPath) || !existsSync(metricsPath)) {
+      throw new Error(`Cannot update replay metrics for ${versionDir}: manifest or metrics missing`);
+    }
+
+    const manifest = loadForecastManifestSchema.parse(JSON.parse(readFileSync(manifestPath, "utf-8")));
+    const metrics = JSON.parse(readFileSync(metricsPath, "utf-8")) as Record<string, unknown>;
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        ...manifest,
+        replay_metrics: replayMetrics,
+      }, null, 2),
+      "utf-8",
+    );
+    writeFileSync(
+      metricsPath,
+      JSON.stringify({
+        ...metrics,
+        replay: replayMetrics,
+      }, null, 2),
+      "utf-8",
+    );
+  }
+
+  updatePromotionDecision(versionDir: string, promotionDecision: string): void {
+    const manifestPath = join(versionDir, "manifest.json");
+    if (!existsSync(manifestPath)) {
+      throw new Error(`Cannot update promotion decision for ${versionDir}: manifest missing`);
+    }
+    const manifest = loadForecastManifestSchema.parse(JSON.parse(readFileSync(manifestPath, "utf-8")));
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        ...manifest,
+        promotion_decision: promotionDecision,
+      }, null, 2),
+      "utf-8",
+    );
+  }
+
+  private inspectArtifactDir(artifactDir: string, baseDir: string): LoadForecastArtifactInspection {
+    const currentDir = artifactDir;
     const manifestPath = join(currentDir, "manifest.json");
     const modelPath = join(currentDir, "model.cbm");
     const metricsPath = join(currentDir, "metrics.json");
     const trainingLogPath = join(currentDir, "training.log");
+
     if (!existsSync(currentDir) || !existsSync(manifestPath) || !existsSync(modelPath)) {
-      return null;
+      return { artifact: null, reason: "no_artifact" };
     }
 
     try {
@@ -83,20 +177,31 @@ export class LoadForecastArtifactService {
         this.logger.warn(
           `Ignoring load-forecast artifact ${manifest.model_version}: schema ${manifest.feature_schema_version} != ${LOAD_FORECAST_FEATURE_SCHEMA_VERSION}`,
         );
-        return null;
+        return { artifact: null, reason: "schema_mismatch", detail: manifest.feature_schema_version };
       }
-      return {
-        baseDir: this.resolveBaseDir(config),
+      if (manifest.feature_count !== LOAD_FORECAST_FEATURE_COUNT) {
+        this.logger.warn(
+          `Ignoring load-forecast artifact ${manifest.model_version}: feature_count ${manifest.feature_count} != ${LOAD_FORECAST_FEATURE_COUNT}`,
+        );
+        return { artifact: null, reason: "invalid_manifest", detail: "feature_count_mismatch" };
+      }
+      if (manifest.feature_names.join("|") !== LOAD_FORECAST_FEATURE_NAMES.join("|")) {
+        this.logger.warn(`Ignoring load-forecast artifact ${manifest.model_version}: feature_names do not match runtime contract`);
+        return { artifact: null, reason: "invalid_manifest", detail: "feature_names_mismatch" };
+      }
+      return { artifact: {
+        baseDir,
         currentDir,
         modelPath,
         manifestPath,
         metricsPath,
         trainingLogPath,
+        activeSource: existsSync(join(currentDir, BUNDLED_SEEDED_MARKER)) ? "bundled_seeded" : "runtime_current",
         manifest,
-      };
+      }, reason: "ok" };
     } catch (error) {
       this.logger.warn(`Ignoring invalid load-forecast artifact in ${currentDir}: ${String(error)}`);
-      return null;
+      return { artifact: null, reason: "invalid_manifest", detail: String(error) };
     }
   }
 
@@ -146,10 +251,15 @@ export class LoadForecastArtifactService {
         );
         return;
       }
+      if (manifest.feature_count !== LOAD_FORECAST_FEATURE_COUNT || manifest.feature_names.join("|") !== LOAD_FORECAST_FEATURE_NAMES.join("|")) {
+        this.logger.warn(`Ignoring bundled load-forecast artifact ${manifest.model_version}: feature contract mismatch`);
+        return;
+      }
       const baseDir = this.ensureBaseDir(config);
       const nextDir = join(baseDir, "current.next");
       rmSync(nextDir, { recursive: true, force: true });
       cpSync(bundledCurrentDir, nextDir, { recursive: true });
+      writeFileSync(join(nextDir, BUNDLED_SEEDED_MARKER), new Date().toISOString(), "utf-8");
       rmSync(currentDir, { recursive: true, force: true });
       renameSync(nextDir, currentDir);
       this.logger.log(`Seeded bundled load-forecast starter model ${manifest.model_version} into ${currentDir}`);

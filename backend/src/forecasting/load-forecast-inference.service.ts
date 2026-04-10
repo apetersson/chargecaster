@@ -19,6 +19,7 @@ export class LoadForecastInferenceService {
   private cachedArtifactPath: string | null = null;
   private cachedModel: CatBoostModelInstance | null = null;
   private catBoostModule: CatBoostModule | null | undefined;
+  private lastRuntimeError: string | null = null;
 
   constructor(
     @Inject(LoadForecastArtifactService) private readonly artifactService: LoadForecastArtifactService,
@@ -28,12 +29,34 @@ export class LoadForecastInferenceService {
     return this.artifactService.readActiveArtifact(config);
   }
 
+  inspectActiveArtifact(config: ConfigDocument) {
+    return this.artifactService.inspectActiveArtifact(config);
+  }
+
+  getRuntimeAvailability(): { available: boolean | null; lastError: string | null } {
+    return {
+      available: this.catBoostModule === undefined ? null : this.catBoostModule !== null,
+      lastError: this.lastRuntimeError,
+    };
+  }
+
   async predict(config: ConfigDocument, floatFeatures: number[][]): Promise<{
     predictions: number[];
     artifact: ActiveLoadForecastArtifact;
   } | null> {
     const artifact = this.getActiveArtifact(config);
     if (!artifact || floatFeatures.length === 0) {
+      return null;
+    }
+
+    return this.predictWithArtifact(artifact, floatFeatures);
+  }
+
+  async predictWithArtifact(artifact: ActiveLoadForecastArtifact, floatFeatures: number[][]): Promise<{
+    predictions: number[];
+    artifact: ActiveLoadForecastArtifact;
+  } | null> {
+    if (floatFeatures.length === 0) {
       return null;
     }
 
@@ -77,8 +100,10 @@ export class LoadForecastInferenceService {
       ensureCatBoostRuntimeLibraryPath();
       const moduleRef = await import("catboost");
       this.catBoostModule = ("default" in moduleRef ? moduleRef.default : moduleRef) as CatBoostModule;
+      this.lastRuntimeError = null;
     } catch (error) {
       this.catBoostModule = null;
+      this.lastRuntimeError = String(error);
       this.logger.warn(`CatBoost runtime unavailable; load forecast will fall back: ${String(error)}`);
     }
     return this.catBoostModule;

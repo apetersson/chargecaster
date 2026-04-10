@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
+import type { ConfigDocument } from "../config/schemas";
+
 function resolveStoragePath(): string {
   const override = process.env.CHARGECASTER_STORAGE_PATH?.trim();
   return override && override.length > 0
@@ -15,15 +17,19 @@ function resolveModelsRootDir(): string {
   return join(modelsParent, "models");
 }
 
-export function resolveLoadForecastBaseDir(): string {
+export function resolveLoadForecastBaseDir(config?: ConfigDocument): string {
   const override = process.env.CHARGECASTER_LOAD_FORECAST_MODEL_DIR?.trim();
+  const configured = config?.load_forecast?.model_dir?.trim();
   return override && override.length > 0
     ? resolve(process.cwd(), override)
-    : join(resolveModelsRootDir(), "load-forecast");
+    : configured && configured.length > 0
+      ? resolve(process.cwd(), configured)
+      : join(resolveModelsRootDir(), "load-forecast");
 }
 
-export function resolvePriceForecastBaseDir(): string {
+export function resolvePriceForecastBaseDir(config?: ConfigDocument): string {
   const override = process.env.CHARGECASTER_PRICE_FORECAST_MODEL_DIR?.trim();
+  void config;
   return override && override.length > 0
     ? resolve(process.cwd(), override)
     : join(resolveModelsRootDir(), "price-forecast");
@@ -42,6 +48,19 @@ export function resolveMlScriptPath(scriptName: string): string {
   const candidates = [
     join(process.cwd(), "ml", scriptName),
     join(process.cwd(), "backend", "ml", scriptName),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
+export function resolveMlFilePath(fileName: string): string {
+  const override = process.env.CHARGECASTER_ML_DIR?.trim();
+  if (override && override.length > 0) {
+    return join(resolve(process.cwd(), override), fileName);
+  }
+
+  const candidates = [
+    join(process.cwd(), "ml", fileName),
+    join(process.cwd(), "backend", "ml", fileName),
   ];
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
 }

@@ -4,6 +4,11 @@ import type { ForecastEra, HistoryPoint } from "@chargecaster/domain";
 import { DemandForecastService } from "../src/config/demand-forecast.service";
 import type { ConfigDocument } from "../src/config/schemas";
 import type { WeatherService } from "../src/config/weather.service";
+import {
+  LOAD_FORECAST_FEATURE_COUNT,
+  LOAD_FORECAST_FEATURE_NAMES,
+  LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+} from "../src/forecasting/load-forecast-feature-contract";
 import type { LoadForecastInferenceService } from "../src/forecasting/load-forecast-inference.service";
 import type { StorageService, WeatherHourRecord } from "../src/storage/storage.service";
 
@@ -127,8 +132,12 @@ function createService(history: HistoryPoint[], weatherRows: WeatherHourRecord[]
   const weatherService = {
     getWeatherHours: () => Promise.resolve(weatherRows),
   } as unknown as WeatherService;
+  const fallbackArtifact = inference?.getActiveArtifact?.({ dry_run: true } as ConfigDocument) ?? null;
   const inferenceService = {
     getActiveArtifact: () => null,
+    inspectActiveArtifact: () => fallbackArtifact
+      ? { artifact: fallbackArtifact, reason: "ok" as const }
+      : { artifact: null, reason: "no_artifact" as const },
     predict: () => Promise.resolve(null),
     ...inference,
   } as unknown as LoadForecastInferenceService;
@@ -172,10 +181,13 @@ describe("DemandForecastService", () => {
           manifestPath: "/tmp/models/current/manifest.json",
           metricsPath: "/tmp/models/current/metrics.json",
           trainingLogPath: "/tmp/models/current/training.log",
+          activeSource: "runtime_current",
           manifest: {
             model_type: "catboost",
             model_version: "test-model-1",
-            feature_schema_version: "v2_house_load_1",
+            feature_schema_version: LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+            feature_count: LOAD_FORECAST_FEATURE_COUNT,
+            feature_names: LOAD_FORECAST_FEATURE_NAMES,
             trained_at: "2026-03-13T00:00:00.000Z",
             training_window: {
               start: "2026-01-01T00:00:00.000Z",
@@ -189,6 +201,8 @@ describe("DemandForecastService", () => {
               p50_absolute_error: 80,
               p90_absolute_error: 200,
             },
+            replay_metrics: {},
+            promotion_decision: "promoted",
             catboost_version: "1.2.8",
           },
         }),
@@ -201,10 +215,13 @@ describe("DemandForecastService", () => {
             manifestPath: "/tmp/models/current/manifest.json",
             metricsPath: "/tmp/models/current/metrics.json",
             trainingLogPath: "/tmp/models/current/training.log",
+            activeSource: "runtime_current",
             manifest: {
               model_type: "catboost",
               model_version: "test-model-1",
-              feature_schema_version: "v2_house_load_1",
+              feature_schema_version: LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+              feature_count: LOAD_FORECAST_FEATURE_COUNT,
+              feature_names: LOAD_FORECAST_FEATURE_NAMES,
               trained_at: "2026-03-13T00:00:00.000Z",
               training_window: {
                 start: "2026-01-01T00:00:00.000Z",
@@ -218,6 +235,8 @@ describe("DemandForecastService", () => {
                 p50_absolute_error: 80,
                 p90_absolute_error: 200,
               },
+              replay_metrics: {},
+              promotion_decision: "promoted",
               catboost_version: "1.2.8",
             },
           },

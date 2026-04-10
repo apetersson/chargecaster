@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ConfigDocument } from "../src/config/schemas";
+import {
+  LOAD_FORECAST_FEATURE_COUNT,
+  LOAD_FORECAST_FEATURE_NAMES,
+  LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+} from "../src/forecasting/load-forecast-feature-contract";
 import { LoadForecastArtifactService } from "../src/forecasting/load-forecast-artifact.service";
 
 describe("LoadForecastArtifactService", () => {
@@ -32,7 +37,9 @@ describe("LoadForecastArtifactService", () => {
     writeFileSync(join(bundledCurrentDir, "manifest.json"), JSON.stringify({
       model_type: "catboost",
       model_version: "starter-load-model",
-      feature_schema_version: "v2_house_load_1",
+      feature_schema_version: LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+      feature_count: LOAD_FORECAST_FEATURE_COUNT,
+      feature_names: LOAD_FORECAST_FEATURE_NAMES,
       trained_at: "2026-03-20T00:00:00.000Z",
       training_window: { start: "2026-01-01T00:00:00.000Z", end: "2026-03-19T00:00:00.000Z" },
       history_row_count: 100,
@@ -43,6 +50,8 @@ describe("LoadForecastArtifactService", () => {
         p50_absolute_error: 90,
         p90_absolute_error: 200,
       },
+      replay_metrics: {},
+      promotion_decision: "seeded",
       catboost_version: "1.2.10",
     }));
     writeFileSync(join(bundledCurrentDir, "model.cbm"), "starter-model");

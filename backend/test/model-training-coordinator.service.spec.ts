@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigDocument } from "../src/config/schemas";
 import type { ConfigFileService } from "../src/config/config-file.service";
+import {
+  LOAD_FORECAST_FEATURE_COUNT,
+  LOAD_FORECAST_FEATURE_NAMES,
+  LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+} from "../src/forecasting/load-forecast-feature-contract";
 import { ModelTrainingCoordinator } from "../src/forecasting/model-training-coordinator.service";
 import type { LoadForecastArtifactService } from "../src/forecasting/load-forecast-artifact.service";
 import type { PriceForecastArtifactService } from "../src/forecasting/price-forecast-artifact.service";
@@ -15,10 +20,17 @@ const { spawnMock, spawnSyncMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
   spawnSyncMock: vi.fn(),
 }));
+const { evaluateReplayMock } = vi.hoisted(() => ({
+  evaluateReplayMock: vi.fn(),
+}));
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
   spawnSync: spawnSyncMock,
+}));
+
+vi.mock("../src/forecasting/load-forecast-replay", () => ({
+  evaluateAndPersistLoadForecastReplay: evaluateReplayMock,
 }));
 
 function createConfig(): ConfigDocument {
@@ -58,6 +70,15 @@ describe("ModelTrainingCoordinator", () => {
     spawnMock.mockReturnValue(createSpawnResult());
     spawnSyncMock.mockReset();
     spawnSyncMock.mockReturnValue({ status: 0 });
+    evaluateReplayMock.mockReset();
+    evaluateReplayMock.mockResolvedValue({
+      window_count: 14,
+      cost_delta_eur: -0.1,
+      mae: 1,
+      p90_economic_hours_absolute_error: 1,
+      mode_switch_count: 1,
+      mode_switch_delta: 0,
+    });
   });
 
   afterEach(() => {
@@ -76,6 +97,7 @@ describe("ModelTrainingCoordinator", () => {
       readActiveArtifact: () => null,
       promoteVersion: () => undefined,
       writePromotionMarker: () => undefined,
+      updatePromotionDecision: () => undefined,
     } as unknown as LoadForecastArtifactService;
     const priceArtifactService = {
       ensureBaseDir: () => priceBaseDir,
@@ -106,6 +128,7 @@ describe("ModelTrainingCoordinator", () => {
       readActiveArtifact: () => ({manifest: {training_window: {end: "2026-03-10T00:00:00.000Z"}}}),
       promoteVersion: () => undefined,
       writePromotionMarker: () => undefined,
+      updatePromotionDecision: () => undefined,
     } as unknown as LoadForecastArtifactService;
     const priceArtifactService = {
       ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-price-models-")),
@@ -133,6 +156,7 @@ describe("ModelTrainingCoordinator", () => {
       readActiveArtifact: () => null,
       promoteVersion: () => undefined,
       writePromotionMarker: () => undefined,
+      updatePromotionDecision: () => undefined,
     } as unknown as LoadForecastArtifactService;
     const priceArtifactService = {
       ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-price-models-")),
@@ -161,6 +185,7 @@ describe("ModelTrainingCoordinator", () => {
       readActiveArtifact: () => null,
       promoteVersion: () => undefined,
       writePromotionMarker: () => undefined,
+      updatePromotionDecision: () => undefined,
     } as unknown as LoadForecastArtifactService;
     const priceArtifactService = {
       ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-price-models-")),
@@ -201,6 +226,7 @@ describe("ModelTrainingCoordinator", () => {
       readActiveArtifact: () => null,
       promoteVersion: () => undefined,
       writePromotionMarker: () => undefined,
+      updatePromotionDecision: () => undefined,
     } as unknown as LoadForecastArtifactService;
     const priceArtifactService = {
       ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-price-models-")),
@@ -218,7 +244,7 @@ describe("ModelTrainingCoordinator", () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it("queues price-forecast training after bootstrapping load-forecast", () => {
+  it("queues price-forecast training after bootstrapping load-forecast", async () => {
     vi.setSystemTime(new Date("2026-03-13T12:15:00.000+01:00"));
     const storage = {
       listHistoryDayStatsBefore: () => createDayStats(1),
@@ -232,6 +258,7 @@ describe("ModelTrainingCoordinator", () => {
         loadReady = true;
       },
       writePromotionMarker: () => undefined,
+      updatePromotionDecision: () => undefined,
     } as unknown as LoadForecastArtifactService;
     const priceArtifactService = {
       ensureBaseDir: () => mkdtempSync(join(tmpdir(), "chargecaster-price-models-")),
@@ -255,21 +282,29 @@ describe("ModelTrainingCoordinator", () => {
     writeFileSync(join(firstVersionDir, "manifest.json"), JSON.stringify({
       model_type: "catboost",
       model_version: "test-load",
-      feature_schema_version: "v2_house_load_1",
+      feature_schema_version: LOAD_FORECAST_FEATURE_SCHEMA_VERSION,
+      feature_count: LOAD_FORECAST_FEATURE_COUNT,
+      feature_names: LOAD_FORECAST_FEATURE_NAMES,
       trained_at: "2026-03-13T00:00:00.000Z",
       training_window: {start: "2026-03-01T00:00:00.000Z", end: "2026-03-13T00:00:00.000Z"},
       history_row_count: 1,
       hourly_row_count: 1,
       metrics_summary: {mae: 1, rmse: 1, p50_absolute_error: 1, p90_absolute_error: 1},
+      replay_metrics: { cost_delta_eur: -0.1 },
+      promotion_decision: "promoted",
       catboost_version: "1.2.10",
     }));
     writeFileSync(join(firstVersionDir, "metrics.json"), JSON.stringify({
       model: {mae: 1, p90_economic_hours_absolute_error: 1},
+      hybrid: {mae: 2, p90_economic_hours_absolute_error: 2},
+      replay: {cost_delta_eur: -0.1},
       active_model: null,
     }));
 
     const firstChild = spawnMock.mock.results[0]?.value as ReturnType<typeof createSpawnResult>;
     firstChild.emit("exit", 0);
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
     expect(spawnMock.mock.calls[1]?.[1]?.some((arg: unknown) => String(arg).includes("train_price_forecast.py"))).toBe(true);
